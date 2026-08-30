@@ -1,10 +1,12 @@
-import { pathToFileURL } from "node:url";
+#!/usr/bin/env node
+
 import { parseArgs } from "node:util";
 
 import {
   loadConfiguredAccounts,
   type LoadedClaudeProfileAccount,
 } from "./config/accounts.js";
+import { isMainModule } from "./entry-point.js";
 import { loginClaudeProfile } from "./services/claude-login.js";
 
 const usage = `Usage: npm run claude:login -- <accountAlias>
@@ -99,10 +101,6 @@ async function main(): Promise<void> {
   process.exitCode = await runClaudeLoginCli(process.argv.slice(2));
 }
 
-const entryPoint = process.argv[1];
-if (
-  entryPoint !== undefined &&
-  import.meta.url === pathToFileURL(entryPoint).href
-) {
+if (isMainModule(import.meta.url)) {
   await main();
 }

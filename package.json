@@ -1,9 +1,43 @@
 {
-  "name": "seat-monitor",
+  "name": "@spectacular-voyage/seat-monitor",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Multi-account Claude and Codex quota monitor",
+  "license": "Apache-2.0",
+  "author": "Spectacular Voyage LLC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spectacular-voyage/seat-monitor.git"
+  },
+  "homepage": "https://github.com/spectacular-voyage/seat-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/spectacular-voyage/seat-monitor/issues"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "codex",
+    "openai",
+    "quota",
+    "rate-limit"
+  ],
+  "bin": {
+    "seat-monitor": "dist/cli.js",
+    "seat-monitor-claude-login": "dist/claude-login.js",
+    "seat-monitor-codex-login": "dist/codex-login.js",
+    "seat-monitor-server": "dist/server.js"
+  },
+  "files": [
+    "dist/",
+    "accounts.example.json",
+    ".env.op.example",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "engines": {
     "node": ">=22.0.0"
   },
@@ -16,9 +50,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "package:check": "node scripts/smoke-package.mjs",
+    "prepack": "npm run build",
     "quota": "tsx src/cli.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

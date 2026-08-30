@@ -16,6 +16,15 @@ The original draft named website roots rather than authenticated quota endpoints
 
 Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse browser cookies, or call private provider endpoints. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for sources and mapping decisions.
 
+## Install
+
+```sh
+npm install --global @spectacular-voyage/seat-monitor
+seat-monitor --init-config
+```
+
+The package exposes `seat-monitor`, `seat-monitor-server`, `seat-monitor-claude-login`, and `seat-monitor-codex-login` commands.
+
 ## Prerequisites
 
 - Node.js 22 or newer
@@ -23,7 +32,7 @@ Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse
 - Claude Code CLI for enabled Claude accounts
 - Codex CLI with App Server support for enabled Codex accounts
 
-Install dependencies:
+For development from a repository checkout, install dependencies with:
 
 ```sh
 npm ci
@@ -31,7 +40,7 @@ npm ci
 
 ## Configure accounts
 
-Create `~/.config/seat-monitor/accounts.json` from `accounts.example.json`. Set `enabled: true` only for accounts you want to scan and give each account a unique profile name:
+`seat-monitor --init-config` creates `~/.config/seat-monitor/accounts.json` with mode `0600`. Edit it with the accounts you want to scan and give each account a unique profile name:
 
 ```json
 {
@@ -63,13 +72,13 @@ Set `SEAT_MONITOR_CONFIG` to an absolute path to use another file. `XDG_CONFIG_H
 List the configured Claude accounts and profile locations:
 
 ```sh
-npm run claude:login -- --list
+seat-monitor-claude-login --list
 ```
 
 Log into each account once, confirming the intended Claude identity in the browser:
 
 ```sh
-npm run claude:login -- 'claude-personal@example.com'
+seat-monitor-claude-login 'claude-personal@example.com'
 ```
 
 The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
@@ -81,13 +90,13 @@ The monitor combines `claude auth status --json` with zero-token `claude --safe-
 List the configured personal Codex accounts and their isolated profile locations:
 
 ```sh
-npm run codex:login -- --list
+seat-monitor-codex-login --list
 ```
 
 Log into each account once, confirming the intended ChatGPT identity in the browser:
 
 ```sh
-npm run codex:login -- 'codex-personal@example.com'
+seat-monitor-codex-login 'codex-personal@example.com'
 ```
 
 The command forces file-backed Codex authentication, creates the profile directory with mode `0700`, and restricts `auth.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/codex/<profile>`. Set `SEAT_MONITOR_CODEX_PROFILES_DIR` to an absolute path to use another location.
@@ -125,21 +134,21 @@ The local lead-line policy lives in `src/presentation/quota-policy.ts`. Spark is
 Claude session resets use clock-only timestamps. Seven-day windows always include weekday and date, so their resets remain unambiguous throughout the week.
 
 ```sh
-npm run quota
-npm run quota -- --format text
+seat-monitor
+seat-monitor --format text
 ```
 
 Markdown is available explicitly for documents:
 
 ```sh
-npm run quota -- --format md
+seat-monitor --format md
 ```
 
 Agent-safe raw JSON remains minified and contains no banners or logs on `stdout`:
 
 ```sh
-npm run quota -- --json
-npm run quota -- --format json
+seat-monitor --json
+seat-monitor --format json
 ```
 
 Exit codes:
@@ -157,7 +166,7 @@ Elapsed percentages marked `*` use the dated local constants in `src/presentatio
 Start the local server:
 
 ```sh
-npm run dev
+seat-monitor-server
 ```
 
 Open <http://127.0.0.1:3000>. The dashboard refreshes every 60 seconds and has a manual refresh control. `GET /api/quota` returns the same runtime-validated array as CLI JSON mode.
@@ -175,7 +184,13 @@ The server:
 
 ## Development
 
+The npm scripts are the repository-development equivalents of the installed commands:
+
 ```sh
+npm run quota
+npm run claude:login -- --list
+npm run codex:login -- --list
+npm run dev
 npm run typecheck
 npm run lint
 npm run format:check

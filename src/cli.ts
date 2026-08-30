@@ -1,7 +1,14 @@
-import { pathToFileURL } from "node:url";
+#!/usr/bin/env node
+
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 
-import { AccountConfigurationError } from "./config/accounts.js";
+import {
+  AccountConfigurationError,
+  defaultAccountsConfigPath,
+} from "./config/accounts.js";
+import { isMainModule } from "./entry-point.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
 import { buildQuotaReport } from "./presentation/quota-report.js";
 import { renderMarkdownReport } from "./presentation/table.js";
@@ -12,10 +19,12 @@ import {
 } from "./services/scan-accounts.js";
 
 const usage = `Usage: seat-monitor [--format text|md|json] [--json]
+       seat-monitor --init-config
 
 Options:
   --format text|md|json  Select output format (default: text)
   --json                 Alias for --format json
+  --init-config          Create a private example accounts.json
   --help                 Show this help
 `;
 
@@ -25,13 +34,16 @@ export type CliDependencies = {
   timeZone?: string;
   stdout?: { write: (value: string) => unknown };
   stderr?: { write: (value: string) => unknown };
+  initializeConfig?: () => Promise<string>;
 };
 
 type OutputFormat = "text" | "md" | "json";
 
 function parseFormat(
   arguments_: readonly string[],
-): { help: true } | { help: false; format: OutputFormat } {
+):
+  | { help: true }
+  | { help: false; format: OutputFormat; initializeConfig: boolean } {
   const parsed = parseArgs({
     args: [...arguments_],
     allowPositionals: false,
@@ -39,6 +51,7 @@ function parseFormat(
     options: {
       format: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
+      "init-config": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
     },
   });
@@ -49,15 +62,39 @@ function parseFormat(
   if (parsed.values.json && parsed.values.format !== undefined) {
     throw new TypeError("--json cannot be combined with --format.");
   }
+  if (
+    parsed.values["init-config"] &&
+    (parsed.values.json || parsed.values.format !== undefined)
+  ) {
+    throw new TypeError("--init-config cannot be combined with output flags.");
+  }
 
   const format = parsed.values.json ? "json" : (parsed.values.format ?? "text");
   if (format === "table") {
-    return { help: false, format: "md" };
+    return {
+      help: false,
+      format: "md",
+      initializeConfig: parsed.values["init-config"],
+    };
   }
   if (format !== "text" && format !== "md" && format !== "json") {
     throw new TypeError("--format must be text, md, or json.");
   }
-  return { help: false, format };
+  return {
+    help: false,
+    format,
+    initializeConfig: parsed.values["init-config"],
+  };
+}
+
+async function initializeAccountConfig(): Promise<string> {
+  const filePath = defaultAccountsConfigPath();
+  const example = await readFile(
+    new URL("../accounts.example.json", import.meta.url),
+  );
+  await mkdir(dirname(filePath), { mode: 0o700, recursive: true });
+  await writeFile(filePath, example, { flag: "wx", mode: 0o600 });
+  return filePath;
 }
 
 export async function runCli(
@@ -78,6 +115,21 @@ export async function runCli(
   if (selection.help) {
     stdout.write(usage);
     return 0;
+  }
+
+  if (selection.initializeConfig) {
+    try {
+      const filePath = await (
+        dependencies.initializeConfig ?? initializeAccountConfig
+      )();
+      stdout.write(`Created account configuration at ${filePath}.\n`);
+      return 0;
+    } catch {
+      stderr.write(
+        "Account configuration could not be created; it may already exist.\n",
+      );
+      return 2;
+    }
   }
 
   let scan: Scanner;
@@ -125,10 +177,6 @@ async function main(): Promise<void> {
   process.exitCode = await runCli(process.argv.slice(2));
 }
 
-const entryPoint = process.argv[1];
-if (
-  entryPoint !== undefined &&
-  import.meta.url === pathToFileURL(entryPoint).href
-) {
+if (isMainModule(import.meta.url)) {
   await main();
 }

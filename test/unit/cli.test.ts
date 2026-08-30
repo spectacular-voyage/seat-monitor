@@ -109,6 +109,26 @@ describe("CLI", () => {
     expect(stderr.read()).toContain("Usage:");
   });
 
+  it("initializes account configuration without scanning", async () => {
+    const stdout = writer();
+    const stderr = writer();
+    let scanned = false;
+    const exitCode = await runCli(["--init-config"], {
+      initializeConfig: () => Promise.resolve("/config/accounts.json"),
+      scan: () => {
+        scanned = true;
+        return Promise.resolve([]);
+      },
+      stdout: stdout.sink,
+      stderr: stderr.sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(scanned).toBe(false);
+    expect(stderr.read()).toBe("");
+    expect(stdout.read()).toContain("/config/accounts.json");
+  });
+
   it("returns exit 1 while preserving account-level error output", async () => {
     const stdout = writer();
     const stderr = writer();

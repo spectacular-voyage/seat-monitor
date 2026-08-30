@@ -1,10 +1,12 @@
-import { pathToFileURL } from "node:url";
+#!/usr/bin/env node
+
 import { parseArgs } from "node:util";
 
 import {
   loadConfiguredAccounts,
   type LoadedCodexProfileAccount,
 } from "./config/accounts.js";
+import { isMainModule } from "./entry-point.js";
 import { loginCodexProfile } from "./services/codex-login.js";
 
 const usage = `Usage: npm run codex:login -- <accountAlias>
@@ -97,10 +99,6 @@ async function main(): Promise<void> {
   process.exitCode = await runCodexLoginCli(process.argv.slice(2));
 }
 
-const entryPoint = process.argv[1];
-if (
-  entryPoint !== undefined &&
-  import.meta.url === pathToFileURL(entryPoint).href
-) {
+if (isMainModule(import.meta.url)) {
   await main();
 }

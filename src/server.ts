@@ -1,5 +1,6 @@
+#!/usr/bin/env node
+
 import { readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 
 import Fastify, {
   type FastifyInstance,
@@ -14,6 +15,7 @@ import {
   type Scanner,
 } from "./services/scan-accounts.js";
 import { SnapshotCache } from "./services/snapshot-cache.js";
+import { isMainModule } from "./entry-point.js";
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 3_000;
@@ -203,11 +205,7 @@ async function main(): Promise<void> {
   );
 }
 
-const entryPoint = process.argv[1];
-if (
-  entryPoint !== undefined &&
-  import.meta.url === pathToFileURL(entryPoint).href
-) {
+if (isMainModule(import.meta.url)) {
   try {
     await main();
   } catch {
