@@ -8,6 +8,11 @@ updates:
       time: "05:20"
       timezone: America/Los_Angeles
     open-pull-requests-limit: 5
+    ignore:
+      # typescript-eslint 8.68 declares TypeScript support only below 6.1.
+      - dependency-name: typescript
+        versions:
+          - 7.x
     groups:
       development-dependencies:
         dependency-type: development
