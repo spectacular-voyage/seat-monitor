@@ -2,7 +2,7 @@
 id: 2135ee1511100d0aa8923d2d
 title: 2026 08 29 CLI Output Rework
 desc: Decision-first quota ranking, hierarchy, provenance, and rendering rules
-updated: 1788056480847
+updated: 1788061648821
 created: 1788055981286
 ---
 
@@ -40,9 +40,11 @@ Claude account
     └── Fable sub-cap
 ```
 
-Fable shows the provider-reported consumed percentage of its sub-cap. It is not multiplied by the local 50% ceiling: Anthropic documents the ceiling but does not define the CLI percentage precisely enough to support that conversion. Fable does not show a second elapsed clock. `WATCH` may use the parent weekly elapsed/reset when Fable is tightest.
+Fable shows the provider-reported consumed percentage of its sub-cap. It is not multiplied by the local 50% ceiling: Anthropic documents the ceiling but does not define the CLI percentage precisely enough to support that conversion. Fable does not show a second elapsed clock and does not participate in `WATCH`, which is reserved for account-wide constraints.
 
 Codex primary/secondary windows are grouped by App Server `limitId`. All windows in a group must have meaningful headroom for that group to be a `USE` candidate.
+
+Local lead-line policy is centralized in `src/presentation/quota-policy.ts`. Spark limits remain in account detail but are excluded from both `USE` and `WATCH` because this installation does not use Spark.
 
 ## Selection
 
@@ -57,7 +59,7 @@ For each capacity group:
 
 Claude Base eligibility therefore uses the smaller headroom across session and shared weekly windows. A nearly empty weekly pool cannot be hidden by a fresh session window.
 
-`WATCH` ranks measured limits by consumed percentage. An exact consumed tie prefers the lower elapsed percentage because the same consumption earlier in a window is riskier, then uses stable account/key tiebreaks.
+`WATCH` ranks measured account-wide limits by consumed percentage. Nested model sub-caps are excluded because exhausting them has narrower impact than exhausting their parent allowance. An exact consumed tie prefers the lower elapsed percentage because the same consumption earlier in a window is riskier, then uses stable account/key tiebreaks.
 
 ## Consistency and missing data
 

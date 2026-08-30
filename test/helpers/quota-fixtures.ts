@@ -88,6 +88,38 @@ export function codexSnapshot(
   });
 }
 
+export function codexSnapshotWithSpark(
+  alias = "codex-next@example.com",
+): QuotaSnapshot {
+  return quotaSuccessSchema.parse({
+    accountAlias: alias,
+    platform: "Codex",
+    status: "ok",
+    plan: "pro",
+    limits: [
+      {
+        key: "codex_bengalfox.primary",
+        label: "Spark Primary",
+        scope: "window",
+        availability: "available",
+        usedPercent: 99,
+        windowDurationMinutes: 300,
+        resetAt: resetAfter(30),
+      },
+      {
+        key: "codex.primary",
+        label: "Codex Primary",
+        scope: "window",
+        availability: "available",
+        usedPercent: 10,
+        windowDurationMinutes: 10_080,
+        resetAt: resetAfter(300),
+      },
+    ],
+    observedAt: new Date(nowMilliseconds).toISOString(),
+  });
+}
+
 export function report(snapshots: readonly QuotaSnapshot[]) {
   return buildQuotaReport(toPublicSnapshots(snapshots, nowMilliseconds), {
     nowMilliseconds,

@@ -119,6 +119,8 @@ The default is an aligned terminal report led by two independent decisions:
 
 `USE` ranks directly by reset time—there is no composite score. Claude account eligibility considers both session and shared weekly constraints. Fable remains nested under the shared weekly pool and shows the provider-reported percentage of its sub-cap without converting that percentage into a share of weekly allowance.
 
+The local lead-line policy lives in `src/presentation/quota-policy.ts`. Spark is visible in account detail but excluded from `USE` and `WATCH`; `WATCH` considers account-wide limits and excludes nested model sub-caps such as Fable.
+
 ```sh
 npm run quota
 npm run quota -- --format text

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   claudeSnapshot,
   codexSnapshot,
+  codexSnapshotWithSpark,
   report,
   resetAfter,
 } from "../helpers/quota-fixtures.js";
@@ -21,18 +22,33 @@ describe("quota report derivation", () => {
     );
   });
 
-  it("selects the tightest fleet limit and uses the parent weekly clock", () => {
+  it("watches the tightest account-wide limit instead of a nested sub-cap", () => {
     const result = report([claudeSnapshot(), codexSnapshot()]);
 
     expect(result.watch?.accountAlias).toBe("claude-ops@example.com");
-    expect(result.watch?.row.key).toBe("fable.weekly");
-    expect(result.watch?.row.consumedPercent).toBe(94);
+    expect(result.watch?.row.key).toBe("base.weekly");
+    expect(result.watch?.row.consumedPercent).toBe(89);
     expect(
       result.accounts[0]?.rows.find((row) => row.key === "base.weekly")
         ?.elapsedMinutes,
     ).toBe(3_380);
     expect(result.watch?.elapsedPercent).toBeCloseTo(33.5, 1);
     expect(result.watch?.resetAt).toBe(resetAfter(6_700));
+  });
+
+  it("keeps Spark visible but excludes it from USE and WATCH", () => {
+    const result = report([codexSnapshotWithSpark()]);
+
+    expect(result.accounts[0]?.rows.map((row) => row.label)).toContain(
+      "Spark primary",
+    );
+    expect(result.use).toEqual(
+      expect.objectContaining({
+        limitLabel: "Codex primary",
+        timeRemainingMinutes: 300,
+      }),
+    );
+    expect(result.watch?.row.key).toBe("codex.primary");
   });
 
   it("nests Fable under weekly without inventing a second position", () => {

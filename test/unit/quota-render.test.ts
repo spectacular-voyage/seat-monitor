@@ -20,7 +20,7 @@ describe("quota report rendering", () => {
       "USE:   codex-next@example.com — Codex primary 100% free",
     );
     expect(output).toContain(
-      "WATCH: claude-ops@example.com — Fable 94% of its 50% sub-cap*",
+      "WATCH: claude-ops@example.com — Week / all models 89% consumed",
     );
     expect(output).toContain("└ Fable sub-cap");
     expect(output).not.toContain("of weekly allowance");

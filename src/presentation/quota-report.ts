@@ -4,6 +4,7 @@ import {
   QUOTA_LOCAL_CONSTANTS,
   type LocalConstant,
 } from "./quota-constants.js";
+import { QUOTA_DECISION_POLICY } from "./quota-policy.js";
 
 export type WindowDurationSource = "api" | "constant" | null;
 
@@ -253,13 +254,26 @@ function rowSortKey(row: QuotaReportRow): string {
 }
 
 function groupKey(platform: Platform, row: QuotaReportRow): string | null {
-  if (row.depth === 1 || row.support !== "available") {
+  if (
+    row.depth === 1 ||
+    row.support !== "available" ||
+    isIgnoredDecisionLimit(platform, row)
+  ) {
     return null;
   }
   if (platform === "Claude") {
     return row.key.startsWith("base.") ? "base" : row.key;
   }
   return row.key.replace(/\.(primary|secondary)$/u, "");
+}
+
+function isIgnoredDecisionLimit(
+  platform: Platform,
+  row: QuotaReportRow,
+): boolean {
+  return QUOTA_DECISION_POLICY.ignoredLimitKeyPrefixes[platform].some(
+    (prefix) => row.key.startsWith(prefix),
+  );
 }
 
 function capacityCandidates(account: QuotaReportAccount): CapacityCandidate[] {
@@ -339,7 +353,12 @@ function watchForAccountRows(
 ): WatchRecommendation[] {
   const byKey = new Map(account.rows.map((row) => [row.key, row]));
   return account.rows.flatMap((row): WatchRecommendation[] => {
-    if (row.support !== "available" || row.consumedPercent === null) {
+    if (
+      row.support !== "available" ||
+      row.consumedPercent === null ||
+      isIgnoredDecisionLimit(account.platform, row) ||
+      row.depth > QUOTA_DECISION_POLICY.maximumWatchDepth
+    ) {
       return [];
     }
     const clockRow = row.parentKey === null ? row : byKey.get(row.parentKey);
