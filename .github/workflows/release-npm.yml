@@ -1,0 +1,78 @@
+name: Release npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_mode:
+        description: What to do with the npm package
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
+      npm_tag:
+        description: npm dist-tag
+        required: true
+        default: latest
+        type: string
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: ${{ inputs.publish_mode == 'publish' && 'Publish' || 'Dry run' }} npm package
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require main branch for publication
+        if: inputs.publish_mode == 'publish' && github.ref != 'refs/heads/main'
+        run: |
+          echo "npm publication is restricted to main"
+          exit 1
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node and npm registry
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run release gates
+        run: |
+          npm audit --audit-level=high
+          npm audit signatures
+          npm run check
+          npm run package:check
+
+      - name: Verify version is unpublished
+        run: |
+          package_name=$(node -p 'require("./package.json").name')
+          package_version=$(node -p 'require("./package.json").version')
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "${package_name}@${package_version} is already published"
+            exit 1
+          fi
+
+      - name: Dry-run publication
+        if: inputs.publish_mode == 'dry-run'
+        run: npm publish --dry-run --access public --tag "${{ inputs.npm_tag }}"
+
+      - name: Publish with npm trusted publishing
+        if: inputs.publish_mode == 'publish'
+        run: npm publish --access public --tag "${{ inputs.npm_tag }}"
