@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Seat Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">AI account telemetry</p>
+          <h1>Seat Monitor</h1>
+          <p class="lede">
+            Claude and Codex limits, without credential sprawl.
+          </p>
+        </div>
+        <button id="refresh" class="refresh" type="button">
+          <span aria-hidden="true">↻</span>
+          Refresh
+        </button>
+      </header>
+
+      <section class="summary" aria-label="Quota summary">
+        <article>
+          <span class="summary-label">Accounts</span>
+          <strong id="account-count">—</strong>
+        </article>
+        <article>
+          <span class="summary-label">Reported limits</span>
+          <strong id="limit-count">—</strong>
+        </article>
+        <article>
+          <span class="summary-label">Account errors</span>
+          <strong id="error-count">—</strong>
+        </article>
+        <article>
+          <span class="summary-label">Last checked</span>
+          <strong id="last-checked">Waiting…</strong>
+        </article>
+      </section>
+
+      <section class="panel" aria-labelledby="quota-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Live snapshot</p>
+            <h2 id="quota-heading">Quota windows</h2>
+          </div>
+          <p id="connection-status" class="connection" role="status">
+            Connecting…
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Account</th>
+                <th scope="col">Platform</th>
+                <th scope="col">Plan</th>
+                <th scope="col">Limit</th>
+                <th scope="col">Used</th>
+                <th scope="col">Resets in</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody id="quota-rows">
+              <tr>
+                <td class="empty" colspan="7">Loading account data…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="footnote">
+        The dashboard refreshes every 60 seconds. Countdown clocks are derived
+        locally from provider reset timestamps. Unsupported metrics are never
+        estimated.
+      </p>
+      <noscript
+        >This dashboard requires JavaScript to retrieve quota data.</noscript
+      >
+    </main>
+  </body>
+</html>

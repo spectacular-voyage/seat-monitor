@@ -1,0 +1,57 @@
+{
+  "accountResult": {
+    "account": {
+      "type": "chatgpt",
+      "planType": "business"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsResult": {
+    "rateLimits": {
+      "limitId": "codex",
+      "limitName": null,
+      "planType": "business",
+      "primary": {
+        "usedPercent": 25,
+        "windowDurationMins": 300,
+        "resetsAt": 1787796000
+      },
+      "secondary": {
+        "usedPercent": 10,
+        "windowDurationMins": 10080,
+        "resetsAt": 1788397200
+      },
+      "rateLimitReachedType": null
+    },
+    "rateLimitsByLimitId": {
+      "codex": {
+        "limitId": "codex",
+        "limitName": "Codex",
+        "planType": "business",
+        "primary": {
+          "usedPercent": 25,
+          "windowDurationMins": 300,
+          "resetsAt": 1787796000
+        },
+        "secondary": {
+          "usedPercent": 10,
+          "windowDurationMins": 10080,
+          "resetsAt": 1788397200
+        },
+        "rateLimitReachedType": null
+      },
+      "codex_other": {
+        "limitId": "codex_other",
+        "limitName": "Codex Other",
+        "primary": {
+          "usedPercent": 42,
+          "windowDurationMins": 60,
+          "resetsAt": 1787792400
+        },
+        "secondary": null,
+        "rateLimitReachedType": null
+      }
+    },
+    "rateLimitResetCredits": null
+  }
+}

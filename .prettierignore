@@ -1,0 +1,10 @@
+dist/
+coverage/
+node_modules/
+package-lock.json
+docs/dendron.code-workspace
+docs/dendron.yml
+docs/notes/.dendron.cache.json
+docs/notes/.vscode/
+docs/notes/root.md
+docs/notes/root.schema.yml
