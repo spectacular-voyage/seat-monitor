@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788132131935
+updated: 1788132482523
 created: 1788130408282
 ---
 
@@ -100,7 +100,7 @@ The replacement repository is public. Activation results:
 3. Dependabot and secret scanning report zero alerts. OSV reports no vulnerable lockfile dependencies.
 4. CodeQL's security-extended suite reported three high-severity path-injection candidates for the configurable account-file path. All three are intentional same-user local CLI behavior: the process is not privileged, reads are strict-JSON validated, raw file contents are not returned, and initialization uses exclusive `wx` creation rather than overwriting. The alerts are dismissed as documented false positives.
 5. The `npm-publish` environment requires maintainer review and permits deployment from `main` only.
-6. This documentation pull request exercises public dependency review. After it passes, protect `main` with required CI and dependency-review checks, pull requests, deletion protection, and force-push protection.
+6. Public dependency review passed on the activation pull request. `main` now requires pull requests, strict up-to-date CI/coverage/dependency-review/CodeQL/OSV checks, linear history, resolved conversations, and admin enforcement; force-pushes and deletion are disabled.
 
 CodeQL and dependency review are available without GitHub Code Security charges for this public repository.
 
@@ -109,7 +109,7 @@ CodeQL and dependency review are available without GitHub Code Security charges 
 The scoped package name is currently unclaimed. npm trusted publishing requires an existing package configuration, npm CLI 11.5.1+, Node 22.14+, and a public repository for provenance.
 
 1. Confirm that the publishing maintainer belongs to the `@spectacular-voyage` npm organization and has 2FA enabled.
-2. From the rewritten public commit, run the release workflow in `dry-run` mode and inspect the package file list.
+2. Completed: the protected `Release npm` workflow passed in `dry-run` mode after manual environment approval, including audit, signature, test, build, package-install, unpublished-version, and registry dry-run gates.
 3. Perform the first `npm publish --access public` interactively with maintainer 2FA to create version `0.1.0`.
 4. In npm package settings, configure the GitHub Actions trusted publisher as:
    - organization: `spectacular-voyage`
@@ -125,4 +125,4 @@ References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 
 ## Release gate
 
-The history and GitHub activation gates are complete. Do not publish the npm package until its interactive bootstrap and trusted-publisher steps are complete. After those steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
+The history and GitHub activation gates are complete. The only remaining blocker is npm proof-of-presence: this machine has no npm login, so a maintainer must authenticate and perform the interactive first publish before trusted publishing can be attached. After the bootstrap and trusted-publisher steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
