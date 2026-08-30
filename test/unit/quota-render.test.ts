@@ -23,7 +23,7 @@ describe("quota report rendering", () => {
       "WATCH: claude-ops@example.com — Fable 94% of its 50% sub-cap*",
     );
     expect(output).toContain("└ Fable sub-cap");
-    expect(output).toContain("47% of weekly allowance*");
+    expect(output).not.toContain("of weekly allowance");
     expect(output).not.toContain("| Account |");
     expect(output).toContain(
       "Claude session 5h; Claude weekly 7d; Fable sub-cap 50%",

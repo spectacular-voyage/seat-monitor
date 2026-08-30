@@ -2,7 +2,7 @@
 id: 2135ee1511100d0aa8923d2d
 title: 2026 08 29 CLI Output Rework
 desc: Decision-first quota ranking, hierarchy, provenance, and rendering rules
-updated: 1788056147952
+updated: 1788056480847
 created: 1788055981286
 ---
 
@@ -20,7 +20,7 @@ No composite score is calculated.
 | -------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | Provider observation | account, plan, limit name, consumed percentage, reset/remaining time, and Codex window duration when present | Preserve as measured values.                                                                    |
 | Local constant       | Claude session/weekly window lengths, Codex weekly fallback, Max Fable sub-cap fraction                      | Keep in one named table with source and checked date. Mark every derived display that uses one. |
-| Derived              | headroom, elapsed time/percentage, Fable share of weekly allowance                                           | Render only when every required input exists. Missing inputs stay empty.                        |
+| Derived              | headroom and elapsed time/percentage                                                                         | Render only when every required input exists. Missing inputs stay empty.                        |
 
 The named constants live in `src/presentation/quota-constants.ts`:
 
@@ -40,7 +40,7 @@ Claude account
     └── Fable sub-cap
 ```
 
-Fable shows consumed percentage of its sub-cap and, when the plan-specific fraction is known, its derived percentage of the weekly allowance. It does not show a second elapsed clock. `WATCH` may use the parent weekly elapsed/reset when Fable is tightest.
+Fable shows the provider-reported consumed percentage of its sub-cap. It is not multiplied by the local 50% ceiling: Anthropic documents the ceiling but does not define the CLI percentage precisely enough to support that conversion. Fable does not show a second elapsed clock. `WATCH` may use the parent weekly elapsed/reset when Fable is tightest.
 
 Codex primary/secondary windows are grouped by App Server `limitId`. All windows in a group must have meaningful headroom for that group to be a `USE` candidate.
 

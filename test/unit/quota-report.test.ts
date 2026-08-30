@@ -35,7 +35,7 @@ describe("quota report derivation", () => {
     expect(result.watch?.resetAt).toBe(resetAfter(6_700));
   });
 
-  it("nests Fable under weekly and derives its share of weekly allowance", () => {
+  it("nests Fable under weekly without inventing a second position", () => {
     const result = report([claudeSnapshot()]);
     const account = result.accounts[0];
 
@@ -52,7 +52,6 @@ describe("quota report derivation", () => {
         elapsedMinutes: null,
         elapsedPercent: null,
         subCapFraction: 0.5,
-        allowancePercent: 47,
       }),
     );
   });

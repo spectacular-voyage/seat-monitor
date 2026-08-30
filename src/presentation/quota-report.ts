@@ -22,7 +22,6 @@ export type QuotaReportRow = {
   windowConstant: LocalConstant | null;
   elapsedMinutes: number | null;
   elapsedPercent: number | null;
-  allowancePercent: number | null;
   subCapFraction: number | null;
   subCapConstant: LocalConstant | null;
   constantSuspect: boolean;
@@ -192,7 +191,6 @@ function deriveTopLevelRow(
       windowDurationSource === "constant" ? fallbackConstant : null,
     elapsedMinutes,
     elapsedPercent,
-    allowancePercent: null,
     subCapFraction: null,
     subCapConstant: null,
     constantSuspect,
@@ -234,10 +232,6 @@ function deriveRows(
       windowConstant: null,
       elapsedMinutes: null,
       elapsedPercent: null,
-      allowancePercent:
-        consumedPercent === null || fraction === null
-          ? null
-          : consumedPercent * fraction,
       subCapFraction: fraction,
       subCapConstant: fractionConstant,
       constantSuspect: false,

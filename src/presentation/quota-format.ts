@@ -127,9 +127,7 @@ export function formatBar(consumedPercent: number | null): string {
 
 export function formatRowPosition(row: QuotaReportRow): string {
   if (row.depth === 1) {
-    return row.allowancePercent === null
-      ? ""
-      : `${formatPercent(row.allowancePercent)} of weekly allowance*`;
+    return "";
   }
   if (row.constantSuspect) {
     return row.timeRemainingMinutes === null
@@ -205,7 +203,7 @@ export function formatLocalConstantFootnote(report: QuotaReport): string {
           codexWeekly = true;
         }
       }
-      if (row.subCapConstant !== null && row.allowancePercent !== null) {
+      if (row.subCapConstant !== null && row.subCapFraction !== null) {
         fableFraction = true;
       }
     }

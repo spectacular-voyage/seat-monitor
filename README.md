@@ -117,7 +117,7 @@ The default is an aligned terminal report led by two independent decisions:
 - `USE`: the account/model group with at least 20% effective headroom whose usable window resets soonest.
 - `WATCH`: the most-consumed limit in the fleet, with its position in the window.
 
-`USE` ranks directly by reset time—there is no composite score. Claude account eligibility considers both session and shared weekly constraints. Fable remains nested under the shared weekly pool and shows its derived share of the weekly allowance.
+`USE` ranks directly by reset time—there is no composite score. Claude account eligibility considers both session and shared weekly constraints. Fable remains nested under the shared weekly pool and shows the provider-reported percentage of its sub-cap without converting that percentage into a share of weekly allowance.
 
 ```sh
 npm run quota
