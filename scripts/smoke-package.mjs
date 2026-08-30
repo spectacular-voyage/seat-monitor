@@ -93,6 +93,33 @@ try {
     }
   }
 
+  const initializedConfigPath = join(
+    temporaryDirectory,
+    "config",
+    "accounts.json",
+  );
+  run(
+    join(
+      temporaryDirectory,
+      "node_modules",
+      ".bin",
+      `seat-monitor${executableSuffix}`,
+    ),
+    ["--init-config"],
+    {
+      env: {
+        ...process.env,
+        SEAT_MONITOR_CONFIG: initializedConfigPath,
+      },
+    },
+  );
+  const initializedConfig = JSON.parse(
+    readFileSync(initializedConfigPath, "utf8"),
+  );
+  if (!Array.isArray(initializedConfig.accounts)) {
+    throw new Error("Installed CLI did not initialize account configuration.");
+  }
+
   process.stdout.write(
     `Package smoke test passed: ${packageName} (${String(paths.length)} files, ${basename(tarballPath)}).\n`,
   );

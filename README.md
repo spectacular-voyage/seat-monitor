@@ -29,7 +29,7 @@ The package exposes `seat-monitor`, `seat-monitor-server`, `seat-monitor-claude-
 
 - Node.js 22 or newer
 - 1Password CLI (`op`) only when using optional environment-token modes
-- Claude Code CLI for enabled Claude accounts
+- Claude Code CLI 2.1.251 or newer for enabled Claude accounts
 - Codex CLI with App Server support for enabled Codex accounts
 
 For development from a repository checkout, install dependencies with:
@@ -205,3 +205,7 @@ npm run check
 ```
 
 Provider adapters accept injected clocks and process clients. Fixtures are derived from public provider examples and contain no live account identifiers, credentials, or usage values.
+
+## Security
+
+Report vulnerabilities privately according to [SECURITY.md](SECURITY.md). The [public-release security review](docs/notes/sm.review.2026-08-30-public-release-security.md) records the local-only threat model, audit evidence, accepted risks, and mandatory publication checklist.
