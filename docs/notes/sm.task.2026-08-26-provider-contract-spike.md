@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788049963177
+updated: 1788050836683
 created: 1787789951052
 ---
 
@@ -108,3 +108,9 @@ The Claude child receives the selected value as `CLAUDE_CODE_OAUTH_TOKEN`. A per
 - Claude setup-token accounts report plan plus explicit unsupported Base and Fable metrics.
 - Unsupported account types remain visible as structured results and never trigger undocumented fallbacks.
 - Adding a future supported Claude quota source requires only a new provider adapter and fixtures; interfaces retain the same public DTO.
+
+## Live Pro profile verification
+
+Verified both configured Codex Pro profiles on 2026-08-29. Each isolated App Server process authenticated as `pro` and returned the primary Codex quota plus separate primary/secondary model windows. Profile directories were mode `0700` and both `auth.json` files were mode `0600`.
+
+No authentication payload, email returned by the provider, live usage percentage, or reset timestamp was persisted in this note or a fixture.
