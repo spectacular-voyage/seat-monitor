@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788131714264
+updated: 1788132131935
 created: 1788130408282
 ---
 
@@ -38,7 +38,7 @@ Security boundary:
 | Severity        | Finding                                                                                      | Disposition                                                                                                                                     |
 | --------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Release blocker | The npm package does not yet exist, so trusted publishing cannot be attached.                | Bootstrap `@spectacular-voyage/seat-monitor` once with maintainer 2FA, then configure OIDC and disallow token publishing.                       |
-| Release blocker | GitHub security features are disabled while the repository is private.                       | Make public only after history cleanup, then enable/verify the settings listed below and run every security workflow.                           |
+| Resolved        | GitHub security features were disabled while the repository was private.                     | The replacement is public; security reporting is enabled and the initial CI, CodeQL, OSV, and Codecov runs succeeded.                           |
 | Resolved        | Historical commits contained private account/vault metadata.                                 | Rewrote every reachable ref, retained the original as a private archive, and verified the replacement from a new GitHub clone.                  |
 | Resolved        | Tracked source contained real account aliases; tracked `.env.op` exposed reference metadata. | Account declarations moved to external `accounts.json` mode `0600`; `.env.op` is ignored; only generic examples ship.                           |
 | Resolved        | The default npm tarball included source, tests, Dendron notes, and `.env.op`.                | A package allowlist now ships only compiled runtime, license, README, and generic examples; off-tree install smoke testing enforces it.         |
@@ -47,6 +47,7 @@ Security boundary:
 | Accepted        | Provider executables are selected from `PATH`.                                               | Document as a trusted local dependency; subprocess arguments are arrays rather than shell strings.                                              |
 | Accepted        | The Claude quota contract is strict parsing of unversioned CLI text.                         | Fail closed on format changes; never fall back to scraping, private endpoints, or raw-response logging. This is primarily an availability risk. |
 | Accepted        | Loopback API exposes aliases and quota data to other local processes.                        | The product is explicitly single-user/local-only; remote binding remains refused until authentication and TLS are designed.                     |
+| Accepted        | `SEAT_MONITOR_CONFIG` intentionally accepts an absolute same-user filesystem path.           | CodeQL's three path-injection alerts were reviewed and dismissed as false positives under the local-only threat model; creation is exclusive.   |
 
 ## Positive controls verified
 
@@ -90,18 +91,18 @@ The rewrite followed [GitHub's sensitive-data removal procedure](https://docs.gi
 
 No credential rotation is indicated because both the original-history audit and rewritten-history verification found no resolved credential.
 
-### 2. Make GitHub security controls active
+### 2. Make GitHub security controls active — completed 2026-08-30
 
-After the rewritten repository becomes public:
+The replacement repository is public. Activation results:
 
-1. Enable/verify dependency graph, Dependabot alerts, Dependabot security updates, malware alerts, secret scanning, and push protection.
-2. Enable [private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository); `SECURITY.md` already points reporters to it.
-3. Run `CI`, `CodeQL`, and `OSV-Scanner` manually once. CodeQL and dependency review are available without GitHub Code Security charges for public repositories.
-4. Authorize the public repository in Codecov for OIDC uploads, or remove the Codecov step before requiring the coverage job.
-5. Create a `main` ruleset requiring pull requests, blocking force-push/deletion, and requiring `Node 22`, `Node 24`, `Coverage`, and `Review dependency changes` after those checks have run at least once.
-6. Review GitHub's secret-scanning results for the rewritten history before announcing the repository.
+1. Dependabot alerts and security updates, secret scanning, push protection, and private vulnerability reporting are enabled and verified through GitHub's API.
+2. `CI`, `CodeQL`, and `OSV-Scanner` completed successfully against public `main`; coverage also uploaded successfully to Codecov using OIDC.
+3. Dependabot and secret scanning report zero alerts. OSV reports no vulnerable lockfile dependencies.
+4. CodeQL's security-extended suite reported three high-severity path-injection candidates for the configurable account-file path. All three are intentional same-user local CLI behavior: the process is not privileged, reads are strict-JSON validated, raw file contents are not returned, and initialization uses exclusive `wx` creation rather than overwriting. The alerts are dismissed as documented false positives.
+5. The `npm-publish` environment requires maintainer review and permits deployment from `main` only.
+6. This documentation pull request exercises public dependency review. After it passes, protect `main` with required CI and dependency-review checks, pull requests, deletion protection, and force-push protection.
 
-The committed public-security workflows intentionally skip while repository visibility is private and begin reporting after it becomes public.
+CodeQL and dependency review are available without GitHub Code Security charges for this public repository.
 
 ### 3. Bootstrap secure npm publishing
 
@@ -116,7 +117,7 @@ The scoped package name is currently unclaimed. npm trusted publishing requires 
    - workflow filename: `release-npm.yml`
    - environment: `npm-publish`
    - allowed action: `npm publish`
-5. In GitHub, configure the `npm-publish` environment with a required maintainer approval.
+5. The GitHub `npm-publish` environment is already configured with required maintainer approval and a `main`-only deployment policy.
 6. In npm publishing access, require 2FA and disallow tokens; revoke any obsolete automation token.
 7. Bump the package version before each later release and publish only through `Release npm`. OIDC publication will generate npm provenance automatically for the public package/repository.
 
@@ -124,4 +125,4 @@ References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 
 ## Release gate
 
-The history gate is complete. Do not publish the npm package until the GitHub security activation and npm bootstrap steps are complete. After those steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
+The history and GitHub activation gates are complete. Do not publish the npm package until its interactive bootstrap and trusted-publisher steps are complete. After those steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
