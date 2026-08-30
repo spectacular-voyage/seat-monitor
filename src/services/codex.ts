@@ -55,16 +55,6 @@ const rateLimitsResultSchema = z.looseObject({
     .optional(),
 });
 
-const fableUnsupportedLimit: QuotaLimit = {
-  key: "fable",
-  label: "Fable",
-  scope: "model",
-  availability: "unsupported",
-  usedPercent: null,
-  windowDurationMinutes: null,
-  resetAt: null,
-};
-
 export type CodexProviderDependencies = {
   command?: string;
   read?: ReadCodexAppServer;
@@ -136,8 +126,6 @@ export function normalizeCodexResult(
   if (limits.length === 0) {
     throw new CodexProtocolError(2);
   }
-  limits.push(fableUnsupportedLimit);
-
   const bucketPlan = buckets.find(
     (bucket) => bucket.planType !== undefined && bucket.planType !== null,
   )?.planType;

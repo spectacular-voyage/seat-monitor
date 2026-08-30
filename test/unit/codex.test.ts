@@ -39,10 +39,9 @@ describe("normalizeCodexResult", () => {
       "codex.primary",
       "codex.secondary",
       "codex_other.primary",
-      "fable",
     ]);
     expect(snapshot.limits[0]?.resetAt).toBe("2026-08-27T02:00:00.000Z");
-    expect(snapshot.limits.at(-1)?.availability).toBe("unsupported");
+    expect(snapshot.limits.every((limit) => limit.key !== "fable")).toBe(true);
 
     const publicSnapshots = toPublicSnapshots(
       [snapshot],

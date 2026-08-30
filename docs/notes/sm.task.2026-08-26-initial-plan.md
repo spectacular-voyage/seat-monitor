@@ -2,7 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
-updated: 1788052294869
+updated: 1788052864949
 created: 1787759817972
 ---
 
@@ -182,7 +182,7 @@ Contract rules:
 
 - Percentages are numbers in the inclusive range `0..100`, or `null` when unavailable.
 - When the verified contract exposes them, use stable semantic keys such as `base` and `fable`; do not make an unverified provider property part of the core type.
-- A missing provider-level contract is an account error with code `unsupported`. A model metric that the provider does not expose is a limit with `availability: "unsupported"`, not an account failure. Codex's Fable presentation is always `N/A`.
+- A missing provider-level contract is an account error with code `unsupported`. A model metric that the provider does not expose is a limit with `availability: "unsupported"`, not an account failure. Codex does not define a Fable metric, so it emits no synthetic Fable limit or table row.
 - Capture `observedAt` from the injected clock immediately after the provider response is received, never at request start. Convert Claude reset seconds to an absolute `resetAt` using that instant.
 - Parse Codex `reset_at` as an ISO-8601 instant. Reject invalid dates.
 - Treat `resetAt` as canonical. Calculate `minutesUntilReset` as `max(0, ceil((resetAt - renderTime) / 60_000))` when creating CLI or API output, so cached snapshots do not carry stale countdowns. The shared public DTO adds this derived field to each limit with a reset.
@@ -330,7 +330,7 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 - All account requests execute with concurrency eight, per-request timeout eight seconds, and the documented aggregate scan budget.
 - Each configured account always has one normalized result.
 - Claude reports base and Fable usage when the verified API supplies them.
-- Codex reports base usage and always represents Fable as unavailable.
+- Codex reports every provider quota window without adding a synthetic Fable metric.
 - Every reported limit window has a valid absolute reset instant or an explicit unsupported value; public DTO countdowns are recomputed from that instant and are nonnegative whole minutes.
 - `--json` emits only minified, parseable JSON to `stdout`.
 - The default CLI emits only a readable Markdown table to `stdout`.
