@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788130408282
+updated: 1788130617156
 created: 1788130408282
 ---
 
@@ -68,7 +68,7 @@ Checked 2026-08-30:
 - Coverage: 83.56% statements, 76.79% branches, 85.88% functions, and 83.45% lines; CI floors each metric at 70%.
 - `npm audit` reports zero production and zero full-tree vulnerabilities.
 - `npm audit signatures` verifies 202 registry signatures and 65 attestations.
-- Semgrep runs 338 TypeScript/Node/security-audit rules across 60 tracked files with zero findings.
+- Semgrep runs 338 TypeScript/Node/security-audit rules across 61 tracked files with zero findings.
 - A high-confidence credential-pattern scan finds zero matches across all commits.
 - The npm artifact installs off-tree, contains 112 allowlisted files, excludes source/tests/notes/local config, and runs the three public CLI help paths.
 - Live configuration migration preserves all six local accounts with zero scan errors; the private external configuration is mode `0600`.
