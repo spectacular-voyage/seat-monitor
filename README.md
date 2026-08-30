@@ -121,6 +121,8 @@ The default is an aligned terminal report led by two independent decisions:
 
 The local lead-line policy lives in `src/presentation/quota-policy.ts`. Spark is visible in account detail but excluded from `USE` and `WATCH`; `WATCH` considers account-wide limits and excludes nested model sub-caps such as Fable.
 
+Claude session resets use clock-only timestamps. Seven-day windows always include weekday and date, so their resets remain unambiguous throughout the week.
+
 ```sh
 npm run quota
 npm run quota -- --format text

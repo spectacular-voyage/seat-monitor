@@ -22,6 +22,12 @@ describe("quota report rendering", () => {
     expect(output).toContain(
       "WATCH: claude-ops@example.com — Week / all models 89% consumed",
     );
+    expect(output).toContain("resets Thu, Sept 3 at 10:37 (111h 40m)");
+    const sessionLine = output
+      .split("\n")
+      .find((line) => line.includes("Session"));
+    expect(sessionLine).toContain("resets at 20:17 (1h 20m)");
+    expect(sessionLine).not.toContain("resets Sat");
     expect(output).toContain("└ Fable sub-cap");
     expect(output).not.toContain("of weekly allowance");
     expect(output).not.toContain("| Account |");

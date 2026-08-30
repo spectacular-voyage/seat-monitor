@@ -1,6 +1,7 @@
 import type {
   QuotaReport,
   QuotaReportRow,
+  ResetDisplay,
   UseRecommendation,
   WatchRecommendation,
 } from "./quota-report.js";
@@ -83,9 +84,14 @@ function localDateOrdinal(parts: ZonedParts): number {
   );
 }
 
-export function formatResetWallClock(
+function displayMonth(parts: ZonedParts): string {
+  return parts.month === "09" ? "Sept" : parts.monthShort;
+}
+
+export function formatResetMoment(
   resetAt: string,
   report: QuotaReport,
+  display: ResetDisplay,
 ): string {
   const resetMilliseconds = Date.parse(resetAt);
   const nowParts = zonedParts(report.nowMilliseconds, report.timeZone);
@@ -95,25 +101,34 @@ export function formatResetWallClock(
       (24 * 60 * 60 * 1_000),
   );
   const clock = `${resetParts.hour}:${resetParts.minute}`;
+  if (display === "clock-only") {
+    return `at ${clock}`;
+  }
+  if (display === "weekday-date") {
+    const year =
+      resetParts.year === nowParts.year ? "" : `, ${resetParts.year}`;
+    return `${resetParts.weekday}, ${displayMonth(resetParts)} ${String(Number(resetParts.day))}${year} at ${clock}`;
+  }
   if (dayDifference === 0) {
-    return clock;
+    return `at ${clock}`;
   }
   if (dayDifference > 0 && dayDifference <= 6) {
-    return `${resetParts.weekday} ${clock}`;
+    return `${resetParts.weekday} at ${clock}`;
   }
-  const year = resetParts.year === nowParts.year ? "" : ` ${resetParts.year}`;
-  return `${resetParts.monthShort} ${String(Number(resetParts.day))}${year} ${clock}`;
+  const year = resetParts.year === nowParts.year ? "" : `, ${resetParts.year}`;
+  return `${displayMonth(resetParts)} ${String(Number(resetParts.day))}${year} at ${clock}`;
 }
 
 export function formatReset(
   resetAt: string | null,
   timeRemainingMinutes: number | null,
   report: QuotaReport,
+  display: ResetDisplay,
 ): string {
   if (resetAt === null || timeRemainingMinutes === null) {
     return "";
   }
-  return `resets ${formatResetWallClock(resetAt, report)} (${formatDuration(timeRemainingMinutes)})`;
+  return `resets ${formatResetMoment(resetAt, report, display)} (${formatDuration(timeRemainingMinutes)})`;
 }
 
 export function formatBar(consumedPercent: number | null): string {
@@ -146,7 +161,7 @@ export function formatUseLine(
   if (recommendation === null) {
     return `USE:   no account has ≥${formatPercent(MINIMUM_USABLE_HEADROOM_PERCENT)} usable headroom with a known reset`;
   }
-  return `USE:   ${recommendation.accountAlias} — ${recommendation.limitLabel} ${formatPercent(recommendation.headroomPercent)} free, ${formatReset(recommendation.resetAt, recommendation.timeRemainingMinutes, report)}`;
+  return `USE:   ${recommendation.accountAlias} — ${recommendation.limitLabel} ${formatPercent(recommendation.headroomPercent)} free, ${formatReset(recommendation.resetAt, recommendation.timeRemainingMinutes, report, recommendation.resetDisplay)}`;
 }
 
 export function formatWatchLine(
@@ -180,6 +195,7 @@ export function formatWatchLine(
     recommendation.resetAt,
     recommendation.timeRemainingMinutes,
     report,
+    row.resetDisplay,
   );
   if (reset.length > 0) {
     clauses.push(reset);

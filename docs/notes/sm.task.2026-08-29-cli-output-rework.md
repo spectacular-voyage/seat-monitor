@@ -2,7 +2,7 @@
 id: 2135ee1511100d0aa8923d2d
 title: 2026 08 29 CLI Output Rework
 desc: Decision-first quota ranking, hierarchy, provenance, and rendering rules
-updated: 1788061648821
+updated: 1788069584848
 created: 1788055981286
 ---
 
@@ -73,5 +73,7 @@ An unsupported provider capability renders as `unsupported`. A field omitted by 
 - `--format md`: the same report semantics in Markdown.
 - `--format json` or `--json`: unchanged minified raw snapshot array for programmatic consumers.
 - `--format table`: backward-compatible alias for Markdown.
+
+Reset timestamps follow window semantics rather than proximity to the current time: Claude session rows use `resets at HH:mm`, while seven-day windows always use `resets Ddd, Mmm D at HH:mm`. The same rule applies in lead lines and account detail.
 
 If the two lead lines are removed in a future design, the grouped body must be replaced by a flat fleet ranking because the cross-cutting decision would otherwise disappear.

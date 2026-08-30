@@ -72,7 +72,12 @@ export function renderMarkdownReport(report: QuotaReport): string {
             : formatPercent(row.consumedPercent),
           formatBar(row.consumedPercent),
           formatRowPosition(row),
-          formatReset(row.resetAt, row.timeRemainingMinutes, report),
+          formatReset(
+            row.resetAt,
+            row.timeRemainingMinutes,
+            report,
+            row.resetDisplay,
+          ),
           rowStatus(row),
         ]),
       );

@@ -69,7 +69,12 @@ export function renderTextReport(report: QuotaReport): string {
     for (const row of account.rows) {
       const consumed =
         row.consumedPercent === null ? "" : formatPercent(row.consumedPercent);
-      const reset = formatReset(row.resetAt, row.timeRemainingMinutes, report);
+      const reset = formatReset(
+        row.resetAt,
+        row.timeRemainingMinutes,
+        report,
+        row.resetDisplay,
+      );
       lines.push(
         `  ${pad(rowLabel(row), labelWidth, "left")}  ${pad(consumed, 6, "right")}  ${pad(formatBar(row.consumedPercent), 10, "left")}  ${pad(formatRowPosition(row), positionWidth, "left")}  ${reset}${rowStatus(row).length > 0 ? `  ${rowStatus(row)}` : ""}`.trimEnd(),
       );

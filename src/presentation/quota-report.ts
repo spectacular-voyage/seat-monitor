@@ -7,6 +7,7 @@ import {
 import { QUOTA_DECISION_POLICY } from "./quota-policy.js";
 
 export type WindowDurationSource = "api" | "constant" | null;
+export type ResetDisplay = "clock-only" | "weekday-date" | "adaptive";
 
 export type QuotaReportRow = {
   key: string;
@@ -17,6 +18,7 @@ export type QuotaReportRow = {
   consumedPercent: number | null;
   headroomPercent: number | null;
   resetAt: string | null;
+  resetDisplay: ResetDisplay;
   timeRemainingMinutes: number | null;
   windowDurationMinutes: number | null;
   windowDurationSource: WindowDurationSource;
@@ -46,6 +48,7 @@ export type UseRecommendation = {
   limitLabel: string;
   headroomPercent: number;
   resetAt: string;
+  resetDisplay: ResetDisplay;
   timeRemainingMinutes: number;
 };
 
@@ -135,6 +138,23 @@ function subCapConstant(plan: string | null): LocalConstant | null {
     : null;
 }
 
+function resetDisplay(
+  platform: Platform,
+  key: string,
+  windowDurationMinutes: number | null,
+): ResetDisplay {
+  if (platform === "Claude" && key === "base.session") {
+    return "clock-only";
+  }
+  if (
+    windowDurationMinutes ===
+    QUOTA_LOCAL_CONSTANTS.windowMinutes.claudeWeekly.value
+  ) {
+    return "weekday-date";
+  }
+  return "adaptive";
+}
+
 function deriveTopLevelRow(
   snapshot: Extract<PublicQuotaSnapshot, { status: "ok" }>,
   limit: Extract<PublicQuotaSnapshot, { status: "ok" }>["limits"][number],
@@ -185,6 +205,11 @@ function deriveTopLevelRow(
     consumedPercent,
     headroomPercent,
     resetAt: limit.resetAt,
+    resetDisplay: resetDisplay(
+      snapshot.platform,
+      limit.key,
+      windowDurationMinutes,
+    ),
     timeRemainingMinutes,
     windowDurationMinutes,
     windowDurationSource,
@@ -227,6 +252,7 @@ function deriveRows(
       consumedPercent,
       headroomPercent: consumedPercent === null ? null : 100 - consumedPercent,
       resetAt: null,
+      resetDisplay: "adaptive",
       timeRemainingMinutes: null,
       windowDurationMinutes: null,
       windowDurationSource: null,
@@ -330,6 +356,7 @@ function capacityCandidates(account: QuotaReportAccount): CapacityCandidate[] {
       limitLabel: resetRow.label,
       headroomPercent: effectiveHeadroom,
       resetAt: resetRow.resetAt,
+      resetDisplay: resetRow.resetDisplay,
       resetMilliseconds: Date.parse(resetRow.resetAt),
       timeRemainingMinutes: resetRow.timeRemainingMinutes,
     });
@@ -472,6 +499,7 @@ export function buildQuotaReport(
             limitLabel: useCandidate.limitLabel,
             headroomPercent: useCandidate.headroomPercent,
             resetAt: useCandidate.resetAt,
+            resetDisplay: useCandidate.resetDisplay,
             timeRemainingMinutes: useCandidate.timeRemainingMinutes,
           },
     watch: watchCandidates[0] ?? null,
