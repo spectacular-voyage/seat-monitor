@@ -196,7 +196,7 @@ export function parseClaudeUsageOutput(
 
   for (const definition of windowDefinitions) {
     const pattern = new RegExp(
-      `^${escapeRegularExpression(definition.lineLabel)}:\\s+(\\d+(?:\\.\\d+)?)% used\\s+·\\s+resets (.+)$`,
+      `^${escapeRegularExpression(definition.lineLabel)}:\\s+(\\d+(?:\\.\\d+)?)% used(?:\\s+·\\s+resets (.+))?$`,
       "imu",
     );
     const match = pattern.exec(output);
@@ -205,7 +205,7 @@ export function parseClaudeUsageOutput(
     }
     const usedPercent = Number(match[1]);
     const resetText = match[2];
-    if (!Number.isFinite(usedPercent) || resetText === undefined) {
+    if (!Number.isFinite(usedPercent)) {
       throw new TypeError("Claude usage percentage is invalid.");
     }
 
@@ -216,7 +216,10 @@ export function parseClaudeUsageOutput(
       availability: "available",
       usedPercent,
       windowDurationMinutes: definition.windowDurationMinutes,
-      resetAt: parseClaudeResetAt(resetText, nowMilliseconds),
+      resetAt:
+        resetText === undefined
+          ? null
+          : parseClaudeResetAt(resetText, nowMilliseconds),
     });
   }
 

@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788052693100
+updated: 1788054177774
 created: 1787789951052
 ---
 
@@ -125,3 +125,5 @@ An end-to-end `op run` smoke test on the same date confirmed that the configured
 On 2026-08-29, the exact `claude -p "/usage"` command was compared under stored-login and setup-token authentication. Stored login returned current-session, weekly-all-models, and weekly-Fable percentage/reset lines with zero model tokens; setup-token authentication returned only invocation cost statistics. This finding supersedes the earlier assumption that Claude subscription quota was interactive-only.
 
 The `claude-account-three@example.com` isolated profile was then verified end to end as a Max account with all three normalized windows. Testing also established that `DISABLE_TELEMETRY=1` makes Claude omit the Fable line from `/usage`; the profile adapter therefore leaves that flag unset while retaining credential isolation, disabled auto-update, and disabled error reporting. No live percentages or reset timestamps are persisted here.
+
+Additional Max profiles established that Claude omits the reset suffix for a window at zero percent usage. The parser accepts this as an available zero-used window with `resetAt: null`; nonzero examples continue to require and parse the provider's reset timestamp.

@@ -46,6 +46,24 @@ describe("Claude usage parser", () => {
     ).toBe("2027-01-02T18:00:00.000Z");
   });
 
+  it("accepts zero-used windows that omit reset times", () => {
+    const limits = parseClaudeUsageOutput(
+      [
+        "Current session: 0% used",
+        "Current week (all models): 0% used",
+        "Current week (Fable): 0% used",
+      ].join("\n"),
+      Date.parse("2026-08-30T00:30:00.000Z"),
+    );
+
+    expect(limits).toHaveLength(3);
+    expect(
+      limits.every(
+        (limit) => limit.usedPercent === 0 && limit.resetAt === null,
+      ),
+    ).toBe(true);
+  });
+
   it("rejects output without a session window", () => {
     expect(() =>
       parseClaudeUsageOutput(
