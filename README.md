@@ -112,14 +112,25 @@ Only `op://` references belong in the tracked `.env.op`; never paste a resolved 
 
 ## CLI
 
-Markdown table output is the default:
+The default is an aligned terminal report led by two independent decisions:
+
+- `USE`: the account/model group with at least 20% effective headroom whose usable window resets soonest.
+- `WATCH`: the most-consumed limit in the fleet, with its position in the window.
+
+`USE` ranks directly by reset time—there is no composite score. Claude account eligibility considers both session and shared weekly constraints. Fable remains nested under the shared weekly pool and shows its derived share of the weekly allowance.
 
 ```sh
 npm run quota
-npm run quota -- --format table
+npm run quota -- --format text
 ```
 
-Agent-safe JSON output is minified and contains no banners or logs on `stdout`:
+Markdown is available explicitly for documents:
+
+```sh
+npm run quota -- --format md
+```
+
+Agent-safe raw JSON remains minified and contains no banners or logs on `stdout`:
 
 ```sh
 npm run quota -- --json
@@ -133,6 +144,8 @@ Exit codes:
 - `2`: invalid flags, fatal configuration, or a failure before snapshots could be produced
 
 Quota percentages are numbers, unavailable values are `null`, and reset countdowns are derived from canonical ISO-8601 `resetAt` values at serialization time.
+
+Elapsed percentages marked `*` use the dated local constants in `src/presentation/quota-constants.ts`. If a provider's remaining time exceeds a local window constant, the row prints `CONSTANT-SUSPECT` with raw remaining time instead of an impossible elapsed percentage. Empty measured fields stay empty; `unsupported` is reserved for capabilities the provider does not define.
 
 ## Dashboard and API
 

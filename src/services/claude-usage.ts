@@ -160,7 +160,6 @@ type UsageWindowDefinition = {
   key: string;
   label: string;
   lineLabel: string;
-  windowDurationMinutes: number;
 };
 
 const windowDefinitions: readonly UsageWindowDefinition[] = [
@@ -168,19 +167,16 @@ const windowDefinitions: readonly UsageWindowDefinition[] = [
     key: "base.session",
     label: "Current Session",
     lineLabel: "Current session",
-    windowDurationMinutes: 300,
   },
   {
     key: "base.weekly",
     label: "Current Week (All Models)",
     lineLabel: "Current week (all models)",
-    windowDurationMinutes: 10_080,
   },
   {
     key: "fable.weekly",
     label: "Current Week (Fable)",
     lineLabel: "Current week (Fable)",
-    windowDurationMinutes: 10_080,
   },
 ];
 
@@ -215,7 +211,7 @@ export function parseClaudeUsageOutput(
       scope: "window",
       availability: "available",
       usedPercent,
-      windowDurationMinutes: definition.windowDurationMinutes,
+      windowDurationMinutes: null,
       resetAt:
         resetText === undefined
           ? null

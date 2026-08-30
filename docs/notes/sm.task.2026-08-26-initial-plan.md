@@ -2,7 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
-updated: 1788052864949
+updated: 1788056147952
 created: 1787759817972
 ---
 
@@ -17,12 +17,13 @@ created: 1787759817972
 - Credential source: isolated persistent Claude and Codex login profiles
 - External review: Claude Code 2.1.246, approved after revision on 2026-08-26
 - Provider evidence: [[sm.task.2026-08-26-provider-contract-spike]]
+- CLI output design: [[sm.task.2026-08-29-cli-output-rework]]
 
 ## Outcome
 
 Build a small service that checks multiple Claude and Codex accounts concurrently, normalizes each provider's quota response, and exposes the same result through:
 
-1. a CLI that emits either a Markdown table or machine-safe JSON; and
+1. a CLI that emits an aligned decision-first text report, Markdown on request, or machine-safe JSON; and
 2. a local HTTP API and single-page dashboard with automatic and manual refresh.
 
 An unavailable or malformed account must produce an account-level error result without preventing healthy accounts from being reported.
@@ -133,7 +134,7 @@ Operational rules:
 
 ## Normalized domain contract
 
-Keep numeric fields numeric so agents and the browser do not need to parse display strings. Formatting such as `%`, `N/A`, and countdown labels belongs at the presentation layer. Model provider limits as a list because one account can have multiple quota windows or model-scoped caps.
+Keep numeric fields numeric so agents and the browser do not need to parse display strings. Formatting such as `%`, explicit `unsupported`, empty unknown fields, and countdown labels belongs at the presentation layer. Model provider limits as a list because one account can have multiple quota windows or model-scoped caps.
 
 ```ts
 type QuotaLimit = {
@@ -206,16 +207,18 @@ Proposed commands:
 
 ```sh
 npm run quota -- --format table
+npm run quota -- --format text
+npm run quota -- --format md
 npm run quota -- --format json
 npm run quota -- --json
 ```
 
 Behavior:
 
-- Make `--format table|json` canonical, default to table, and treat `--json` as an alias for `--format json`.
+- Make `--format text|md|json` canonical, default to text, retain `table` as a backward-compatible Markdown alias, and treat `--json` as an alias for `--format json`.
 - Both formats keep `stdout` free of logs, banners, and spinners. JSON writes exactly one minified array plus a trailing newline.
 - Send diagnostics only to `stderr`; keep them disabled in JSON mode unless explicitly requested.
-- Render account, platform, plan, base usage, Fable usage, reset countdown, and status in the Markdown table.
+- Lead human output with independent `USE` and `WATCH` decisions, then render vendor/account groups with consumed and elapsed positions adjacent. Keep Fable nested under Claude weekly usage.
 - Reject unknown or conflicting flags with usage text on `stderr` and exit `2`.
 - Use exit `0` when all accounts succeed, `1` when a valid scan contains one or more account failures, and `2` for invalid flags or fatal static configuration errors such as duplicate aliases. A missing credential is an account failure, so a complete snapshot is still printed with exit `1`.
 
@@ -251,7 +254,7 @@ Unit tests:
 - Percentage validation and nullable unsupported fields.
 - Error classification and redaction.
 - Stable configuration-order output from out-of-order completions.
-- Markdown escaping and `N/A` rendering.
+- Markdown escaping plus distinct empty-unknown and explicit-unsupported rendering.
 - CLI JSON purity: stdout parses with `JSON.parse` and contains no extra text.
 - Table stdout purity: stdout contains only the table, while diagnostics are isolated to `stderr`.
 
@@ -333,7 +336,7 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 - Codex reports every provider quota window without adding a synthetic Fable metric.
 - Every reported limit window has a valid absolute reset instant or an explicit unsupported value; public DTO countdowns are recomputed from that instant and are nonnegative whole minutes.
 - `--json` emits only minified, parseable JSON to `stdout`.
-- The default CLI emits only a readable Markdown table to `stdout`.
+- The default CLI emits only a readable aligned text report to `stdout`; Markdown is explicit through `--format md`.
 - CLI exits are deterministic: `0` all healthy, `1` one or more account failures, and `2` invalid invocation or fatal static configuration.
 - `/api/quota` exposes the same normalized contract and the dashboard supports automatic and manual refresh.
 - The server defaults to loopback, rejects invalid Host/cross-site browser requests, redacts error responses, coalesces scans, and shuts down gracefully.

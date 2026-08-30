@@ -3,28 +3,31 @@ import { parseArgs } from "node:util";
 
 import { AccountConfigurationError } from "./config/accounts.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
-import { renderMarkdownTable } from "./presentation/table.js";
+import { buildQuotaReport } from "./presentation/quota-report.js";
+import { renderMarkdownReport } from "./presentation/table.js";
+import { renderTextReport } from "./presentation/text-report.js";
 import {
   createDefaultScanner,
   type Scanner,
 } from "./services/scan-accounts.js";
 
-const usage = `Usage: seat-monitor [--format table|json] [--json]
+const usage = `Usage: seat-monitor [--format text|md|json] [--json]
 
 Options:
-  --format table|json  Select output format (default: table)
-  --json               Alias for --format json
-  --help               Show this help
+  --format text|md|json  Select output format (default: text)
+  --json                 Alias for --format json
+  --help                 Show this help
 `;
 
 export type CliDependencies = {
   scan?: Scanner;
   now?: () => Date;
+  timeZone?: string;
   stdout?: { write: (value: string) => unknown };
   stderr?: { write: (value: string) => unknown };
 };
 
-type OutputFormat = "table" | "json";
+type OutputFormat = "text" | "md" | "json";
 
 function parseFormat(
   arguments_: readonly string[],
@@ -47,11 +50,12 @@ function parseFormat(
     throw new TypeError("--json cannot be combined with --format.");
   }
 
-  const format = parsed.values.json
-    ? "json"
-    : (parsed.values.format ?? "table");
-  if (format !== "table" && format !== "json") {
-    throw new TypeError("--format must be table or json.");
+  const format = parsed.values.json ? "json" : (parsed.values.format ?? "text");
+  if (format === "table") {
+    return { help: false, format: "md" };
+  }
+  if (format !== "text" && format !== "md" && format !== "json") {
+    throw new TypeError("--format must be text, md, or json.");
   }
   return { help: false, format };
 }
@@ -96,12 +100,22 @@ export async function runCli(
     return 2;
   }
 
-  const now = dependencies.now ?? (() => new Date());
-  const output = toPublicSnapshots(snapshots, now().getTime());
+  const now = (dependencies.now ?? (() => new Date()))();
+  const output = toPublicSnapshots(snapshots, now.getTime());
   if (selection.format === "json") {
     stdout.write(`${JSON.stringify(output)}\n`);
   } else {
-    stdout.write(renderMarkdownTable(output));
+    const report = buildQuotaReport(output, {
+      nowMilliseconds: now.getTime(),
+      timeZone:
+        dependencies.timeZone ??
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    stdout.write(
+      selection.format === "md"
+        ? renderMarkdownReport(report)
+        : renderTextReport(report),
+    );
   }
 
   return snapshots.some((snapshot) => snapshot.status === "error") ? 1 : 0;

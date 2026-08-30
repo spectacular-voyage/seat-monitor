@@ -60,20 +60,39 @@ describe("CLI", () => {
     ]);
   });
 
-  it("defaults to a log-free Markdown table", async () => {
+  it("defaults to a log-free aligned text report", async () => {
     const stdout = writer();
     const stderr = writer();
     const exitCode = await runCli([], {
       scan: () => Promise.resolve([fixture()]),
       now: () => new Date("2026-08-26T18:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
       stdout: stdout.sink,
       stderr: stderr.sink,
     });
 
     expect(exitCode).toBe(0);
     expect(stderr.read()).toBe("");
-    expect(stdout.read()).toContain("| Account | Platform |");
-    expect(stdout.read()).toContain("Codex \\| Primary");
+    expect(stdout.read()).toContain("QUOTA — 2026-08-26 11:00 PDT");
+    expect(stdout.read()).toContain("USE:   Codex_Work");
+    expect(stdout.read()).toContain("CODEX");
+    expect(stdout.read()).not.toContain("| Limit |");
+  });
+
+  it("emits Markdown only when requested", async () => {
+    const stdout = writer();
+    const stderr = writer();
+    const exitCode = await runCli(["--format=md"], {
+      scan: () => Promise.resolve([fixture()]),
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
+      stdout: stdout.sink,
+      stderr: stderr.sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr.read()).toBe("");
+    expect(stdout.read()).toContain("| Limit | Consumed | Level |");
   });
 
   it("rejects conflicting flags with exit 2", async () => {

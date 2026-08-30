@@ -1,8 +1,14 @@
-import type { PublicQuotaSnapshot } from "../domain/quota.js";
-
-const percentageFormatter = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 2,
-});
+import type { QuotaReport, QuotaReportRow } from "./quota-report.js";
+import {
+  formatBar,
+  formatLocalConstantFootnote,
+  formatPercent,
+  formatReportTimestamp,
+  formatReset,
+  formatRowPosition,
+  formatUseLine,
+  formatWatchLine,
+} from "./quota-format.js";
 
 function escapeCell(value: string): string {
   return value
@@ -11,76 +17,71 @@ function escapeCell(value: string): string {
     .replaceAll(/[\r\n]+/gu, " ");
 }
 
-function formatMinutes(minutes: number | null): string {
-  if (minutes === null) {
-    return "N/A";
-  }
-  if (minutes === 0) {
-    return "Now";
-  }
-  if (minutes < 60) {
-    return `${String(minutes)}m`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder === 0
-    ? `${String(hours)}h`
-    : `${String(hours)}h ${String(remainder)}m`;
-}
-
-function row(cells: readonly string[]): string {
+function markdownRow(cells: readonly string[]): string {
   return `| ${cells.map(escapeCell).join(" | ")} |`;
 }
 
-export function renderMarkdownTable(
-  snapshots: readonly PublicQuotaSnapshot[],
-): string {
+function rowStatus(row: QuotaReportRow): string {
+  if (row.support === "unsupported") {
+    return "unsupported";
+  }
+  return row.constantSuspect ? "**CONSTANT-SUSPECT**" : "";
+}
+
+export function renderMarkdownReport(report: QuotaReport): string {
   const lines = [
-    row([
-      "Account",
-      "Platform",
-      "Plan",
-      "Limit",
-      "Used",
-      "Resets In",
-      "Status",
-    ]),
-    "| --- | --- | --- | --- | ---: | ---: | --- |",
+    `# QUOTA — ${formatReportTimestamp(report)}`,
+    "",
+    formatUseLine(report.use, report),
+    "",
+    formatWatchLine(report.watch, report),
+    "",
   ];
 
-  for (const snapshot of snapshots) {
-    if (snapshot.status === "error") {
+  for (const account of report.accounts) {
+    const plan = account.plan === null ? "" : ` · ${account.plan}`;
+    lines.push(
+      `## ${account.platform.toLocaleUpperCase("en-US")} ${account.displayAccount}${plan}`,
+      "",
+    );
+    if (account.status === "error") {
       lines.push(
-        row([
-          snapshot.accountAlias,
-          snapshot.platform,
-          "N/A",
-          "N/A",
-          "N/A",
-          "N/A",
-          `Error (${snapshot.error.code}): ${snapshot.error.message}`,
-        ]),
+        `Error (${account.error?.code ?? "unknown"}): ${account.error?.message ?? ""}`,
+        "",
       );
       continue;
     }
 
-    for (const limit of snapshot.limits) {
+    lines.push(
+      markdownRow([
+        "Limit",
+        "Consumed",
+        "Level",
+        "Position",
+        "Reset",
+        "Status",
+      ]),
+      "| --- | ---: | --- | --- | --- | --- |",
+    );
+    for (const row of account.rows) {
       lines.push(
-        row([
-          snapshot.accountAlias,
-          snapshot.platform,
-          snapshot.plan ?? "N/A",
-          limit.label,
-          limit.usedPercent === null
-            ? "N/A"
-            : `${percentageFormatter.format(limit.usedPercent)}%`,
-          formatMinutes(limit.minutesUntilReset),
-          limit.availability === "available" ? "OK" : "Unsupported",
+        markdownRow([
+          row.depth === 1 ? `↳ ${row.label}` : row.label,
+          row.consumedPercent === null
+            ? ""
+            : formatPercent(row.consumedPercent),
+          formatBar(row.consumedPercent),
+          formatRowPosition(row),
+          formatReset(row.resetAt, row.timeRemainingMinutes, report),
+          rowStatus(row),
         ]),
       );
     }
+    lines.push("");
   }
 
-  return `${lines.join("\n")}\n`;
+  if (report.usesLocalConstants) {
+    lines.push(formatLocalConstantFootnote(report), "");
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
 }
