@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788050836683
+updated: 1788050960637
 created: 1787789951052
 ---
 
@@ -114,3 +114,5 @@ The Claude child receives the selected value as `CLAUDE_CODE_OAUTH_TOKEN`. A per
 Verified both configured Codex Pro profiles on 2026-08-29. Each isolated App Server process authenticated as `pro` and returned the primary Codex quota plus separate primary/secondary model windows. Profile directories were mode `0700` and both `auth.json` files were mode `0600`.
 
 No authentication payload, email returned by the provider, live usage percentage, or reset timestamp was persisted in this note or a fixture.
+
+An end-to-end `op run` smoke test on the same date confirmed that the configured Claude setup token and both Codex profiles succeed through the CLI and `GET /api/quota`. The dashboard HTML returned `200` with the expected Content Security Policy. Three other enabled Claude accounts correctly remained visible as `missing_credential` errors while their 1Password references were commented out.
