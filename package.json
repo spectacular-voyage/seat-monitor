@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-public.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
+    "claude:login": "tsx src/claude-login.ts",
     "codex:login": "tsx src/codex-login.ts",
     "dev": "tsx watch src/server.ts",
     "format": "prettier --write .",

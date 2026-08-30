@@ -2,7 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
-updated: 1788049963177
+updated: 1788052294869
 created: 1787759817972
 ---
 
@@ -14,7 +14,7 @@ created: 1787759817972
 - Runtime: Node.js on an active LTS release
 - Language: TypeScript 5.x in strict mode
 - Primary interfaces: CLI and a local web dashboard
-- Credential source: Claude tokens via `op run`; Codex Pro via isolated local profiles
+- Credential source: isolated persistent Claude and Codex login profiles
 - External review: Claude Code 2.1.246, approved after revision on 2026-08-26
 - Provider evidence: [[sm.task.2026-08-26-provider-contract-spike]]
 
@@ -96,7 +96,7 @@ The provider adapters should accept injected `fetch` and clock dependencies. Thi
 
 ## Configuration and secret handling
 
-Store only account metadata, environment-variable _names_, and Codex profile names in version control. Resolve Claude and managed-workspace tokens when the process starts. Keep personal Codex OAuth caches outside the repository in dedicated profiles.
+Store only account metadata, profile names, and optional environment-variable _names_ in version control. Keep personal Claude and Codex OAuth caches outside the repository in dedicated profiles. Resolve optional managed-workspace tokens only when the process starts.
 
 ```ts
 export const accounts = [
@@ -104,8 +104,8 @@ export const accounts = [
     accountAlias: "Anthropic_Personal",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_TOKEN_PERSONAL",
+      type: "claude_profile",
+      profile: "anthropic-personal",
     },
   },
   {
@@ -121,14 +121,15 @@ export const accounts = [
 
 Operational rules:
 
-- Launch secret-dependent commands with `op run --env-file=.env.op -- ...`.
+- Run the default personal-account flow directly after its one-time provider logins; no runtime secret injection is required.
+- For optional environment-token modes, launch with `op run --env-file=.env.op -- ...` and prefer a read-only service account scoped to a dedicated non-built-in vault.
 - Commit `.env.op` with `op://...` references only; never commit resolved credentials or a conventional `.env` file. Note that reference paths can reveal vault/item metadata, so use neutral item names where that metadata is sensitive.
 - Add `.env`, resolved secret outputs, logs, and local artifacts to `.gitignore`.
 - Validate aliases, duplicate aliases, and required environment variables before scanning.
 - Never include tokens, authorization headers, or raw provider response bodies in logs, errors, CLI output, or API responses.
 - Use generic account-scoped error messages; keep optional debug diagnostics on `stderr`, redacted, and disabled by default.
-- Document that `op run` resolves secrets into the child process environment at startup. A long-running server retains those values after the 1Password CLI session expires and must be restarted to pick up credential rotation.
-- Create personal Codex profiles through `codex login`, keep them outside the repository, use file-backed auth so profiles stay isolated, and restrict their directories to `0700` and `auth.json` to `0600`.
+- Document that optional `op run` mode resolves secrets into the child process environment at startup. A long-running server retains those values after the 1Password session expires and must be restarted to pick up credential rotation.
+- Create personal Claude and Codex profiles through provider login commands, keep them outside the repository, isolate them per account, and restrict profile directories to `0700` and credential files to `0600`.
 
 ## Normalized domain contract
 
@@ -315,10 +316,10 @@ Exit criterion: the dashboard reflects fresh and partially failed results withou
 
 ### Phase 5: operational hardening
 
-- Document 1Password launch commands, configuration, troubleshooting, and endpoint limitations.
+- Document provider-profile setup, optional 1Password launch commands, configuration, troubleshooting, and endpoint limitations.
 - Verify local-only binding, graceful shutdown, no secret leakage, and production start scripts.
 
-Exit criterion: a clean checkout can be configured with `op run`, tested, built, and operated from the README.
+Exit criterion: a clean checkout can be configured with isolated provider profiles, tested, built, and operated from the README.
 
 ## Initial acceptance criteria
 
@@ -342,7 +343,7 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 ## Phase 0 decisions
 
 1. Codex means a ChatGPT/Codex subscription seat. V1 uses the official Codex App Server with isolated persistent profiles for personal plans and optional environment-provided access tokens for Business/Enterprise.
-2. Claude setup tokens support safe plan/auth discovery, but no documented machine-readable subscription-window contract was found. Base and Fable limits are therefore explicit unsupported metrics.
+2. Claude stored-login profiles support plan discovery plus zero-token print-mode `/usage` output for session, weekly-all-models, and weekly-Fable windows. Setup tokens remain auth-only because their `/usage` output contains invocation statistics instead.
 3. Fable is not treated as a stable provider response key. It remains a semantic presentation key and is never inferred.
 4. Every provider window is preserved with a stable provider limit ID plus `primary` or `secondary`; the interfaces can display multiple rows per account.
 5. V1 is local-only. The server refuses non-loopback listeners until authentication and TLS are designed.
@@ -360,14 +361,14 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 Completed on 2026-08-26:
 
 - Strict TypeScript project with Zod validation at provider and public-output boundaries.
-- Isolated Claude CLI and Codex App Server adapters with per-account state, allowlisted child environments, eight-second deadlines, capped process output, and redacted failures. Codex access-token state is temporary; Codex Pro login profiles persist outside the repository so refreshed OAuth credentials survive.
+- Isolated Claude CLI and Codex App Server adapters with per-account state, allowlisted child environments, eight-second deadlines, capped process output, and redacted failures. Personal Claude and Codex login profiles persist outside the repository so refreshed OAuth credentials survive; optional token-mode state is temporary.
 - Stable-order scanner with concurrency eight and account-level failure isolation.
 - Pure Markdown/JSON CLI with documented `0`, `1`, and `2` exit codes.
 - Loopback Fastify API with Host/Origin checks, CSP, redacted errors, 30-second cache freshness, and scan coalescing.
 - Dependency-free dashboard with manual refresh, 60-second auto-refresh, accessible quota rows, and live reset countdowns.
-- 39 unit/integration tests before the Pro-profile documentation pass, strict typecheck, lint, formatting check, production build, compiled CLI/server smoke tests, dependency audit, and credential-pattern scan.
+- 47 unit/integration tests before the final profile smoke test, strict typecheck, lint, formatting check, production build, compiled CLI/server smoke tests, dependency audit, and credential-pattern scan.
 
-Account entries are enabled selectively during setup. No live credential or usage fixture is stored. Claude entries require matching `op://` references; Codex Pro entries require one `npm run codex:login -- <accountAlias>` browser login each.
+Account entries are enabled selectively during setup. No live credential or usage fixture is stored. Personal Claude and Codex entries each require one provider login command per account; the resulting credential profiles stay outside the repository.
 
 The original `429` HTTP-fixture requirement became inapplicable after Phase 0 selected local CLI/App Server contracts instead of direct provider HTTP endpoints. V1 performs no retries; provider protocol and timeout failures remain isolated and redacted.
 

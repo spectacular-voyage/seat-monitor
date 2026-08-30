@@ -14,7 +14,7 @@ const commonShape = {
   enabled: z.boolean().optional().default(true),
 } as const;
 
-const claudeAccountDefinitionSchema = z
+const claudeSetupTokenDefinitionSchema = z
   .object({
     ...commonShape,
     platform: z.literal("Claude"),
@@ -22,6 +22,19 @@ const claudeAccountDefinitionSchema = z
       .object({
         type: z.literal("claude_setup_token"),
         credentialEnv: credentialEnvironmentSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+const claudeProfileDefinitionSchema = z
+  .object({
+    ...commonShape,
+    platform: z.literal("Claude"),
+    auth: z
+      .object({
+        type: z.literal("claude_profile"),
+        profile: profileNameSchema,
       })
       .strict(),
   })
@@ -54,7 +67,8 @@ const codexAccessTokenDefinitionSchema = z
   .strict();
 
 export const accountDefinitionSchema = z.union([
-  claudeAccountDefinitionSchema,
+  claudeSetupTokenDefinitionSchema,
+  claudeProfileDefinitionSchema,
   codexProfileDefinitionSchema,
   codexAccessTokenDefinitionSchema,
 ]);
@@ -66,12 +80,21 @@ type LoadedAccountBase = {
   platform: Platform;
 };
 
-export type LoadedClaudeAccount = LoadedAccountBase & {
+export type LoadedClaudeSetupTokenAccount = LoadedAccountBase & {
   platform: "Claude";
   auth: {
     type: "claude_setup_token";
     credentialEnv: string;
     credential: string | undefined;
+  };
+};
+
+export type LoadedClaudeProfileAccount = LoadedAccountBase & {
+  platform: "Claude";
+  auth: {
+    type: "claude_profile";
+    profile: string;
+    claudeConfigDir: string;
   };
 };
 
@@ -94,7 +117,8 @@ export type LoadedCodexAccessTokenAccount = LoadedAccountBase & {
 };
 
 export type LoadedAccount =
-  | LoadedClaudeAccount
+  | LoadedClaudeSetupTokenAccount
+  | LoadedClaudeProfileAccount
   | LoadedCodexProfileAccount
   | LoadedCodexAccessTokenAccount;
 
@@ -121,19 +145,35 @@ export function defaultCodexProfilesRoot(
   return join(homedir(), ".local", "share", "seat-monitor", "codex");
 }
 
+export function defaultClaudeProfilesRoot(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = environment.SEAT_MONITOR_CLAUDE_PROFILES_DIR;
+  if (configured !== undefined) {
+    if (!isAbsolute(configured)) {
+      throw new AccountConfigurationError(
+        "SEAT_MONITOR_CLAUDE_PROFILES_DIR must be an absolute path.",
+      );
+    }
+    return configured;
+  }
+
+  return join(homedir(), ".local", "share", "seat-monitor", "claude");
+}
+
 /**
- * Edit this non-secret map to declare accounts. Claude setup tokens and Codex
- * workspace access tokens resolve from environment variables. Personal Codex
- * subscriptions use isolated, persistent Codex profiles created by the
- * `npm run codex:login -- <accountAlias>` command.
+ * Edit this non-secret map to declare accounts. Personal Claude and Codex
+ * subscriptions use isolated persistent profiles created by their provider
+ * login commands. Setup/access-token modes remain available for automation
+ * environments that deliberately inject credentials.
  */
 export const accountDefinitions = [
   {
     accountAlias: "claude-account-one@example.com",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_ACCOUNT_ONE",
+      type: "claude_profile",
+      profile: "claude-account-one",
     },
     enabled: true,
   },
@@ -141,8 +181,8 @@ export const accountDefinitions = [
     accountAlias: "claude-account-two@example.com",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_ACCOUNT_TWO",
+      type: "claude_profile",
+      profile: "account-two",
     },
     enabled: true,
   },
@@ -150,8 +190,8 @@ export const accountDefinitions = [
     accountAlias: "claude-account-four@example.com",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_ACCOUNT_THREE",
+      type: "claude_profile",
+      profile: "codex-account-four",
     },
     enabled: true,
   },
@@ -159,8 +199,8 @@ export const accountDefinitions = [
     accountAlias: "claude-account-five@example.com",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_ACCOUNT_FIVE",
+      type: "claude_profile",
+      profile: "claude-account-five",
     },
     enabled: true,
   },
@@ -188,10 +228,16 @@ export function loadAccounts(
   definitions: readonly AccountDefinition[] = accountDefinitions,
   environment: NodeJS.ProcessEnv = process.env,
   codexProfilesRoot = defaultCodexProfilesRoot(environment),
+  claudeProfilesRoot = defaultClaudeProfilesRoot(environment),
 ): LoadedAccount[] {
   if (!isAbsolute(codexProfilesRoot)) {
     throw new AccountConfigurationError(
       "Codex profiles root must be an absolute path.",
+    );
+  }
+  if (!isAbsolute(claudeProfilesRoot)) {
+    throw new AccountConfigurationError(
+      "Claude profiles root must be an absolute path.",
     );
   }
 
@@ -219,6 +265,18 @@ export function loadAccounts(
   }
 
   return enabled.map((definition): LoadedAccount => {
+    if (definition.auth.type === "claude_profile") {
+      return {
+        accountAlias: definition.accountAlias,
+        platform: "Claude",
+        auth: {
+          type: "claude_profile",
+          profile: definition.auth.profile,
+          claudeConfigDir: join(claudeProfilesRoot, definition.auth.profile),
+        },
+      };
+    }
+
     if (definition.auth.type === "codex_profile") {
       return {
         accountAlias: definition.accountAlias,

@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788050960637
+updated: 1788052294869
 created: 1787789951052
 ---
 
@@ -12,13 +12,14 @@ created: 1787789951052
 
 Phase 0 is complete. The website-root endpoints in the draft are rejected. Version 1 will use supported local product interfaces where available and will represent unsupported metrics explicitly.
 
-| Provider/account type                           | V1 source                                                                                  | Decision                                                                                                |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| Codex, ChatGPT Business or Enterprise           | Codex App Server over stdio, authenticated by a persistent profile or `CODEX_ACCESS_TOKEN` | Implement                                                                                               |
-| Codex, personal Free/Go/Plus/Pro                | Codex App Server over stdio with an isolated persistent `CODEX_HOME` profile               | Implement after one interactive `codex login` per account                                               |
-| Claude Pro/Max/Team/Enterprise with setup token | `claude auth status --json` with `CLAUDE_CODE_OAUTH_TOKEN`                                 | Implement plan/auth discovery; quota windows remain unsupported                                         |
-| Claude Enterprise admin analytics               | Admin usage/spend APIs                                                                     | Defer; these are organization analytics/spend contracts, not the requested subscription-window contract |
-| OpenAI or Anthropic API organizations           | Admin usage/rate-limit APIs                                                                | Defer; this is a different product target from ChatGPT/Codex and Claude subscription seats              |
+| Provider/account type                                | V1 source                                                                                  | Decision                                                                                                |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Codex, ChatGPT Business or Enterprise                | Codex App Server over stdio, authenticated by a persistent profile or `CODEX_ACCESS_TOKEN` | Implement                                                                                               |
+| Codex, personal Free/Go/Plus/Pro                     | Codex App Server over stdio with an isolated persistent `CODEX_HOME` profile               | Implement after one interactive `codex login` per account                                               |
+| Claude Pro/Max/Team/Enterprise with persistent login | `claude auth status --json` plus `claude -p "/usage"` in an isolated `CLAUDE_CONFIG_DIR`   | Implement plan, session, weekly-all-models, and weekly-Fable windows                                    |
+| Claude Pro/Max/Team/Enterprise with setup token      | `claude auth status --json` with `CLAUDE_CODE_OAUTH_TOKEN`                                 | Retain as optional auth-only mode; quota windows remain unsupported                                     |
+| Claude Enterprise admin analytics                    | Admin usage/spend APIs                                                                     | Defer; these are organization analytics/spend contracts, not the requested subscription-window contract |
+| OpenAI or Anthropic API organizations                | Admin usage/rate-limit APIs                                                                | Defer; this is a different product target from ChatGPT/Codex and Claude subscription seats              |
 
 The domain remains multi-window and provider-neutral. A status-only Claude result can be healthy while its `base` and `fable` metrics are explicitly unavailable; failure to authenticate remains an account error.
 
@@ -57,21 +58,22 @@ Official sources:
 - [Anthropic Rate Limits API](https://platform.claude.com/docs/en/manage-claude/rate-limits-api) documents configured Claude API organization limits and explicitly excludes individual accounts.
 - [Anthropic Spend Limits API](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) is Enterprise-only and reports monthly member spend against configured spend caps.
 
-`claude auth status --json` is locally verified to expose authentication state and `subscriptionType`, but not quota windows. The documented `/usage` view has no verified machine-readable, non-interactive contract. Version 1 therefore maps:
+`claude auth status --json` exposes authentication state and `subscriptionType`. Local comparison on Claude Code 2.1.251 established that `claude -p "/usage"` emits account quota without model tokens for a stored browser login, while a setup token emits only invocation statistics. The stored-login output is plain text rather than a versioned JSON schema, so the adapter uses strict, fixture-backed parsing and fails closed if the shape changes.
 
-| Claude CLI field   | Normalized field           |
-| ------------------ | -------------------------- |
-| `loggedIn`         | success/error decision     |
-| `subscriptionType` | `plan`                     |
-| base quota         | metric-level `unsupported` |
-| Fable quota        | metric-level `unsupported` |
-| reset time         | `null`                     |
+| Claude CLI field             | Normalized field             |
+| ---------------------------- | ---------------------------- |
+| `loggedIn`                   | success/error decision       |
+| `subscriptionType`           | `plan`                       |
+| `Current session`            | `base.session` quota window  |
+| `Current week (all models)`  | `base.weekly` quota window   |
+| `Current week (Fable)`       | `fable.weekly` quota window  |
+| `resets ... (IANA timezone)` | canonical ISO-8601 `resetAt` |
 
-Do not parse terminal control sequences, inspect browser traffic, call private Claude endpoints, or make an inference request merely to discover limits.
+Do not parse terminal control sequences, inspect browser traffic, call private Claude endpoints, or make an inference request merely to discover limits. The print-mode command reports zero input/output tokens.
 
 ## Authentication configuration
 
-Each Claude account definition names an environment variable; it never contains the credential itself. A personal Codex account names an isolated non-secret profile, while Business/Enterprise can optionally name an access-token environment variable.
+Personal Claude and Codex account definitions name isolated, non-secret profiles. Environment-variable token modes remain optional for integrations that deliberately inject credentials.
 
 ```ts
 export const accounts = [
@@ -79,8 +81,8 @@ export const accounts = [
     accountAlias: "Anthropic_Personal",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_TOKEN_PERSONAL",
+      type: "claude_profile",
+      profile: "anthropic-personal",
     },
   },
   {
@@ -94,18 +96,19 @@ export const accounts = [
 ] as const;
 ```
 
-The Claude child receives the selected value as `CLAUDE_CODE_OAUTH_TOKEN`. A personal Codex child receives its dedicated `CODEX_HOME`; an optional managed-workspace token child receives `CODEX_ACCESS_TOKEN`. Parent secrets are not inherited wholesale by provider children.
+A personal Claude child receives its dedicated `CLAUDE_CONFIG_DIR`; a personal Codex child receives its dedicated `CODEX_HOME`. Optional token-mode children receive only the selected provider token. Parent secrets are not inherited wholesale.
 
 ## Fixture policy
 
 - Codex fixtures are derived from the public App Server examples and contain no account data.
-- Claude fixtures cover the documented `auth status` shape only.
+- Claude fixtures cover the `auth status` shape and sanitized `/usage` text.
 - No live account response, email, organization ID, token, or real usage percentage is checked in.
 
 ## Re-baselined V1 acceptance
 
 - Codex personal profile and Business/Enterprise access-token accounts report plan and all App Server quota windows.
-- Claude setup-token accounts report plan plus explicit unsupported Base and Fable metrics.
+- Claude persistent-profile accounts report plan, Base session/weekly, and weekly Fable quota/reset windows.
+- Claude setup-token accounts remain explicit auth-only results with unsupported Base and Fable metrics.
 - Unsupported account types remain visible as structured results and never trigger undocumented fallbacks.
 - Adding a future supported Claude quota source requires only a new provider adapter and fixtures; interfaces retain the same public DTO.
 
@@ -116,3 +119,7 @@ Verified both configured Codex Pro profiles on 2026-08-29. Each isolated App Ser
 No authentication payload, email returned by the provider, live usage percentage, or reset timestamp was persisted in this note or a fixture.
 
 An end-to-end `op run` smoke test on the same date confirmed that the configured Claude setup token and both Codex profiles succeed through the CLI and `GET /api/quota`. The dashboard HTML returned `200` with the expected Content Security Policy. Three other enabled Claude accounts correctly remained visible as `missing_credential` errors while their 1Password references were commented out.
+
+## Claude print-mode discovery
+
+On 2026-08-29, the exact `claude -p "/usage"` command was compared under stored-login and setup-token authentication. Stored login returned current-session, weekly-all-models, and weekly-Fable percentage/reset lines with zero model tokens; setup-token authentication returned only invocation cost statistics. This finding supersedes the earlier assumption that Claude subscription quota was interactive-only.

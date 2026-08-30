@@ -61,6 +61,7 @@ export function createScanner(options: ScannerOptions): Scanner {
     mapWithConcurrency(options.accounts, concurrency, async (account) => {
       if (
         account.auth.type !== "codex_profile" &&
+        account.auth.type !== "claude_profile" &&
         (account.auth.credential === undefined ||
           account.auth.credential.length === 0)
       ) {

@@ -56,6 +56,28 @@ describe("loadAccounts", () => {
     ]);
   });
 
+  it("resolves Claude profile names below the configured profile root", () => {
+    const definitions: AccountDefinition[] = [
+      {
+        accountAlias: "claude-user@example.com",
+        platform: "Claude",
+        auth: { type: "claude_profile", profile: "user-example" },
+      },
+    ];
+
+    expect(loadAccounts(definitions, {}, "/codex", "/claude")).toEqual([
+      {
+        accountAlias: "claude-user@example.com",
+        platform: "Claude",
+        auth: {
+          type: "claude_profile",
+          profile: "user-example",
+          claudeConfigDir: "/claude/user-example",
+        },
+      },
+    ]);
+  });
+
   it("retains access-token mode for managed Codex workspaces", () => {
     const definitions: AccountDefinition[] = [
       {
@@ -176,6 +198,23 @@ describe("loadAccounts", () => {
           },
         ],
         {},
+        "relative/profiles",
+      ),
+    ).toThrow(AccountConfigurationError);
+  });
+
+  it("rejects relative Claude profile roots", () => {
+    expect(() =>
+      loadAccounts(
+        [
+          {
+            accountAlias: "Claude",
+            platform: "Claude",
+            auth: { type: "claude_profile", profile: "personal" },
+          },
+        ],
+        {},
+        "/codex",
         "relative/profiles",
       ),
     ).toThrow(AccountConfigurationError);

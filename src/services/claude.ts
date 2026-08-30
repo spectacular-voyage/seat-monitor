@@ -1,10 +1,12 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { z } from "zod";
 
 import { quotaSuccessSchema, type QuotaLimit } from "../domain/quota.js";
+import { parseClaudeUsageOutput } from "./claude-usage.js";
 import { createFailureSnapshot } from "./failure.js";
 import {
   minimalChildEnvironment,
@@ -44,13 +46,39 @@ const unsupportedClaudeLimits: readonly QuotaLimit[] = [
 export type ClaudeProviderDependencies = {
   command?: string;
   run?: RunCommand;
+  profileIsReady?: (claudeConfigDir: string) => Promise<boolean>;
 };
+
+async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
+  try {
+    await access(
+      join(claudeConfigDir, ".credentials.json"),
+      constants.R_OK | constants.W_OK,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseAuthStatus(
+  stdout: string,
+): z.infer<typeof claudeAuthStatusSchema> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
+    throw new TypeError("Claude CLI returned invalid JSON.");
+  }
+  return claudeAuthStatusSchema.parse(payload);
+}
 
 export function createClaudeProvider(
   dependencies: ClaudeProviderDependencies = {},
 ): QuotaProvider {
   const command = dependencies.command ?? "claude";
   const run = dependencies.run ?? runCommand;
+  const isProfileReady = dependencies.profileIsReady ?? profileIsReady;
 
   return {
     async scan(account, context) {
@@ -63,62 +91,87 @@ export function createClaudeProvider(
         );
       }
 
-      const configDirectory = await mkdtemp(
-        join(tmpdir(), "seat-monitor-claude-"),
-      );
+      let temporaryDirectory: string | null = null;
 
       try {
-        const result = await run({
-          command,
-          args: ["auth", "status", "--json"],
-          environment: minimalChildEnvironment({
-            CLAUDE_CODE_OAUTH_TOKEN: account.auth.credential,
-            CLAUDE_CONFIG_DIR: configDirectory,
+        let environment: NodeJS.ProcessEnv;
+        const readsQuota = account.auth.type === "claude_profile";
+        if (account.auth.type === "claude_profile") {
+          if (!(await isProfileReady(account.auth.claudeConfigDir))) {
+            return createFailureSnapshot(
+              account,
+              "missing_credential",
+              `Claude profile ${account.auth.profile} is not logged in. Run the claude:login command for this account.`,
+              context.now().toISOString(),
+            );
+          }
+          environment = minimalChildEnvironment({
+            CLAUDE_CONFIG_DIR: account.auth.claudeConfigDir,
+            CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
             DISABLE_AUTOUPDATER: "1",
             DISABLE_ERROR_REPORTING: "1",
             DISABLE_TELEMETRY: "1",
-          }),
+          });
+        } else {
+          temporaryDirectory = await mkdtemp(
+            join(tmpdir(), "seat-monitor-claude-"),
+          );
+          environment = minimalChildEnvironment({
+            CLAUDE_CODE_OAUTH_TOKEN: account.auth.credential,
+            CLAUDE_CONFIG_DIR: temporaryDirectory,
+            CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
+            DISABLE_AUTOUPDATER: "1",
+            DISABLE_ERROR_REPORTING: "1",
+            DISABLE_TELEMETRY: "1",
+          });
+        }
+
+        const authResult = await run({
+          command,
+          args: ["auth", "status", "--json"],
+          environment,
           timeoutMilliseconds: context.timeoutMilliseconds,
         });
-        const observedAt = context.now().toISOString();
-
-        if (result.exitCode !== 0) {
+        if (authResult.exitCode !== 0) {
           return createFailureSnapshot(
             account,
             "unauthorized",
             "Claude CLI could not authenticate this account.",
-            observedAt,
+            context.now().toISOString(),
           );
         }
 
-        let payload: unknown;
-        try {
-          payload = JSON.parse(result.stdout);
-        } catch {
-          return createFailureSnapshot(
-            account,
-            "invalid_response",
-            "Claude CLI returned an invalid authentication response.",
-            observedAt,
-          );
-        }
-
-        const parsed = claudeAuthStatusSchema.safeParse(payload);
-        if (!parsed.success) {
-          return createFailureSnapshot(
-            account,
-            "invalid_response",
-            "Claude CLI returned an unexpected authentication response.",
-            observedAt,
-          );
-        }
-
-        if (!parsed.data.loggedIn) {
+        const authStatus = parseAuthStatus(authResult.stdout);
+        if (!authStatus.loggedIn) {
           return createFailureSnapshot(
             account,
             "unauthorized",
             "Claude account is not authenticated.",
-            observedAt,
+            context.now().toISOString(),
+          );
+        }
+
+        let limits = unsupportedClaudeLimits;
+        let observedAt = context.now();
+        if (readsQuota) {
+          const usageResult = await run({
+            command,
+            args: ["-p", "/usage", "--no-session-persistence"],
+            environment,
+            timeoutMilliseconds: context.timeoutMilliseconds,
+          });
+          observedAt = context.now();
+          if (usageResult.exitCode !== 0) {
+            return createFailureSnapshot(
+              account,
+              "invalid_response",
+              "Claude CLI could not read account usage.",
+              observedAt.toISOString(),
+            );
+          }
+          limits = parseClaudeUsageOutput(
+            usageResult.stdout,
+            observedAt.getTime(),
           );
         }
 
@@ -126,9 +179,9 @@ export function createClaudeProvider(
           accountAlias: account.accountAlias,
           platform: account.platform,
           status: "ok",
-          plan: parsed.data.subscriptionType ?? null,
-          limits: unsupportedClaudeLimits,
-          observedAt,
+          plan: authStatus.subscriptionType ?? null,
+          limits,
+          observedAt: observedAt.toISOString(),
         });
       } catch (error) {
         const observedAt = context.now().toISOString();
@@ -148,6 +201,14 @@ export function createClaudeProvider(
             observedAt,
           );
         }
+        if (error instanceof TypeError || error instanceof z.ZodError) {
+          return createFailureSnapshot(
+            account,
+            "invalid_response",
+            "Claude CLI returned an invalid account response.",
+            observedAt,
+          );
+        }
         return createFailureSnapshot(
           account,
           "network",
@@ -155,7 +216,9 @@ export function createClaudeProvider(
           observedAt,
         );
       } finally {
-        await rm(configDirectory, { force: true, recursive: true });
+        if (temporaryDirectory !== null) {
+          await rm(temporaryDirectory, { force: true, recursive: true });
+        }
       }
     },
   };

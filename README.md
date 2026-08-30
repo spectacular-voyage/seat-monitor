@@ -6,19 +6,20 @@ Seat Monitor is a strict TypeScript service that presents multi-account Claude a
 
 The original draft named website roots rather than authenticated quota endpoints. The implemented provider boundary follows the supported contracts found during the Phase 0 spike:
 
-| Account type                                          | V1 behavior                                                                                                                  |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Codex on personal ChatGPT plans, including Pro        | Reads plan and all quota windows from an isolated, persistent `CODEX_HOME` profile created with `codex login`                |
-| Codex on ChatGPT Business or Enterprise               | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                               |
-| Claude subscription with a `claude setup-token` token | Reads plan/authentication through `claude auth status --json`; Base and Fable quota fields are explicit `unsupported` values |
-| API-organization usage and spend                      | Out of scope for V1 because it is a different billing product from subscription seats                                        |
+| Account type                                   | V1 behavior                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Claude subscription with persistent login      | Reads plan plus session, weekly-all-models, and weekly-Fable quota/reset windows from `claude -p "/usage"`    |
+| Claude subscription with `claude setup-token`  | Optional auth-only mode; Base and Fable quota remain explicit `unsupported` values                            |
+| Codex on personal ChatGPT plans, including Pro | Reads plan and all quota windows from an isolated, persistent `CODEX_HOME` profile created with `codex login` |
+| Codex on ChatGPT Business or Enterprise        | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                |
+| API-organization usage and spend               | Out of scope for V1 because it is a different billing product from subscription seats                         |
 
 Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse browser cookies, or call private provider endpoints. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for sources and mapping decisions.
 
 ## Prerequisites
 
 - Node.js 22 or newer
-- 1Password CLI (`op`)
+- 1Password CLI (`op`) only when using optional environment-token modes
 - Claude Code CLI for enabled Claude accounts
 - Codex CLI with App Server support for enabled Codex accounts
 
@@ -30,7 +31,7 @@ npm ci
 
 ## Configure accounts
 
-Edit the non-secret map in `src/config/accounts.ts`. Set `enabled: true` only for accounts you want to scan, and give each account a unique environment-variable name:
+Edit the non-secret map in `src/config/accounts.ts`. Set `enabled: true` only for accounts you want to scan and give each account a unique profile name:
 
 ```ts
 export const accountDefinitions = [
@@ -38,8 +39,8 @@ export const accountDefinitions = [
     accountAlias: "Anthropic_Personal",
     platform: "Claude",
     auth: {
-      type: "claude_setup_token",
-      credentialEnv: "CLAUDE_TOKEN_PERSONAL",
+      type: "claude_profile",
+      profile: "anthropic-personal",
     },
     enabled: true,
   },
@@ -55,15 +56,23 @@ export const accountDefinitions = [
 ] as const;
 ```
 
-Add matching 1Password references to the tracked `.env.op` file:
+### Set up Claude profiles
 
-```dotenv
-CLAUDE_TOKEN_PERSONAL=op://Private/seat-monitor-claude-personal/password
+List the configured Claude accounts and profile locations:
+
+```sh
+npm run claude:login -- --list
 ```
 
-Only `op://` references belong in `.env.op`. Never paste a resolved token into the repository.
+Log into each account once, confirming the intended Claude identity in the browser:
 
-For Claude, generate a subscription token with `claude setup-token`, save it directly in 1Password, and reference that field. Each Claude child process receives only its selected credential plus a small allowlist of required process variables.
+```sh
+npm run claude:login -- 'claude-account-four@example.com'
+```
+
+The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
+
+The monitor combines `claude auth status --json` with zero-token `claude -p "/usage"` output. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
 ### Set up Codex Pro profiles
 
@@ -95,20 +104,26 @@ auth: {
 
 That optional mode resolves `CODEX_TOKEN_WORK` through 1Password and injects it as `CODEX_ACCESS_TOKEN` into an ephemeral Codex profile.
 
+### Optional 1Password token mode
+
+Claude setup-token and Codex managed-workspace access-token modes remain supported for environments that intentionally inject credentials. Claude setup-token mode verifies authentication but cannot retrieve subscription quota.
+
+Only `op://` references belong in the tracked `.env.op`; never paste a resolved token into the repository. For unattended `op run`, use a narrowly scoped 1Password service account and `OP_SERVICE_ACCOUNT_TOKEN`. Service accounts cannot access built-in Personal, Private, Employee, or default Shared vaults, so create a dedicated read-only vault for monitor items.
+
 ## CLI
 
 Markdown table output is the default:
 
 ```sh
-op run --env-file=.env.op -- npm run quota
-op run --env-file=.env.op -- npm run quota -- --format table
+npm run quota
+npm run quota -- --format table
 ```
 
 Agent-safe JSON output is minified and contains no banners or logs on `stdout`:
 
 ```sh
-op run --env-file=.env.op -- npm run quota -- --json
-op run --env-file=.env.op -- npm run quota -- --format json
+npm run quota -- --json
+npm run quota -- --format json
 ```
 
 Exit codes:
@@ -124,7 +139,7 @@ Quota percentages are numbers, unavailable values are `null`, and reset countdow
 Start the local server:
 
 ```sh
-op run --env-file=.env.op -- npm run dev
+npm run dev
 ```
 
 Open <http://127.0.0.1:3000>. The dashboard refreshes every 60 seconds and has a manual refresh control. `GET /api/quota` returns the same runtime-validated array as CLI JSON mode.
