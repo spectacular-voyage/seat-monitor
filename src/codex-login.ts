@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
-  loadAccounts,
+  loadConfiguredAccounts,
   type LoadedCodexProfileAccount,
 } from "./config/accounts.js";
 import { loginCodexProfile } from "./services/codex-login.js";
@@ -14,7 +14,7 @@ Create or refresh the isolated ChatGPT login used by one Codex account.
 `;
 
 function profileAccounts(): LoadedCodexProfileAccount[] {
-  return loadAccounts().filter(
+  return loadConfiguredAccounts().filter(
     (account): account is LoadedCodexProfileAccount =>
       account.platform === "Codex" && account.auth.type === "codex_profile",
   );

@@ -1,10 +1,81 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   AccountConfigurationError,
+  defaultAccountsConfigPath,
   loadAccounts,
+  readAccountDefinitions,
   type AccountDefinition,
 } from "../../src/config/accounts.js";
+
+describe("account configuration file", () => {
+  it("loads strict JSON account definitions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-config-"));
+    const filePath = join(directory, "accounts.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        accounts: [
+          {
+            accountAlias: "claude-user@example.com",
+            platform: "Claude",
+            auth: { type: "claude_profile", profile: "claude-user" },
+          },
+        ],
+      }),
+    );
+
+    try {
+      expect(readAccountDefinitions(filePath)).toEqual([
+        expect.objectContaining({
+          accountAlias: "claude-user@example.com",
+          enabled: true,
+        }),
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects missing and malformed configuration files", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-config-"));
+    const malformedPath = join(directory, "malformed.json");
+    await writeFile(malformedPath, "{not-json");
+
+    try {
+      expect(() =>
+        readAccountDefinitions(join(directory, "missing.json")),
+      ).toThrow(AccountConfigurationError);
+      expect(() => readAccountDefinitions(malformedPath)).toThrow(
+        AccountConfigurationError,
+      );
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("uses an absolute explicit path or the standard user config path", () => {
+    expect(
+      defaultAccountsConfigPath(
+        { SEAT_MONITOR_CONFIG: "/config/accounts.json" },
+        "/home/user",
+      ),
+    ).toBe("/config/accounts.json");
+    expect(defaultAccountsConfigPath({}, "/home/user")).toBe(
+      "/home/user/.config/seat-monitor/accounts.json",
+    );
+    expect(() =>
+      defaultAccountsConfigPath(
+        { SEAT_MONITOR_CONFIG: "relative.json" },
+        "/home/user",
+      ),
+    ).toThrow(AccountConfigurationError);
+  });
+});
 
 describe("loadAccounts", () => {
   it("resolves Claude credentials from the declared environment key", () => {

@@ -1,0 +1,20 @@
+{
+  "accounts": [
+    {
+      "accountAlias": "claude-personal@example.com",
+      "platform": "Claude",
+      "auth": {
+        "type": "claude_profile",
+        "profile": "claude-personal"
+      }
+    },
+    {
+      "accountAlias": "codex-personal@example.com",
+      "platform": "Codex",
+      "auth": {
+        "type": "codex_profile",
+        "profile": "codex-personal"
+      }
+    }
+  ]
+}

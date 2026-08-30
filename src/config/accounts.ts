@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -73,6 +74,12 @@ export const accountDefinitionSchema = z.union([
   codexAccessTokenDefinitionSchema,
 ]);
 
+const accountConfigurationSchema = z
+  .object({
+    accounts: z.array(accountDefinitionSchema),
+  })
+  .strict();
+
 export type AccountDefinition = z.input<typeof accountDefinitionSchema>;
 
 type LoadedAccountBase = {
@@ -129,6 +136,69 @@ export class AccountConfigurationError extends Error {
   }
 }
 
+export function defaultAccountsConfigPath(
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory = homedir(),
+): string {
+  const configured = environment.SEAT_MONITOR_CONFIG;
+  if (configured !== undefined) {
+    if (!isAbsolute(configured)) {
+      throw new AccountConfigurationError(
+        "SEAT_MONITOR_CONFIG must be an absolute path.",
+      );
+    }
+    return configured;
+  }
+
+  const platformConfigRoot =
+    process.platform === "win32" ? environment.APPDATA : undefined;
+  const configRoot =
+    environment.XDG_CONFIG_HOME ??
+    platformConfigRoot ??
+    join(homeDirectory, ".config");
+  if (!isAbsolute(configRoot)) {
+    throw new AccountConfigurationError(
+      "The account configuration root must be an absolute path.",
+    );
+  }
+  return join(configRoot, "seat-monitor", "accounts.json");
+}
+
+export function readAccountDefinitions(
+  filePath = defaultAccountsConfigPath(),
+): AccountDefinition[] {
+  let source: string;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      throw new AccountConfigurationError(
+        `Account configuration not found at ${filePath}.`,
+      );
+    }
+    throw new AccountConfigurationError(
+      `Account configuration could not be read at ${filePath}.`,
+    );
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(source);
+  } catch {
+    throw new AccountConfigurationError(
+      `Account configuration is not valid JSON: ${filePath}.`,
+    );
+  }
+
+  const parsed = accountConfigurationSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccountConfigurationError(
+      `Account configuration has an invalid structure: ${filePath}.`,
+    );
+  }
+  return parsed.data.accounts;
+}
+
 export function defaultCodexProfilesRoot(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -161,71 +231,8 @@ export function defaultClaudeProfilesRoot(
   return join(homedir(), ".local", "share", "seat-monitor", "claude");
 }
 
-/**
- * Edit this non-secret map to declare accounts. Personal Claude and Codex
- * subscriptions use isolated persistent profiles created by their provider
- * login commands. Setup/access-token modes remain available for automation
- * environments that deliberately inject credentials.
- */
-export const accountDefinitions = [
-  {
-    accountAlias: "claude-account-one@example.com",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "claude-account-one",
-    },
-    enabled: true,
-  },
-  {
-    accountAlias: "claude-account-two@example.com",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "account-two",
-    },
-    enabled: true,
-  },
-  {
-    accountAlias: "claude-account-three@example.com",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "claude-account-three",
-    },
-    enabled: true,
-  },
-  {
-    accountAlias: "claude-account-five@example.com",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "claude-account-five",
-    },
-    enabled: true,
-  },
-  {
-    accountAlias: "codex-account-four@example.com",
-    platform: "Codex",
-    auth: {
-      type: "codex_profile",
-      profile: "codex-account-four",
-    },
-    enabled: true,
-  },
-  {
-    accountAlias: "codex-account-six@example.com",
-    platform: "Codex",
-    auth: {
-      type: "codex_profile",
-      profile: "codex-account-six",
-    },
-    enabled: true,
-  },
-] as const satisfies readonly AccountDefinition[];
-
 export function loadAccounts(
-  definitions: readonly AccountDefinition[] = accountDefinitions,
+  definitions: readonly AccountDefinition[],
   environment: NodeJS.ProcessEnv = process.env,
   codexProfilesRoot = defaultCodexProfilesRoot(environment),
   claudeProfilesRoot = defaultClaudeProfilesRoot(environment),
@@ -311,4 +318,11 @@ export function loadAccounts(
       },
     };
   });
+}
+
+export function loadConfiguredAccounts(
+  environment: NodeJS.ProcessEnv = process.env,
+  configPath = defaultAccountsConfigPath(environment),
+): LoadedAccount[] {
+  return loadAccounts(readAccountDefinitions(configPath), environment);
 }

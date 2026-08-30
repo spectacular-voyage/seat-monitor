@@ -91,7 +91,7 @@ function render(snapshots) {
   if (snapshots.length === 0) {
     const row = document.createElement("tr");
     const empty = cell(
-      "No accounts are enabled. Edit src/config/accounts.ts to add one.",
+      "No accounts are enabled. Add one to your accounts.json configuration.",
       "empty",
     );
     empty.colSpan = 7;

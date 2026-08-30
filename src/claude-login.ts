@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
-  loadAccounts,
+  loadConfiguredAccounts,
   type LoadedClaudeProfileAccount,
 } from "./config/accounts.js";
 import { loginClaudeProfile } from "./services/claude-login.js";
@@ -14,7 +14,7 @@ Create or refresh the isolated Claude subscription login used by one account.
 `;
 
 function profileAccounts(): LoadedClaudeProfileAccount[] {
-  return loadAccounts().filter(
+  return loadConfiguredAccounts().filter(
     (account): account is LoadedClaudeProfileAccount =>
       account.platform === "Claude" && account.auth.type === "claude_profile",
   );

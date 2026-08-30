@@ -31,30 +31,32 @@ npm ci
 
 ## Configure accounts
 
-Edit the non-secret map in `src/config/accounts.ts`. Set `enabled: true` only for accounts you want to scan and give each account a unique profile name:
+Create `~/.config/seat-monitor/accounts.json` from `accounts.example.json`. Set `enabled: true` only for accounts you want to scan and give each account a unique profile name:
 
-```ts
-export const accountDefinitions = [
-  {
-    accountAlias: "Anthropic_Personal",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "anthropic-personal",
+```json
+{
+  "accounts": [
+    {
+      "accountAlias": "claude-personal@example.com",
+      "platform": "Claude",
+      "auth": {
+        "type": "claude_profile",
+        "profile": "claude-personal"
+      }
     },
-    enabled: true,
-  },
-  {
-    accountAlias: "Codex_Work",
-    platform: "Codex",
-    auth: {
-      type: "codex_profile",
-      profile: "codex-work",
-    },
-    enabled: true,
-  },
-] as const;
+    {
+      "accountAlias": "codex-personal@example.com",
+      "platform": "Codex",
+      "auth": {
+        "type": "codex_profile",
+        "profile": "codex-personal"
+      }
+    }
+  ]
+}
 ```
+
+Set `SEAT_MONITOR_CONFIG` to an absolute path to use another file. `XDG_CONFIG_HOME` is honored on Unix-like systems. The configuration contains aliases and profile names, not credentials; keep it private if those identifiers are sensitive.
 
 ### Set up Claude profiles
 
@@ -67,7 +69,7 @@ npm run claude:login -- --list
 Log into each account once, confirming the intended Claude identity in the browser:
 
 ```sh
-npm run claude:login -- 'claude-account-three@example.com'
+npm run claude:login -- 'claude-personal@example.com'
 ```
 
 The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
@@ -85,8 +87,7 @@ npm run codex:login -- --list
 Log into each account once, confirming the intended ChatGPT identity in the browser:
 
 ```sh
-npm run codex:login -- 'codex-account-four@example.com'
-npm run codex:login -- 'codex-account-six@example.com'
+npm run codex:login -- 'codex-personal@example.com'
 ```
 
 The command forces file-backed Codex authentication, creates the profile directory with mode `0700`, and restricts `auth.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/codex/<profile>`. Set `SEAT_MONITOR_CODEX_PROFILES_DIR` to an absolute path to use another location.
@@ -108,7 +109,7 @@ That optional mode resolves `CODEX_TOKEN_WORK` through 1Password and injects it 
 
 Claude setup-token and Codex managed-workspace access-token modes remain supported for environments that intentionally inject credentials. Claude setup-token mode verifies authentication but cannot retrieve subscription quota.
 
-Only `op://` references belong in the tracked `.env.op`; never paste a resolved token into the repository. For unattended `op run`, use a narrowly scoped 1Password service account and `OP_SERVICE_ACCOUNT_TOKEN`. Service accounts cannot access built-in Personal, Private, Employee, or default Shared vaults, so create a dedicated read-only vault for monitor items.
+Copy `.env.op.example` to a local, ignored `.env.op` when token mode is needed. Only `op://` references belong there; never paste a resolved token into the repository. For unattended `op run`, use a narrowly scoped 1Password service account and `OP_SERVICE_ACCOUNT_TOKEN`. Service accounts cannot access built-in Personal, Private, Employee, or default Shared vaults, so create a dedicated read-only vault for monitor items.
 
 ## CLI
 

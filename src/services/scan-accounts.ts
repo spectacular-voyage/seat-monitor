@@ -1,4 +1,7 @@
-import { loadAccounts, type LoadedAccount } from "../config/accounts.js";
+import {
+  loadConfiguredAccounts,
+  type LoadedAccount,
+} from "../config/accounts.js";
 import {
   quotaSnapshotSchema,
   type Platform,
@@ -102,7 +105,7 @@ export function createScanner(options: ScannerOptions): Scanner {
 
 export function createDefaultScanner(): Scanner {
   return createScanner({
-    accounts: loadAccounts(),
+    accounts: loadConfiguredAccounts(),
     providers: {
       Claude: createClaudeProvider(),
       Codex: createCodexProvider(),

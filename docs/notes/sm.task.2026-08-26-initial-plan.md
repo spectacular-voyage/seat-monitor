@@ -2,7 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
-updated: 1788056147952
+updated: 1788129916591
 created: 1787759817972
 ---
 
@@ -10,7 +10,7 @@ created: 1787759817972
 
 ## Status
 
-- Stage: implementation complete; account credentials/configuration pending
+- Stage: implementation complete; public-release hardening in progress
 - Runtime: Node.js on an active LTS release
 - Language: TypeScript 5.x in strict mode
 - Primary interfaces: CLI and a local web dashboard
@@ -70,8 +70,7 @@ Suggested project layout:
 ```text
 src/
   config/
-    accounts.ts          # non-secret account aliases, provider, env-var names
-    load-config.ts       # resolve and validate process.env at runtime
+    accounts.ts          # validate external account config and resolve profiles/env
   domain/
     quota.ts             # normalized result and error types
   services/
@@ -97,34 +96,25 @@ The provider adapters should accept injected `fetch` and clock dependencies. Thi
 
 ## Configuration and secret handling
 
-Store only account metadata, profile names, and optional environment-variable _names_ in version control. Keep personal Claude and Codex OAuth caches outside the repository in dedicated profiles. Resolve optional managed-workspace tokens only when the process starts.
+Keep account metadata, profile names, and optional environment-variable _names_ in the user's external `accounts.json`, not version control. Keep personal Claude and Codex OAuth caches outside the repository in dedicated profiles. Resolve optional managed-workspace tokens only when the process starts.
 
-```ts
-export const accounts = [
-  {
-    accountAlias: "Anthropic_Personal",
-    platform: "Claude",
-    auth: {
-      type: "claude_profile",
-      profile: "anthropic-personal",
-    },
-  },
-  {
-    accountAlias: "Codex_Personal",
-    platform: "Codex",
-    auth: {
-      type: "codex_profile",
-      profile: "codex-personal",
-    },
-  },
-] as const;
+```json
+{
+  "accounts": [
+    {
+      "accountAlias": "claude-personal@example.com",
+      "platform": "Claude",
+      "auth": { "type": "claude_profile", "profile": "claude-personal" }
+    }
+  ]
+}
 ```
 
 Operational rules:
 
 - Run the default personal-account flow directly after its one-time provider logins; no runtime secret injection is required.
 - For optional environment-token modes, launch with `op run --env-file=.env.op -- ...` and prefer a read-only service account scoped to a dedicated non-built-in vault.
-- Commit `.env.op` with `op://...` references only; never commit resolved credentials or a conventional `.env` file. Note that reference paths can reveal vault/item metadata, so use neutral item names where that metadata is sensitive.
+- Keep `.env.op` ignored and local. Commit only the neutral `.env.op.example`; never commit resolved credentials, private vault/item names, or a conventional `.env` file.
 - Add `.env`, resolved secret outputs, logs, and local artifacts to `.gitignore`.
 - Validate aliases, duplicate aliases, and required environment variables before scanning.
 - Never include tokens, authorization headers, or raw provider response bodies in logs, errors, CLI output, or API responses.
@@ -371,7 +361,7 @@ Completed on 2026-08-26:
 - Dependency-free dashboard with manual refresh, 60-second auto-refresh, accessible quota rows, and live reset countdowns.
 - 47 unit/integration tests before the final profile smoke test, strict typecheck, lint, formatting check, production build, compiled CLI/server smoke tests, dependency audit, and credential-pattern scan.
 
-Account entries are enabled selectively during setup. No live credential or usage fixture is stored. Personal Claude and Codex entries each require one provider login command per account; the resulting credential profiles stay outside the repository.
+Account entries are enabled selectively in the external user configuration. No live account identifier, credential, or usage fixture is stored in the release tree. Personal Claude and Codex entries each require one provider login command per account; the resulting credential profiles stay outside the repository.
 
 The original `429` HTTP-fixture requirement became inapplicable after Phase 0 selected local CLI/App Server contracts instead of direct provider HTTP endpoints. V1 performs no retries; provider protocol and timeout failures remain isolated and redacted.
 
