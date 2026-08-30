@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788130617156
+updated: 1788131714264
 created: 1788130408282
 ---
 
@@ -10,9 +10,9 @@ created: 1788130408282
 
 ## Decision
 
-**Current source and npm artifact: conditional GO. Current Git repository history: NO-GO for public visibility.**
+**Current source, npm artifact, and rewritten Git history: GO for public visibility. npm publication remains gated on the bootstrap controls below.**
 
-The release candidate is suitable for public distribution under its stated local-only threat model after the mandatory history cleanup and publication controls below. No resolved credential or high-confidence token pattern was found, but 13 historical commits retain personal account aliases and 1Password vault/item reference metadata. The current tree no longer contains that metadata; making the repository public without rewriting history would expose it.
+The release candidate is suitable for public distribution under its stated local-only threat model. No resolved credential or high-confidence token pattern was found. The original repository contained personal account aliases and 1Password vault/item reference metadata in historical commits; it is retained as a private archived repository and offline bundle. The replacement repository was built from rewritten history and independently cloned back from GitHub for verification.
 
 This is an engineering security review, not an independent penetration test, legal opinion, provider-terms approval, or bug bounty audit.
 
@@ -37,9 +37,9 @@ Security boundary:
 
 | Severity        | Finding                                                                                      | Disposition                                                                                                                                     |
 | --------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release blocker | Historical commits contain private account/vault metadata.                                   | Rewrite all repository history and verify from a fresh clone before changing visibility.                                                        |
 | Release blocker | The npm package does not yet exist, so trusted publishing cannot be attached.                | Bootstrap `@spectacular-voyage/seat-monitor` once with maintainer 2FA, then configure OIDC and disallow token publishing.                       |
 | Release blocker | GitHub security features are disabled while the repository is private.                       | Make public only after history cleanup, then enable/verify the settings listed below and run every security workflow.                           |
+| Resolved        | Historical commits contained private account/vault metadata.                                 | Rewrote every reachable ref, retained the original as a private archive, and verified the replacement from a new GitHub clone.                  |
 | Resolved        | Tracked source contained real account aliases; tracked `.env.op` exposed reference metadata. | Account declarations moved to external `accounts.json` mode `0600`; `.env.op` is ignored; only generic examples ship.                           |
 | Resolved        | The default npm tarball included source, tests, Dendron notes, and `.env.op`.                | A package allowlist now ships only compiled runtime, license, README, and generic examples; off-tree install smoke testing enforces it.         |
 | Resolved        | Installed npm bin shims exited silently because entry-point checks did not resolve symlinks. | Main-module detection resolves the npm shim; package smoke tests execute all user-facing CLI help paths.                                        |
@@ -70,30 +70,25 @@ Checked 2026-08-30:
 - `npm audit signatures` verifies 202 registry signatures and 65 attestations.
 - Semgrep runs 338 TypeScript/Node/security-audit rules across 61 tracked files with zero findings.
 - A high-confidence credential-pattern scan finds zero matches across all commits.
+- The replacement GitHub repository contains only sanitized `main`: 20 commits, no tags or pull refs, no historical `.env.op`, and zero private-identifier matches.
 - The npm artifact installs off-tree, contains 112 allowlisted files, excludes source/tests/notes/local config, and runs the three public CLI help paths.
 - Live configuration migration preserves all six local accounts with zero scan errors; the private external configuration is mode `0600`.
 
 ## Mandatory pre-publication runbook
 
-### 1. Rewrite private history
+### 1. Rewrite private history — completed 2026-08-30
 
-Follow [GitHub's sensitive-data removal procedure](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) from a fresh mirror clone using `git-filter-repo` 2.47 or newer.
+The rewrite followed [GitHub's sensitive-data removal procedure](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) with `git-filter-repo` 2.47.0.
 
-1. Back up the private repository and pause all pushes.
-2. Create a replacement manifest outside the clone containing every historical personal email/profile/item string. Do not commit that manifest.
-3. Remove `.env.op` from every ref and replace the private strings in every other historical file, for example:
+1. Created and verified a complete mode-`0600` Git bundle outside the repository.
+2. Removed `.env.op` from every historical ref and replaced all known personal email, profile, environment-variable, and 1Password item identifiers from an external mode-`0600` manifest.
+3. Retained the original GitHub repository, including its bot PR refs, under a renamed private archive rather than deleting it.
+4. Created the replacement `spectacular-voyage/seat-monitor` privately and pushed only rewritten `main`.
+5. Cloned the replacement back from GitHub and verified Git object integrity, 20 commits, one branch, no tags/pull refs, no `.env.op` history, zero private-identifier matches, and zero high-confidence credential-pattern matches.
+6. Re-ran the full checks, coverage suite, package smoke test, npm audits/signature verification, and Semgrep against the rewritten clone.
+7. Replaced the developer working copy with a fresh clone while preserving the ignored local `.env.op` at mode `0600` and the external account configuration at mode `0600`.
 
-   ```sh
-   git-filter-repo --sensitive-data-removal \
-     --invert-paths --path .env.op \
-     --replace-text ../seat-monitor-private-replacements.txt
-   ```
-
-4. Inspect `.git/filter-repo/changed-refs`, the first changed commits, branches, tags, and pull-request refs. There are currently no tags or pull requests, which reduces coordination cost.
-5. Force-push the rewritten mirror only after review, then discard or re-clone every old working copy so old objects cannot be reintroduced.
-6. From a new clone, repeat the history credential/metadata scan, `npm run check`, `npm run package:check`, and `npm audit signatures`.
-
-No credential rotation is indicated by this review because no resolved credential was found. Rotate immediately if the replacement audit discovers that a real token was ever committed.
+No credential rotation is indicated because both the original-history audit and rewritten-history verification found no resolved credential.
 
 ### 2. Make GitHub security controls active
 
@@ -129,4 +124,4 @@ References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 
 ## Release gate
 
-Do not change repository visibility or publish the npm package until every mandatory step above is checked off. After those steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
+The history gate is complete. Do not publish the npm package until the GitHub security activation and npm bootstrap steps are complete. After those steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
