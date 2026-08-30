@@ -187,11 +187,11 @@ export const accountDefinitions = [
     enabled: true,
   },
   {
-    accountAlias: "claude-account-four@example.com",
+    accountAlias: "claude-account-three@example.com",
     platform: "Claude",
     auth: {
       type: "claude_profile",
-      profile: "codex-account-four",
+      profile: "claude-account-three",
     },
     enabled: true,
   },

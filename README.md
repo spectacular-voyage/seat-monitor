@@ -67,7 +67,7 @@ npm run claude:login -- --list
 Log into each account once, confirming the intended Claude identity in the browser:
 
 ```sh
-npm run claude:login -- 'claude-account-four@example.com'
+npm run claude:login -- 'claude-account-three@example.com'
 ```
 
 The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
