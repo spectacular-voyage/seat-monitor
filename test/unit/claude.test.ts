@@ -125,6 +125,7 @@ describe("Claude provider", () => {
     expect(environments).toHaveLength(2);
     expect(environments[0]?.CLAUDE_CONFIG_DIR).toBe("/profiles/profile");
     expect(environments[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(environments[0]?.DISABLE_TELEMETRY).toBeUndefined();
   });
 
   it("reports a missing profile without starting Claude", async () => {

@@ -110,7 +110,8 @@ export function createClaudeProvider(
             CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
             DISABLE_AUTOUPDATER: "1",
             DISABLE_ERROR_REPORTING: "1",
-            DISABLE_TELEMETRY: "1",
+            // Claude omits the Fable quota line from /usage when
+            // DISABLE_TELEMETRY is set, so profile quota reads must not set it.
           });
         } else {
           temporaryDirectory = await mkdtemp(
