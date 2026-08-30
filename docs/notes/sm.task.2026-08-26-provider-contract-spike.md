@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788054177774
+updated: 1788129283253
 created: 1787789951052
 ---
 
@@ -127,3 +127,9 @@ On 2026-08-29, the exact `claude -p "/usage"` command was compared under stored-
 The `claude-account-three@example.com` isolated profile was then verified end to end as a Max account with all three normalized windows. Testing also established that `DISABLE_TELEMETRY=1` makes Claude omit the Fable line from `/usage`; the profile adapter therefore leaves that flag unset while retaining credential isolation, disabled auto-update, and disabled error reporting. No live percentages or reset timestamps are persisted here.
 
 Additional Max profiles established that Claude omits the reset suffix for a window at zero percent usage. The parser accepts this as an available zero-used window with `resetAt: null`; nonzero examples continue to require and parse the provider's reset timestamp.
+
+## Claude headless reliability
+
+On 2026-08-30, the `claude-account-one` profile intermittently failed the eight-second process deadline while the same `/usage` call completed successfully in isolation. A diagnostic call returned valid auth JSON and all three usage rows, but took 7.51 seconds—too close to the deadline for reliable concurrent scans. The profile and credentials were healthy.
+
+Quota reads now add Claude Code's `--safe-mode` flag. Authentication remains profile-backed, while project customizations, plugins, hooks, MCP servers, and other unrelated startup work are disabled. The strict eight-second deadline remains unchanged, and provider output parsing still fails closed.

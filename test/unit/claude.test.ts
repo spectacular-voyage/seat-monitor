@@ -94,8 +94,10 @@ describe("Claude provider", () => {
       },
     };
     const environments: NodeJS.ProcessEnv[] = [];
+    const argumentLists: string[][] = [];
     const run: RunCommand = (options) => {
       environments.push(options.environment);
+      argumentLists.push([...options.args]);
       return Promise.resolve({
         exitCode: 0,
         stdout: options.args[0] === "auth" ? authFixture : usageFixture,
@@ -126,6 +128,10 @@ describe("Claude provider", () => {
     expect(environments[0]?.CLAUDE_CONFIG_DIR).toBe("/profiles/profile");
     expect(environments[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(environments[0]?.DISABLE_TELEMETRY).toBeUndefined();
+    expect(argumentLists).toEqual([
+      ["auth", "status", "--json"],
+      ["--safe-mode", "-p", "/usage", "--no-session-persistence"],
+    ]);
   });
 
   it("reports a missing profile without starting Claude", async () => {

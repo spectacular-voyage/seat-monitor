@@ -157,7 +157,7 @@ export function createClaudeProvider(
         if (readsQuota) {
           const usageResult = await run({
             command,
-            args: ["-p", "/usage", "--no-session-persistence"],
+            args: ["--safe-mode", "-p", "/usage", "--no-session-persistence"],
             environment,
             timeoutMilliseconds: context.timeoutMilliseconds,
           });
