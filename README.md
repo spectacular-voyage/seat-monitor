@@ -18,8 +18,23 @@ Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse
 
 ## Install
 
+With npm:
+
 ```sh
 npm install --global seat-monitor
+```
+
+With pnpm 11 or 12:
+
+```sh
+pnpm add --global seat-monitor
+```
+
+If pnpm itself is not installed, [pnpm's current installation guide](https://pnpm.io/installation) uses `npx get-pnpm` for pnpm 11 or `npx get-pnpm next-12` for pnpm 12. Although pnpm 12 is stable, npm's `latest` tag still points to pnpm 11 as of 2026-08-30.
+
+Then initialize the account configuration:
+
+```sh
 seat-monitor --init-config
 ```
 
