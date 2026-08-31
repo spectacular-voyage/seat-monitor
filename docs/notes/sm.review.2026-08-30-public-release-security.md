@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788151250775
+updated: 1788190690722
 created: 1788130408282
 ---
 
@@ -53,7 +53,7 @@ Security boundary:
 
 - Credential profiles are outside the repository; login helpers enforce directory mode `0700` and credential-file mode `0600`.
 - Provider children receive an allowlisted environment rather than the parent's complete environment.
-- Provider processes have an eight-second deadline and a 1 MB combined per-stream capture bound.
+- Provider processes have a sixteen-second Claude deadline, an eight-second Codex deadline, and a 1 MB per-stream capture bound.
 - Account, provider, and public DTO inputs are runtime-validated with strict Zod schemas.
 - Upstream errors and raw bodies are not returned by CLI/API failure messages.
 - The server enforces loopback binding, a Host allowlist, Origin and `Sec-Fetch-Site` checks, `Cache-Control: no-store`, CSP, and redacted framework failures.

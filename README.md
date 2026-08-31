@@ -195,6 +195,8 @@ The server:
 - recomputes reset countdowns when each API response is serialized; and
 - redacts framework and provider errors.
 
+Account checks run in parallel with a default concurrency of eight. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
+
 `SEAT_MONITOR_PORT` can select another local port. V1 intentionally refuses non-loopback hosts because it does not implement remote authentication or TLS.
 
 ## Development

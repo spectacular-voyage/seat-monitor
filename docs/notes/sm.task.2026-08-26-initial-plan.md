@@ -2,7 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
-updated: 1788129916591
+updated: 1788190690722
 created: 1787759817972
 ---
 
@@ -320,7 +320,7 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 
 - TypeScript strict mode passes with no implicit `any` and no unchecked provider payloads.
 - Provider and public payloads are checked by shared runtime schemas at trust boundaries.
-- All account requests execute with concurrency eight, per-request timeout eight seconds, and the documented aggregate scan budget.
+- All account requests execute with concurrency eight. Codex subprocesses use an eight-second deadline; Claude subprocesses use sixteen seconds after live headless CLI latency exceeded the original bound.
 - Each configured account always has one normalized result.
 - Claude reports base and Fable usage when the verified API supplies them.
 - Codex reports every provider quota window without adding a synthetic Fable metric.
@@ -354,7 +354,7 @@ These criteria apply to the provider scope approved at the Phase 0 gate.
 Completed on 2026-08-26:
 
 - Strict TypeScript project with Zod validation at provider and public-output boundaries.
-- Isolated Claude CLI and Codex App Server adapters with per-account state, allowlisted child environments, eight-second deadlines, capped process output, and redacted failures. Personal Claude and Codex login profiles persist outside the repository so refreshed OAuth credentials survive; optional token-mode state is temporary.
+- Isolated Claude CLI and Codex App Server adapters with per-account state, allowlisted child environments, provider-specific deadlines (Claude sixteen seconds, Codex eight), capped process output, and redacted failures. Personal Claude and Codex login profiles persist outside the repository so refreshed OAuth credentials survive; optional token-mode state is temporary.
 - Stable-order scanner with concurrency eight and account-level failure isolation.
 - Pure Markdown/JSON CLI with documented `0`, `1`, and `2` exit codes.
 - Loopback Fastify API with Host/Origin checks, CSP, redacted errors, 30-second cache freshness, and scan coalescing.

@@ -1,6 +1,6 @@
 {
   "name": "seat-monitor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Multi-account Claude and Codex quota monitor",
   "license": "Apache-2.0",
@@ -43,7 +43,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-public.mjs",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run release:check && npm run build",
     "claude:login": "tsx src/claude-login.ts",
     "codex:login": "tsx src/codex-login.ts",
     "dev": "tsx watch src/server.ts",
@@ -53,6 +53,7 @@
     "package:check": "node scripts/smoke-package.mjs",
     "prepack": "npm run build",
     "quota": "tsx src/cli.ts",
+    "release:check": "node scripts/release-notes.mjs --check",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
