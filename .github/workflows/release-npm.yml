@@ -81,7 +81,9 @@ jobs:
 
       - name: Read release metadata
         id: metadata
-        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify requested historical release notes
         if: inputs.github_release_mode != 'skip' && inputs.github_release_version != ''
