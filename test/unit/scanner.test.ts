@@ -17,6 +17,18 @@ function account(alias: string, credential = "token"): LoadedAccount {
   };
 }
 
+function claudeAccount(alias: string): LoadedAccount {
+  return {
+    accountAlias: alias,
+    platform: "Claude",
+    auth: {
+      type: "claude_setup_token",
+      credentialEnv: `TOKEN_${alias.toLocaleUpperCase("en-US")}`,
+      credential: "token",
+    },
+  };
+}
+
 function success(alias: string) {
   return quotaSuccessSchema.parse({
     accountAlias: alias,
@@ -81,6 +93,28 @@ describe("account scanner", () => {
 
     expect(await scan()).toHaveLength(10);
     expect(maximumActive).toBe(3);
+  });
+
+  it("uses a longer Claude deadline while preserving the Codex bound", async () => {
+    const received = new Map<string, number>();
+    const provider: QuotaProvider = {
+      scan(loadedAccount, context) {
+        received.set(loadedAccount.accountAlias, context.timeoutMilliseconds);
+        return Promise.resolve(success(loadedAccount.accountAlias));
+      },
+    };
+    const scan = createScanner({
+      accounts: [claudeAccount("Claude"), account("Codex")],
+      providers: { Claude: provider, Codex: provider },
+    });
+
+    await scan();
+    expect(received).toEqual(
+      new Map([
+        ["Claude", 16_000],
+        ["Codex", 8_000],
+      ]),
+    );
   });
 
   it("returns missing credentials as account-level errors", async () => {

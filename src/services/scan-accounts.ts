@@ -14,6 +14,10 @@ import type { QuotaProvider } from "./provider.js";
 
 export const DEFAULT_CONCURRENCY = 8;
 export const DEFAULT_TIMEOUT_MILLISECONDS = 8_000;
+export const DEFAULT_TIMEOUT_MILLISECONDS_BY_PLATFORM = {
+  Claude: 16_000,
+  Codex: DEFAULT_TIMEOUT_MILLISECONDS,
+} as const satisfies Readonly<Record<Platform, number>>;
 
 export type Scanner = () => Promise<QuotaSnapshot[]>;
 
@@ -22,6 +26,7 @@ export type ScannerOptions = {
   providers: Readonly<Record<Platform, QuotaProvider>>;
   concurrency?: number;
   timeoutMilliseconds?: number;
+  timeoutMillisecondsByPlatform?: Partial<Readonly<Record<Platform, number>>>;
   now?: () => Date;
 };
 
@@ -56,8 +61,6 @@ async function mapWithConcurrency<T, R>(
 
 export function createScanner(options: ScannerOptions): Scanner {
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
-  const timeoutMilliseconds =
-    options.timeoutMilliseconds ?? DEFAULT_TIMEOUT_MILLISECONDS;
   const now = options.now ?? (() => new Date());
 
   return async () =>
@@ -77,6 +80,10 @@ export function createScanner(options: ScannerOptions): Scanner {
       }
 
       try {
+        const timeoutMilliseconds =
+          options.timeoutMillisecondsByPlatform?.[account.platform] ??
+          options.timeoutMilliseconds ??
+          DEFAULT_TIMEOUT_MILLISECONDS_BY_PLATFORM[account.platform];
         const snapshot = quotaSnapshotSchema.parse(
           await options.providers[account.platform].scan(account, {
             now,
