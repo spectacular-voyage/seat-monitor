@@ -29,10 +29,10 @@ function claudeAccount(alias: string): LoadedAccount {
   };
 }
 
-function success(alias: string) {
+function success(alias: string, platform: LoadedAccount["platform"] = "Codex") {
   return quotaSuccessSchema.parse({
     accountAlias: alias,
-    platform: "Codex",
+    platform,
     status: "ok",
     plan: "business",
     limits: [
@@ -100,7 +100,9 @@ describe("account scanner", () => {
     const provider: QuotaProvider = {
       scan(loadedAccount, context) {
         received.set(loadedAccount.accountAlias, context.timeoutMilliseconds);
-        return Promise.resolve(success(loadedAccount.accountAlias));
+        return Promise.resolve(
+          success(loadedAccount.accountAlias, loadedAccount.platform),
+        );
       },
     };
     const scan = createScanner({
@@ -108,7 +110,8 @@ describe("account scanner", () => {
       providers: { Claude: provider, Codex: provider },
     });
 
-    await scan();
+    const snapshots = await scan();
+    expect(snapshots.every((snapshot) => snapshot.status === "ok")).toBe(true);
     expect(received).toEqual(
       new Map([
         ["Claude", 16_000],

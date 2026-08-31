@@ -128,11 +128,15 @@ jobs:
 
       - name: Dry-run publication
         if: inputs.npm_publish_mode == 'dry-run'
-        run: npm publish --dry-run --access public --tag "${{ inputs.npm_tag }}"
+        env:
+          NPM_TAG: ${{ inputs.npm_tag }}
+        run: npm publish --dry-run --access public --tag "$NPM_TAG"
 
       - name: Publish with npm trusted publishing
         if: inputs.npm_publish_mode == 'publish'
-        run: npm publish --access public --tag "${{ inputs.npm_tag }}"
+        env:
+          NPM_TAG: ${{ inputs.npm_tag }}
+        run: npm publish --access public --tag "$NPM_TAG"
 
   github-release:
     name: ${{ inputs.github_release_mode == 'draft' && 'Draft' || 'Publish' }} GitHub Release
