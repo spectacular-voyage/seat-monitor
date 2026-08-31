@@ -1,5 +1,5 @@
 {
-  "name": "@spectacular-voyage/seat-monitor",
+  "name": "seat-monitor",
   "version": "0.1.0",
   "type": "module",
   "description": "Multi-account Claude and Codex quota monitor",
