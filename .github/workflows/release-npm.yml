@@ -26,6 +26,16 @@ on:
           - skip
           - draft
           - publish
+      github_release_version:
+        description: Version to release; defaults to package.json (for historical backfills)
+        required: false
+        default: ""
+        type: string
+      github_target:
+        description: Branch or commit for the tag; defaults to the workflow SHA
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: npm-release
@@ -72,6 +82,12 @@ jobs:
       - name: Read release metadata
         id: metadata
         run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify requested historical release notes
+        if: inputs.github_release_mode != 'skip' && inputs.github_release_version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.github_release_version }}
+        run: node scripts/release-notes.mjs --check --version "$RELEASE_VERSION"
 
   publish-npm:
     name: ${{ inputs.npm_publish_mode == 'publish' && 'Publish' || 'Dry run' }} npm package
@@ -131,15 +147,24 @@ jobs:
           persist-credentials: false
 
       - name: Render release notes
-        run: node scripts/release-notes.mjs --body > "$RUNNER_TEMP/release-notes.md"
+        env:
+          PACKAGE_VERSION: ${{ needs.verify.outputs.version }}
+          REQUESTED_VERSION: ${{ inputs.github_release_version }}
+        run: |
+          version="${REQUESTED_VERSION:-$PACKAGE_VERSION}"
+          node scripts/release-notes.mjs --body --version "$version" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.verify.outputs.version }}
           RELEASE_MODE: ${{ inputs.github_release_mode }}
-          VERSION: ${{ needs.verify.outputs.version }}
+          REQUESTED_TARGET: ${{ inputs.github_target }}
+          REQUESTED_VERSION: ${{ inputs.github_release_version }}
         run: |
-          tag="v${VERSION}"
+          version="${REQUESTED_VERSION:-$PACKAGE_VERSION}"
+          target="${REQUESTED_TARGET:-$GITHUB_SHA}"
+          tag="v${version}"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "GitHub Release ${tag} already exists"
             exit 1
@@ -147,7 +172,7 @@ jobs:
 
           args=(
             gh release create "$tag"
-            --target "$GITHUB_SHA"
+            --target "$target"
             --title "Seat Monitor ${tag}"
             --notes-file "$RUNNER_TEMP/release-notes.md"
           )
