@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 const packageMetadata = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
-const version = packageMetadata.version;
+const versionOptionIndex = process.argv.indexOf("--version");
+const requestedVersion =
+  versionOptionIndex === -1 ? undefined : process.argv[versionOptionIndex + 1];
+if (versionOptionIndex !== -1 && requestedVersion === undefined) {
+  throw new TypeError("--version requires a value.");
+}
+const version = requestedVersion ?? packageMetadata.version;
 if (
   typeof version !== "string" ||
   !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)
