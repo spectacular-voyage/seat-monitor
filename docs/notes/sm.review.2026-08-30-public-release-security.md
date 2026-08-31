@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788132482523
+updated: 1788136729458
 created: 1788130408282
 ---
 
@@ -37,7 +37,7 @@ Security boundary:
 
 | Severity        | Finding                                                                                      | Disposition                                                                                                                                     |
 | --------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release blocker | The npm package does not yet exist, so trusted publishing cannot be attached.                | Bootstrap `@spectacular-voyage/seat-monitor` once with maintainer 2FA, then configure OIDC and disallow token publishing.                       |
+| Release blocker | The npm package does not yet exist, so trusted publishing cannot be attached.                | Bootstrap the unscoped `seat-monitor` package once with maintainer 2FA, then configure OIDC and disallow token publishing.                      |
 | Resolved        | GitHub security features were disabled while the repository was private.                     | The replacement is public; security reporting is enabled and the initial CI, CodeQL, OSV, and Codecov runs succeeded.                           |
 | Resolved        | Historical commits contained private account/vault metadata.                                 | Rewrote every reachable ref, retained the original as a private archive, and verified the replacement from a new GitHub clone.                  |
 | Resolved        | Tracked source contained real account aliases; tracked `.env.op` exposed reference metadata. | Account declarations moved to external `accounts.json` mode `0600`; `.env.op` is ignored; only generic examples ship.                           |

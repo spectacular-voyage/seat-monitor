@@ -19,7 +19,7 @@ Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse
 ## Install
 
 ```sh
-npm install --global @spectacular-voyage/seat-monitor
+npm install --global seat-monitor
 seat-monitor --init-config
 ```
 
