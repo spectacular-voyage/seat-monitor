@@ -166,17 +166,29 @@ jobs:
           target="${REQUESTED_TARGET:-$GITHUB_SHA}"
           tag="v${version}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "GitHub Release ${tag} already exists"
-            exit 1
+            args=(
+              "$tag"
+              --target "$target"
+              --title "Seat Monitor ${tag}"
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+            )
+            if [ "$RELEASE_MODE" = "draft" ]; then
+              args+=(--draft)
+            else
+              args+=(--draft=false --latest)
+            fi
+            gh release edit "${args[@]}"
+          else
+            args=(
+              "$tag"
+              --target "$target"
+              --title "Seat Monitor ${tag}"
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+            )
+            if [ "$RELEASE_MODE" = "draft" ]; then
+              args+=(--draft)
+            else
+              args+=(--latest)
+            fi
+            gh release create "${args[@]}"
           fi
-
-          args=(
-            gh release create "$tag"
-            --target "$target"
-            --title "Seat Monitor ${tag}"
-            --notes-file "$RUNNER_TEMP/release-notes.md"
-          )
-          if [ "$RELEASE_MODE" = "draft" ]; then
-            args+=(--draft)
-          fi
-          "${args[@]}"
