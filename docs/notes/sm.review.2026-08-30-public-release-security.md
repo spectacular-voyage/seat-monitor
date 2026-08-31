@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788136729458
+updated: 1788151120413
 created: 1788130408282
 ---
 
@@ -106,7 +106,7 @@ CodeQL and dependency review are available without GitHub Code Security charges 
 
 ### 3. Bootstrap secure npm publishing
 
-The scoped package name is currently unclaimed. npm trusted publishing requires an existing package configuration, npm CLI 11.5.1+, Node 22.14+, and a public repository for provenance.
+The unscoped `seat-monitor` package is published and governed by the `spectacular-voyage:developers` team. npm trusted publishing requires npm CLI 11.5.1+, Node 22.14+, and a public repository for provenance.
 
 1. Confirm that the publishing maintainer belongs to the `@spectacular-voyage` npm organization and has 2FA enabled.
 2. Completed: the protected `Release npm` workflow passed in `dry-run` mode after manual environment approval, including audit, signature, test, build, package-install, unpublished-version, and registry dry-run gates.
