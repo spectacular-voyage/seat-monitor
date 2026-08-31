@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788151120413
+updated: 1788151250775
 created: 1788130408282
 ---
 
@@ -35,19 +35,19 @@ Security boundary:
 
 ## Findings
 
-| Severity        | Finding                                                                                      | Disposition                                                                                                                                     |
-| --------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release blocker | The npm package does not yet exist, so trusted publishing cannot be attached.                | Bootstrap the unscoped `seat-monitor` package once with maintainer 2FA, then configure OIDC and disallow token publishing.                      |
-| Resolved        | GitHub security features were disabled while the repository was private.                     | The replacement is public; security reporting is enabled and the initial CI, CodeQL, OSV, and Codecov runs succeeded.                           |
-| Resolved        | Historical commits contained private account/vault metadata.                                 | Rewrote every reachable ref, retained the original as a private archive, and verified the replacement from a new GitHub clone.                  |
-| Resolved        | Tracked source contained real account aliases; tracked `.env.op` exposed reference metadata. | Account declarations moved to external `accounts.json` mode `0600`; `.env.op` is ignored; only generic examples ship.                           |
-| Resolved        | The default npm tarball included source, tests, Dendron notes, and `.env.op`.                | A package allowlist now ships only compiled runtime, license, README, and generic examples; off-tree install smoke testing enforces it.         |
-| Resolved        | Installed npm bin shims exited silently because entry-point checks did not resolve symlinks. | Main-module detection resolves the npm shim; package smoke tests execute all user-facing CLI help paths.                                        |
-| Resolved        | Child-process timeout/output/protocol boundaries had weak direct coverage.                   | Direct tests now exercise success, nonzero exit, spawn failure, timeout kill, output cap, malformed JSON, and JSON-RPC error paths.             |
-| Accepted        | Provider executables are selected from `PATH`.                                               | Document as a trusted local dependency; subprocess arguments are arrays rather than shell strings.                                              |
-| Accepted        | The Claude quota contract is strict parsing of unversioned CLI text.                         | Fail closed on format changes; never fall back to scraping, private endpoints, or raw-response logging. This is primarily an availability risk. |
-| Accepted        | Loopback API exposes aliases and quota data to other local processes.                        | The product is explicitly single-user/local-only; remote binding remains refused until authentication and TLS are designed.                     |
-| Accepted        | `SEAT_MONITOR_CONFIG` intentionally accepts an absolute same-user filesystem path.           | CodeQL's three path-injection alerts were reviewed and dismissed as false positives under the local-only threat model; creation is exclusive.   |
+| Severity | Finding                                                                                      | Disposition                                                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resolved | The npm package did not exist, so trusted publishing could not be attached.                  | Published `seat-monitor@0.1.0`, granted the organization team write access, configured OIDC, and disallowed bypass-2FA tokens.                  |
+| Resolved | GitHub security features were disabled while the repository was private.                     | The replacement is public; security reporting is enabled and the initial CI, CodeQL, OSV, and Codecov runs succeeded.                           |
+| Resolved | Historical commits contained private account/vault metadata.                                 | Rewrote every reachable ref, retained the original as a private archive, and verified the replacement from a new GitHub clone.                  |
+| Resolved | Tracked source contained real account aliases; tracked `.env.op` exposed reference metadata. | Account declarations moved to external `accounts.json` mode `0600`; `.env.op` is ignored; only generic examples ship.                           |
+| Resolved | The default npm tarball included source, tests, Dendron notes, and `.env.op`.                | A package allowlist now ships only compiled runtime, license, README, and generic examples; off-tree install smoke testing enforces it.         |
+| Resolved | Installed npm bin shims exited silently because entry-point checks did not resolve symlinks. | Main-module detection resolves the npm shim; package smoke tests execute all user-facing CLI help paths.                                        |
+| Resolved | Child-process timeout/output/protocol boundaries had weak direct coverage.                   | Direct tests now exercise success, nonzero exit, spawn failure, timeout kill, output cap, malformed JSON, and JSON-RPC error paths.             |
+| Accepted | Provider executables are selected from `PATH`.                                               | Document as a trusted local dependency; subprocess arguments are arrays rather than shell strings.                                              |
+| Accepted | The Claude quota contract is strict parsing of unversioned CLI text.                         | Fail closed on format changes; never fall back to scraping, private endpoints, or raw-response logging. This is primarily an availability risk. |
+| Accepted | Loopback API exposes aliases and quota data to other local processes.                        | The product is explicitly single-user/local-only; remote binding remains refused until authentication and TLS are designed.                     |
+| Accepted | `SEAT_MONITOR_CONFIG` intentionally accepts an absolute same-user filesystem path.           | CodeQL's three path-injection alerts were reviewed and dismissed as false positives under the local-only threat model; creation is exclusive.   |
 
 ## Positive controls verified
 
@@ -73,6 +73,7 @@ Checked 2026-08-30:
 - A high-confidence credential-pattern scan finds zero matches across all commits.
 - The replacement GitHub repository contains only sanitized `main`: 20 commits, no tags or pull refs, no historical `.env.op`, and zero private-identifier matches.
 - The npm artifact installs off-tree, contains 112 allowlisted files, excludes source/tests/notes/local config, and runs the three public CLI help paths.
+- The published `seat-monitor@0.1.0` registry artifact has the expected repository, Apache-2.0 license, Node engine, four executable mappings, integrity digest, and working installed CLI.
 - Live configuration migration preserves all six local accounts with zero scan errors; the private external configuration is mode `0600`.
 
 ## Mandatory pre-publication runbook
@@ -108,21 +109,21 @@ CodeQL and dependency review are available without GitHub Code Security charges 
 
 The unscoped `seat-monitor` package is published and governed by the `spectacular-voyage:developers` team. npm trusted publishing requires npm CLI 11.5.1+, Node 22.14+, and a public repository for provenance.
 
-1. Confirm that the publishing maintainer belongs to the `@spectacular-voyage` npm organization and has 2FA enabled.
+1. Completed: the publishing maintainer is an owner of the `@spectacular-voyage` npm organization, has a verified email, and has 2FA enabled.
 2. Completed: the protected `Release npm` workflow passed in `dry-run` mode after manual environment approval, including audit, signature, test, build, package-install, unpublished-version, and registry dry-run gates.
-3. Perform the first `npm publish --access public` interactively with maintainer 2FA to create version `0.1.0`.
-4. In npm package settings, configure the GitHub Actions trusted publisher as:
+3. Completed: `seat-monitor@0.1.0` was published interactively with maintainer 2FA and installed successfully from the public registry.
+4. Completed: npm's trusted publisher is configured as:
    - organization: `spectacular-voyage`
    - repository: `seat-monitor`
    - workflow filename: `release-npm.yml`
    - environment: `npm-publish`
    - allowed action: `npm publish`
 5. The GitHub `npm-publish` environment is already configured with required maintainer approval and a `main`-only deployment policy.
-6. In npm publishing access, require 2FA and disallow tokens; revoke any obsolete automation token.
+6. Completed: npm publishing access requires 2FA and disallows bypass-2FA tokens. The OIDC publisher remains authorized under this setting.
 7. Bump the package version before each later release and publish only through `Release npm`. OIDC publication will generate npm provenance automatically for the public package/repository.
 
 References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/), [scoped public packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/), [GitHub dependency review](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-review), and [GitHub secret scanning](https://docs.github.com/en/code-security/concepts/secret-security/about-alerts).
 
 ## Release gate
 
-The history and GitHub activation gates are complete. The only remaining blocker is npm proof-of-presence: this machine has no npm login, so a maintainer must authenticate and perform the interactive first publish before trusted publishing can be attached. After the bootstrap and trusted-publisher steps, the remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
+The history, GitHub security, package publication, organization governance, and trusted-publishing gates are complete. Future versions must be bumped and published only through the protected `Release npm` workflow. The remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.
