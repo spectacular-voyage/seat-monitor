@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { QuotaSnapshot } from "../../src/domain/quota.js";
 import { SnapshotCache } from "../../src/services/snapshot-cache.js";
 
 describe("SnapshotCache", () => {
@@ -31,5 +32,22 @@ describe("SnapshotCache", () => {
     now = new Date("2026-08-26T18:00:31.000Z");
     await cache.read();
     expect(scan).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the latest cached value without refreshing stale data", async () => {
+    let now = new Date("2026-08-26T18:00:00.000Z");
+    const first: QuotaSnapshot[] = [];
+    const scan = vi.fn(() => Promise.resolve(first));
+    const cache = new SnapshotCache({
+      scan,
+      freshnessMilliseconds: 30_000,
+      now: () => now,
+    });
+
+    await cache.read();
+    now = new Date("2026-08-26T19:00:00.000Z");
+
+    await expect(cache.readLatest()).resolves.toBe(first);
+    expect(scan).toHaveBeenCalledOnce();
   });
 });

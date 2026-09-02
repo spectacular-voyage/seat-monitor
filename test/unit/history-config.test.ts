@@ -28,6 +28,22 @@ describe("history configuration", () => {
     });
   });
 
+  it("uses settings-file retention defaults below environment overrides", () => {
+    expect(
+      readHistoryConfiguration(
+        {
+          XDG_STATE_HOME: "/state",
+          SEAT_MONITOR_HISTORY_RAW_DAYS: "14",
+        },
+        { rawRetentionDays: 7, retentionDays: 180 },
+      ),
+    ).toEqual({
+      filePath: "/state/seat-monitor/history.sqlite3",
+      rawRetentionDays: 14,
+      retentionDays: 180,
+    });
+  });
+
   it("rejects relative paths and inverted retention", () => {
     expect(() =>
       readHistoryConfiguration({ SEAT_MONITOR_HISTORY_PATH: "history.db" }),

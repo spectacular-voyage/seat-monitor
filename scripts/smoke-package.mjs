@@ -46,6 +46,7 @@ try {
     "dist/server.js",
     "dist/public/index.html",
     "accounts.example.json",
+    "settings.example.json",
     ".env.op.example",
     "README.md",
     "LICENSE",

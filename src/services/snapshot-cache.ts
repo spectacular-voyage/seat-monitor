@@ -8,6 +8,10 @@ export class SnapshotCache {
   #cached: { snapshots: QuotaSnapshot[]; cachedAt: number } | null = null;
   #inFlight: Promise<QuotaSnapshot[]> | null = null;
 
+  public get hasSnapshot(): boolean {
+    return this.#cached !== null;
+  }
+
   public constructor(options: {
     scan: Scanner;
     freshnessMilliseconds: number;
@@ -44,5 +48,15 @@ export class SnapshotCache {
         this.#inFlight = null;
       });
     return this.#inFlight;
+  }
+
+  public async readLatest(): Promise<QuotaSnapshot[]> {
+    if (this.#inFlight !== null) {
+      return this.#inFlight;
+    }
+    if (this.#cached !== null) {
+      return this.#cached.snapshots;
+    }
+    return this.read();
   }
 }

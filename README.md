@@ -184,7 +184,7 @@ Start the local server:
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. The dashboard refreshes every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Range controls cover 24 hours, 7 days, 30 days, and 90 days.
+Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Range controls cover 24 hours, 7 days, 30 days, and 90 days.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
@@ -207,18 +207,49 @@ Raw retention cannot exceed total retention. A history database failure does not
 
 Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Exhaustion timestamps are estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
 
+### Server settings and scheduled scans
+
+Server settings are optional. Seat Monitor reads `$XDG_CONFIG_HOME/seat-monitor/settings.json`, falling back to `~/.config/seat-monitor/settings.json`. Set `SEAT_MONITOR_SETTINGS` to another absolute path. A missing file preserves the defaults.
+
+Copy the packaged `settings.example.json` or create a private file with this shape:
+
+```json
+{
+  "scanIntervalSeconds": 60,
+  "scanOnStartup": true,
+  "port": 3000,
+  "history": {
+    "rawRetentionDays": 30,
+    "retentionDays": 365
+  }
+}
+```
+
+The scan interval accepts 30 through 3600 seconds. Scheduling is completion-based: Seat Monitor finishes a fleet scan, waits the configured interval, and then starts the next scan. Slow provider checks therefore never accumulate overlapping scheduled work. A manual dashboard refresh coalesces with an in-flight scan and restarts the countdown.
+
+Environment variables override the settings file:
+
+- `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
+- `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
+- `SEAT_MONITOR_PORT`
+- `SEAT_MONITOR_HISTORY_RAW_DAYS`
+- `SEAT_MONITOR_HISTORY_RETENTION_DAYS`
+
+The settings file cannot enable remote listening. `SEAT_MONITOR_HOST` remains compatibility-only and still accepts only `127.0.0.1` or `localhost`.
+
 The server:
 
 - binds to loopback only;
 - validates Host, Origin, and cross-site browser headers;
 - applies a restrictive Content Security Policy;
+- continues scheduled scans while the server process is running;
 - coalesces simultaneous scans and caches snapshots for 30 seconds;
 - recomputes reset countdowns when each API response is serialized; and
 - redacts framework and provider errors.
 
 Account checks run in parallel with a default concurrency of eight. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
 
-`SEAT_MONITOR_PORT` can select another local port. V1 intentionally refuses non-loopback hosts because it does not implement remote authentication or TLS.
+An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. The application itself intentionally refuses non-loopback hosts because it does not implement remote authentication or TLS.
 
 ## Development
 
