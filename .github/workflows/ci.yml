@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   quality:
-    name: Node 24 LTS
+    name: Node 24
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
