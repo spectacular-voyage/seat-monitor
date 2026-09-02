@@ -10,6 +10,11 @@ import Fastify, {
 import { z } from "zod";
 
 import { historyScansSchema } from "./domain/history.js";
+import {
+  DEFAULT_SERVER_PORT,
+  readServerSettings,
+  type ServerSettings,
+} from "./config/server-settings.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
 import { createRecordingScanner } from "./history/recording-scanner.js";
 import {
@@ -23,10 +28,11 @@ import {
   type Scanner,
 } from "./services/scan-accounts.js";
 import { SnapshotCache } from "./services/snapshot-cache.js";
+import { ScanScheduler } from "./services/scan-scheduler.js";
 import { isMainModule } from "./entry-point.js";
 
 export const DEFAULT_HOST = "127.0.0.1";
-export const DEFAULT_PORT = 3_000;
+export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 
 const refreshQuerySchema = z
@@ -67,6 +73,10 @@ export type ServerOptions = {
   port?: number;
   assets?: DashboardAssets;
   history?: HistoryService;
+  scheduler?: {
+    intervalMilliseconds: number;
+    scanOnStartup: boolean;
+  };
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
@@ -163,6 +173,13 @@ export async function buildServer(
       options.freshnessMilliseconds ?? DEFAULT_FRESHNESS_MILLISECONDS,
     now,
   });
+  const scheduler =
+    options.scheduler === undefined
+      ? null
+      : new ScanScheduler({
+          refresh: () => cache.read(true),
+          ...options.scheduler,
+        });
   const server = Fastify({ logger: false });
 
   server.addHook("onRequest", async (request, reply) => {
@@ -228,7 +245,16 @@ export async function buildServer(
   });
   server.get("/api/quota", async (request, reply) => {
     const query = refreshQuerySchema.parse(request.query);
-    const snapshots = await cache.read(query.refresh === "true");
+    const forceRefresh = query.refresh === "true";
+    const hadSnapshot = cache.hasSnapshot;
+    const snapshots = await (forceRefresh
+      ? cache.read(true)
+      : scheduler === null
+        ? cache.read()
+        : cache.readLatest());
+    if (forceRefresh || (!hadSnapshot && scheduler !== null)) {
+      scheduler?.restartCountdown();
+    }
     reply.header("Cache-Control", "no-store");
     return toPublicSnapshots(snapshots, now().getTime());
   });
@@ -307,31 +333,40 @@ export async function buildServer(
     });
   });
 
-  if (options.history !== undefined) {
-    server.addHook("onClose", () => {
+  if (options.history !== undefined || scheduler !== null) {
+    server.addHook("onClose", async () => {
+      await scheduler?.stop();
       options.history?.close();
     });
   }
 
   await server.ready();
+  scheduler?.start();
   return server;
 }
 
-function readServerConfiguration(): { host: string; port: number } {
+function readServerConfiguration(settings: ServerSettings): {
+  host: string;
+  port: number;
+} {
   const host = process.env.SEAT_MONITOR_HOST ?? DEFAULT_HOST;
-  const portText = process.env.SEAT_MONITOR_PORT ?? String(DEFAULT_PORT);
-  const port = Number(portText);
-  if (!Number.isInteger(port)) {
-    throw new TypeError("SEAT_MONITOR_PORT must be an integer.");
-  }
-  return { host, port };
+  return { host, port: settings.port };
 }
 
 async function main(): Promise<void> {
-  const configuration = readServerConfiguration();
+  const settings = readServerSettings();
+  const configuration = readServerConfiguration(settings);
   const server = await buildServer({
     ...configuration,
-    history: createDefaultHistoryService(),
+    history: createDefaultHistoryService(
+      process.env,
+      () => new Date(),
+      settings.history,
+    ),
+    scheduler: {
+      intervalMilliseconds: settings.scanIntervalSeconds * 1_000,
+      scanOnStartup: settings.scanOnStartup,
+    },
   });
 
   const shutdown = async (): Promise<void> => {
@@ -344,7 +379,12 @@ async function main(): Promise<void> {
     void shutdown();
   });
 
-  await server.listen(configuration);
+  try {
+    await server.listen(configuration);
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
   process.stderr.write(
     `Seat Monitor listening on http://${configuration.host}:${String(configuration.port)}\n`,
   );

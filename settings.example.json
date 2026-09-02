@@ -1,0 +1,9 @@
+{
+  "scanIntervalSeconds": 60,
+  "scanOnStartup": true,
+  "port": 3000,
+  "history": {
+    "rawRetentionDays": 30,
+    "retentionDays": 365
+  }
+}

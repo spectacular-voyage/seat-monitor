@@ -16,6 +16,7 @@ This is the root of your dendron vault. If you decide to publish your entire vau
 - [[sm.task.2026-08-26-provider-contract-spike]]
 - [[sm.task.2026-08-29-cli-output-rework]]
 - [[sm.task.2026-09-02-historical-quota-analytics]]
+- [[sm.task.2026-09-02-server-scheduler-settings]]
 - [[sm.review.2026-08-30-public-release-security]]
 
 ## Lookup

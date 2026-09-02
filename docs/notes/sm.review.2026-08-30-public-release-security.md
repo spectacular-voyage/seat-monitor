@@ -139,6 +139,8 @@ The findings are accepted and dismissed as documented false positives under the 
 
 This review does not authorize remote configuration of the history path. Any future settings write API must preserve absolute-path validation, loopback controls, and the same-user boundary or undergo a new security review.
 
+The server-scheduler follow-up adds an optional absolute `SEAT_MONITOR_SETTINGS` read path under the same boundary. The default remains below the private Seat Monitor configuration directory, the file is strict-JSON validated, and the application does not write settings or accept settings over HTTP. A future web editor remains subject to the new-review requirement above.
+
 ## Release gate
 
 The history, GitHub security, package publication, organization governance, and trusted-publishing gates are complete. Future versions must be bumped and published only through the protected `Release npm` workflow. The remaining accepted risks are explicit consequences of a local CLI that delegates authentication and quota access to installed provider CLIs, not undisclosed release blockers.

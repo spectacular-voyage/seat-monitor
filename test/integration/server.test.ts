@@ -107,6 +107,62 @@ describe("HTTP server", () => {
     expect(scan).toHaveBeenCalledOnce();
   });
 
+  it("starts scheduled scans without an HTTP client", async () => {
+    const scan = vi.fn(() => Promise.resolve([snapshot()]));
+    const server = await buildServer({
+      assets,
+      scan,
+      scheduler: {
+        intervalMilliseconds: 60_000,
+        scanOnStartup: true,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(scan).toHaveBeenCalledOnce();
+    });
+    await server.close();
+  });
+
+  it("uses scheduled cache reads instead of creating a dashboard polling loop", async () => {
+    let now = new Date("2026-08-26T18:00:00.000Z");
+    const scan = vi.fn(() => Promise.resolve([snapshot()]));
+    const server = await buildServer({
+      assets,
+      scan,
+      now: () => now,
+      scheduler: {
+        intervalMilliseconds: 60_000,
+        scanOnStartup: false,
+      },
+    });
+
+    const initial = await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    now = new Date("2026-08-26T18:00:31.000Z");
+    const staleButScheduled = await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    const manual = await server.inject({
+      method: "GET",
+      url: "/api/quota?refresh=true",
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect([
+      initial.statusCode,
+      staleButScheduled.statusCode,
+      manual.statusCode,
+    ]).toEqual([200, 200, 200]);
+    expect(scan).toHaveBeenCalledTimes(2);
+  });
+
   it("records actual scans and exposes validated historical APIs", async () => {
     const now = "2026-08-26T18:00:01.000Z";
     const historyService = history(now);

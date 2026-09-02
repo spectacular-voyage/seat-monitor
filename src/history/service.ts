@@ -90,10 +90,14 @@ export class HistoryService {
 export function createDefaultHistoryService(
   environment: NodeJS.ProcessEnv = process.env,
   now: () => Date = () => new Date(),
+  defaults: {
+    rawRetentionDays?: number;
+    retentionDays?: number;
+  } = {},
 ): HistoryService {
   try {
     const store = openSqliteHistoryStore(
-      readHistoryConfiguration(environment),
+      readHistoryConfiguration(environment, defaults),
       {
         now,
       },

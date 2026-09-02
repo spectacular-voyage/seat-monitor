@@ -59,15 +59,19 @@ export function defaultHistoryDatabasePath(
 
 export function readHistoryConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
+  defaults: {
+    rawRetentionDays?: number;
+    retentionDays?: number;
+  } = {},
 ): HistoryConfiguration {
   const rawRetentionDays = positiveInteger(
     environment.SEAT_MONITOR_HISTORY_RAW_DAYS,
-    DEFAULT_RAW_RETENTION_DAYS,
+    defaults.rawRetentionDays ?? DEFAULT_RAW_RETENTION_DAYS,
     "SEAT_MONITOR_HISTORY_RAW_DAYS",
   );
   const retentionDays = positiveInteger(
     environment.SEAT_MONITOR_HISTORY_RETENTION_DAYS,
-    DEFAULT_HISTORY_RETENTION_DAYS,
+    defaults.retentionDays ?? DEFAULT_HISTORY_RETENTION_DAYS,
     "SEAT_MONITOR_HISTORY_RETENTION_DAYS",
   );
   if (rawRetentionDays > retentionDays) {

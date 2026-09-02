@@ -30,6 +30,7 @@
   "files": [
     "dist/",
     "accounts.example.json",
+    "settings.example.json",
     ".env.op.example",
     "README.md",
     "LICENSE"
