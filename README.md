@@ -42,7 +42,7 @@ The package exposes `seat-monitor`, `seat-monitor-server`, `seat-monitor-claude-
 
 ## Prerequisites
 
-- Node.js 22 or newer
+- Node.js 24 LTS or newer
 - 1Password CLI (`op`) only when using optional environment-token modes
 - Claude Code CLI 2.1.251 or newer for enabled Claude accounts
 - Codex CLI with App Server support for enabled Codex accounts
@@ -184,7 +184,28 @@ Start the local server:
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. The dashboard refreshes every 60 seconds and has a manual refresh control. `GET /api/quota` returns the same runtime-validated array as CLI JSON mode.
+Open <http://127.0.0.1:3000>. The dashboard refreshes every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Range controls cover 24 hours, 7 days, 30 days, and 90 days.
+
+`GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
+
+- `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
+- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations.
+
+Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
+
+### Local history
+
+Successful and failed normalized account snapshots are recorded by both the installed CLI and server. The default SQLite database is `$XDG_STATE_HOME/seat-monitor/history.sqlite3`, falling back to `~/.local/state/seat-monitor/history.sqlite3`. It is created outside the repository with private directory/file modes where supported.
+
+Defaults retain raw scans for 30 days and hourly rollups plus reset events for 365 days. Maintenance runs at startup and at most daily. Configure history with:
+
+- `SEAT_MONITOR_HISTORY_PATH`: absolute SQLite database path;
+- `SEAT_MONITOR_HISTORY_RAW_DAYS`: raw scan retention, from 1 to 3650 days; and
+- `SEAT_MONITOR_HISTORY_RETENTION_DAYS`: total rollup/reset retention, from 1 to 3650 days.
+
+Raw retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
+
+Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Exhaustion timestamps are estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
 
 The server:
 

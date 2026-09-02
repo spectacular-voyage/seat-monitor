@@ -39,9 +39,10 @@ describe("quota report derivation", () => {
   it("keeps Spark visible but excludes it from USE and WATCH", () => {
     const result = report([codexSnapshotWithSpark()]);
 
-    expect(result.accounts[0]?.rows.map((row) => row.label)).toContain(
+    expect(result.accounts[0]?.rows.map((row) => row.label)).toEqual([
+      "Codex primary",
       "Spark primary",
-    );
+    ]);
     expect(result.use).toEqual(
       expect.objectContaining({
         limitLabel: "Codex primary",

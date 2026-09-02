@@ -2,6 +2,7 @@
 id: mo67eop5dzh45hkmnw1t6xf
 title: 2026 08 26 Initial Plan
 desc: Initial delivery plan for the multi-account Claude and Codex quota monitor
+status: COMPLETED
 updated: 1788190690722
 created: 1787759817972
 ---

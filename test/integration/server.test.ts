@@ -4,6 +4,12 @@ import {
   publicQuotaArraySchema,
   quotaSuccessSchema,
 } from "../../src/domain/quota.js";
+import {
+  historyAnalyticsSchema,
+  historyScansSchema,
+} from "../../src/domain/history.js";
+import { HistoryService } from "../../src/history/service.js";
+import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
 import { buildServer } from "../../src/server.js";
 
 const assets = {
@@ -34,6 +40,15 @@ function snapshot() {
 }
 
 const allowedHeaders = { host: "127.0.0.1:3000" };
+
+function history(now: string): HistoryService {
+  return new HistoryService(
+    openSqliteHistoryStore(
+      { filePath: ":memory:", rawRetentionDays: 30, retentionDays: 365 },
+      { now: () => new Date(now) },
+    ),
+  );
+}
 
 describe("HTTP server", () => {
   it("serves the shared public DTO with fresh countdowns and no-store", async () => {
@@ -90,6 +105,95 @@ describe("HTTP server", () => {
       200, 200,
     ]);
     expect(scan).toHaveBeenCalledOnce();
+  });
+
+  it("records actual scans and exposes validated historical APIs", async () => {
+    const now = "2026-08-26T18:00:01.000Z";
+    const historyService = history(now);
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([snapshot()]),
+      history: historyService,
+      now: () => new Date(now),
+    });
+
+    const quota = await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    const cachedQuota = await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    const scans = await server.inject({
+      method: "GET",
+      url: "/api/history/scans",
+      headers: allowedHeaders,
+    });
+    const analytics = await server.inject({
+      method: "GET",
+      url: "/api/history/analytics",
+      headers: allowedHeaders,
+    });
+
+    expect(quota.statusCode).toBe(200);
+    expect(cachedQuota.statusCode).toBe(200);
+    expect(scans.statusCode).toBe(200);
+    expect(scans.headers["cache-control"]).toBe("no-store");
+    expect(historyScansSchema.parse(scans.json()).runs).toHaveLength(1);
+    const analyticsPayload = historyAnalyticsSchema.parse(analytics.json());
+    expect(analyticsPayload.accounts[0]).toEqual(
+      expect.objectContaining({
+        accountAlias: "Codex_Work",
+        platform: "Codex",
+      }),
+    );
+    expect(analyticsPayload.accounts[0]?.limits[0]?.projection.status).toBe(
+      "insufficient_history",
+    );
+    await server.close();
+  });
+
+  it("bounds historical queries and redacts unavailable history", async () => {
+    const unavailableServer = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+    });
+    const unavailable = await unavailableServer.inject({
+      method: "GET",
+      url: "/api/history/analytics",
+      headers: allowedHeaders,
+    });
+    await unavailableServer.close();
+
+    const boundedServer = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      history: history("2026-01-01T00:00:00.000Z"),
+    });
+    const invalid = await boundedServer.inject({
+      method: "GET",
+      url: "/api/history/scans?from=2025-01-01T00%3A00%3A00.000Z&to=2026-01-01T00%3A00%3A00.000Z",
+      headers: allowedHeaders,
+    });
+    await boundedServer.close();
+
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json()).toEqual({
+      error: {
+        code: "history_unavailable",
+        message: "Historical quota data is unavailable.",
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toEqual({
+      error: {
+        code: "invalid_request",
+        message: "Request parameters are invalid.",
+      },
+    });
   });
 
   it("rejects invalid hosts and cross-site browser requests", async () => {
