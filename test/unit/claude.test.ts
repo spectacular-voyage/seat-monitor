@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import type { LoadedAccount } from "../../src/config/accounts.js";
-import { createClaudeProvider } from "../../src/services/claude.js";
+import {
+  createClaudeProvider,
+  managedMcpIsConfigured,
+} from "../../src/services/claude.js";
 import type { RunCommand } from "../../src/services/process.js";
 
 const account: LoadedAccount = {
@@ -15,6 +18,43 @@ const account: LoadedAccount = {
     credential: "test-token",
   },
 };
+
+describe("managed MCP detection", () => {
+  it.each([
+    ["darwin", "/Library/Application Support/ClaudeCode/managed-mcp.json"],
+    ["linux", "/etc/claude-code/managed-mcp.json"],
+    ["win32", "C:\\Program Files\\ClaudeCode\\managed-mcp.json"],
+  ] as const)("checks the documented %s path", async (platform, expected) => {
+    let receivedPath: string | undefined;
+
+    const configured = await managedMcpIsConfigured(platform, (filePath) => {
+      receivedPath = filePath;
+      return Promise.resolve();
+    });
+
+    expect(configured).toBe(true);
+    expect(receivedPath).toBe(expected);
+  });
+
+  it("reports an absent managed MCP file", async () => {
+    const configured = await managedMcpIsConfigured("linux", () =>
+      Promise.reject(new Error("missing")),
+    );
+
+    expect(configured).toBe(false);
+  });
+
+  it("skips unsupported platform paths", async () => {
+    let checkCalled = false;
+    const configured = await managedMcpIsConfigured("aix", () => {
+      checkCalled = true;
+      return Promise.resolve();
+    });
+
+    expect(configured).toBe(false);
+    expect(checkCalled).toBe(false);
+  });
+});
 
 describe("Claude provider", () => {
   it("reports plan and explicit unsupported quota metrics", async () => {
@@ -107,6 +147,7 @@ describe("Claude provider", () => {
     const provider = createClaudeProvider({
       run,
       profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(false),
     });
 
     const snapshot = await provider.scan(profileAccount, {
@@ -138,6 +179,50 @@ describe("Claude provider", () => {
         "/usage",
         "--no-session-persistence",
       ],
+    ]);
+  });
+
+  it("preserves an enterprise-managed MCP configuration", async () => {
+    const authFixture = await readFile(
+      new URL("../fixtures/claude-auth-status.json", import.meta.url),
+      "utf8",
+    );
+    const usageFixture = await readFile(
+      new URL("../fixtures/claude-usage.txt", import.meta.url),
+      "utf8",
+    );
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-enterprise@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "enterprise",
+        claudeConfigDir: "/profiles/enterprise",
+      },
+    };
+    const argumentLists: string[][] = [];
+    const provider = createClaudeProvider({
+      profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(true),
+      run: (options) => {
+        argumentLists.push([...options.args]);
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: options.args[0] === "auth" ? authFixture : usageFixture,
+          stderr: "",
+        });
+      },
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-09-02T18:00:00.000Z"),
+      timeoutMilliseconds: 16_000,
+    });
+
+    expect(snapshot.status).toBe("ok");
+    expect(argumentLists).toEqual([
+      ["auth", "status", "--json"],
+      ["--setting-sources", "", "-p", "/usage", "--no-session-persistence"],
     ]);
   });
 

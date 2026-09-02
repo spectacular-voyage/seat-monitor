@@ -47,6 +47,7 @@ export type ClaudeProviderDependencies = {
   command?: string;
   run?: RunCommand;
   profileIsReady?: (claudeConfigDir: string) => Promise<boolean>;
+  managedMcpIsConfigured?: () => Promise<boolean>;
 };
 
 async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
@@ -55,6 +56,41 @@ async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
       join(claudeConfigDir, ".credentials.json"),
       constants.R_OK | constants.W_OK,
     );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type CheckManagedMcpPath = (filePath: string) => Promise<void>;
+
+const checkManagedMcpPath: CheckManagedMcpPath = (filePath) =>
+  access(filePath, constants.F_OK);
+
+export async function managedMcpIsConfigured(
+  platform: NodeJS.Platform = process.platform,
+  checkPath: CheckManagedMcpPath = checkManagedMcpPath,
+): Promise<boolean> {
+  let filePath: string | null;
+  switch (platform) {
+    case "darwin":
+      filePath = "/Library/Application Support/ClaudeCode/managed-mcp.json";
+      break;
+    case "linux":
+      filePath = "/etc/claude-code/managed-mcp.json";
+      break;
+    case "win32":
+      filePath = "C:\\Program Files\\ClaudeCode\\managed-mcp.json";
+      break;
+    default:
+      filePath = null;
+  }
+
+  if (filePath === null) {
+    return false;
+  }
+  try {
+    await checkPath(filePath);
     return true;
   } catch {
     return false;
@@ -79,6 +115,8 @@ export function createClaudeProvider(
   const command = dependencies.command ?? "claude";
   const run = dependencies.run ?? runCommand;
   const isProfileReady = dependencies.profileIsReady ?? profileIsReady;
+  const hasManagedMcpConfig =
+    dependencies.managedMcpIsConfigured ?? managedMcpIsConfigured;
 
   return {
     async scan(account, context) {
@@ -155,16 +193,14 @@ export function createClaudeProvider(
         let limits = unsupportedClaudeLimits;
         let observedAt = context.now();
         if (readsQuota) {
+          const usageArguments = ["--setting-sources", ""];
+          if (!(await hasManagedMcpConfig())) {
+            usageArguments.push("--strict-mcp-config");
+          }
+          usageArguments.push("-p", "/usage", "--no-session-persistence");
           const usageResult = await run({
             command,
-            args: [
-              "--setting-sources",
-              "",
-              "--strict-mcp-config",
-              "-p",
-              "/usage",
-              "--no-session-persistence",
-            ],
+            args: usageArguments,
             environment,
             timeoutMilliseconds: context.timeoutMilliseconds,
           });
