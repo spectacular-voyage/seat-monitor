@@ -101,7 +101,7 @@ export function createClaudeProvider(
             return createFailureSnapshot(
               account,
               "missing_credential",
-              `Claude profile ${account.auth.profile} is not logged in. Run the claude:login command for this account.`,
+              `Claude profile ${account.auth.profile} is not logged in. Run: seat-monitor-claude-login '${account.accountAlias}'`,
               context.now().toISOString(),
             );
           }
@@ -157,7 +157,14 @@ export function createClaudeProvider(
         if (readsQuota) {
           const usageResult = await run({
             command,
-            args: ["--safe-mode", "-p", "/usage", "--no-session-persistence"],
+            args: [
+              "--setting-sources",
+              "",
+              "--strict-mcp-config",
+              "-p",
+              "/usage",
+              "--no-session-persistence",
+            ],
             environment,
             timeoutMilliseconds: context.timeoutMilliseconds,
           });

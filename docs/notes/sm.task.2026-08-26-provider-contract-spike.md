@@ -2,7 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
-updated: 1788190482811
+updated: 1788277157501
 created: 1787789951052
 ---
 
@@ -132,4 +132,6 @@ Additional Max profiles established that Claude omits the reset suffix for a win
 
 On 2026-08-30, the `claude-account-one` profile intermittently failed the eight-second process deadline while the same `/usage` call completed successfully in isolation. A diagnostic call returned valid auth JSON and all three usage rows, but took 7.51 seconds—too close to the deadline for reliable concurrent scans. The profile and credentials were healthy.
 
-Quota reads now add Claude Code's `--safe-mode` flag. Authentication remains profile-backed, while project customizations, plugins, hooks, MCP servers, and other unrelated startup work are disabled. A later recurrence on two healthy profiles established that eight seconds still leaves too little margin for transient provider latency. Claude subprocesses therefore use a sixteen-second deadline while Codex retains eight seconds. Accounts continue to scan in parallel with concurrency eight, and provider output parsing still fails closed.
+Quota reads initially added Claude Code's `--safe-mode` flag. Authentication remained profile-backed, while project customizations, plugins, hooks, MCP servers, and other unrelated startup work were disabled. A later recurrence on two healthy profiles established that eight seconds still leaves too little margin for transient provider latency. Claude subprocesses therefore use a sixteen-second deadline while Codex retains eight seconds. Accounts continue to scan in parallel with concurrency eight, and provider output parsing still fails closed.
+
+On 2026-09-01, Claude Code 2.1.252 returned only the subscription header under `--safe-mode` for two healthy Max profiles, omitting every quota window while exiting successfully. The same profiles returned complete quota output without safe mode. The quota command now uses `--setting-sources "" --strict-mcp-config` instead: user, project, and local settings plus configured MCP servers remain isolated, and all four tested profiles returned complete quota output in 0.8–1.3 seconds.

@@ -130,7 +130,14 @@ describe("Claude provider", () => {
     expect(environments[0]?.DISABLE_TELEMETRY).toBeUndefined();
     expect(argumentLists).toEqual([
       ["auth", "status", "--json"],
-      ["--safe-mode", "-p", "/usage", "--no-session-persistence"],
+      [
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "-p",
+        "/usage",
+        "--no-session-persistence",
+      ],
     ]);
   });
 
@@ -162,6 +169,9 @@ describe("Claude provider", () => {
       throw new TypeError("Expected a profile error.");
     }
     expect(snapshot.error.code).toBe("missing_credential");
+    expect(snapshot.error.message).toBe(
+      "Claude profile profile is not logged in. Run: seat-monitor-claude-login 'claude-profile@example.com'",
+    );
     expect(runCalled).toBe(false);
   });
 });
