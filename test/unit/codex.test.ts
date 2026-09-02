@@ -132,6 +132,9 @@ describe("normalizeCodexResult", () => {
       throw new TypeError("Expected a profile error.");
     }
     expect(snapshot.error.code).toBe("missing_credential");
+    expect(snapshot.error.message).toBe(
+      "Codex profile personal is not logged in. Run: seat-monitor-codex-login 'codex-personal@example.com'",
+    );
     expect(readCalled).toBe(false);
   });
 });

@@ -98,7 +98,7 @@ seat-monitor-claude-login 'claude-personal@example.com'
 
 The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
 
-The monitor combines `claude auth status --json` with zero-token `claude --safe-mode -p "/usage"` output. Safe mode retains profile authentication while skipping project customizations, plugins, hooks, and MCP startup that are irrelevant to a quota read. Treat `.credentials.json` like a password and never place a profile inside the repository.
+The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. These flags avoid unrelated hooks, plugins, and MCP startup without suppressing quota details on some profiles. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
 ### Set up Codex Pro profiles
 

@@ -167,7 +167,7 @@ export function createCodexProvider(
             return createFailureSnapshot(
               account,
               "missing_credential",
-              `Codex profile ${account.auth.profile} is not logged in. Run the codex:login command for this account.`,
+              `Codex profile ${account.auth.profile} is not logged in. Run: seat-monitor-codex-login '${account.accountAlias}'`,
               context.now().toISOString(),
             );
           }
