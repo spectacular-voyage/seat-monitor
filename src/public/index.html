@@ -12,10 +12,10 @@
     <main class="shell">
       <header class="masthead">
         <div>
-          <p class="eyebrow">AI account telemetry</p>
+          <p class="eyebrow">Local quota telemetry</p>
           <h1>Seat Monitor</h1>
           <p class="lede">
-            Claude and Codex limits, without credential sprawl.
+            Current headroom, historical pace, and what resets first.
           </p>
         </div>
         <button id="refresh" class="refresh" type="button">
@@ -23,6 +23,42 @@
           Refresh
         </button>
       </header>
+
+      <section class="strategy" aria-labelledby="strategy-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">At a glance</p>
+            <h2 id="strategy-heading">Capacity now</h2>
+          </div>
+          <p id="connection-status" class="connection" role="status">
+            Connecting…
+          </p>
+        </div>
+        <div class="strategy-grid">
+          <article id="general-strategy" class="strategy-card">
+            <span class="strategy-label">General work</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">Current headroom will appear here.</p>
+          </article>
+          <article id="fable-strategy" class="strategy-card">
+            <span class="strategy-label">Fable work</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">
+              Nested weekly capacity will appear here.
+            </p>
+          </article>
+          <article id="watch-strategy" class="strategy-card">
+            <span class="strategy-label">Fleet watch</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">
+              The tightest account-wide limit will appear here.
+            </p>
+          </article>
+        </div>
+        <div id="fleet-capacity" class="fleet-capacity" aria-live="polite">
+          <p class="fleet-loading">Loading fleet capacity…</p>
+        </div>
+      </section>
 
       <section class="summary" aria-label="Quota summary">
         <article>
@@ -38,48 +74,46 @@
           <strong id="error-count">—</strong>
         </article>
         <article>
-          <span class="summary-label">Last checked</span>
-          <strong id="last-checked">Waiting…</strong>
+          <span class="summary-label">History</span>
+          <strong id="history-status">Waiting…</strong>
         </article>
       </section>
 
-      <section class="panel" aria-labelledby="quota-heading">
-        <div class="panel-heading">
+      <section class="accounts" aria-labelledby="accounts-heading">
+        <div class="section-heading accounts-heading">
           <div>
-            <p class="eyebrow">Live snapshot</p>
-            <h2 id="quota-heading">Quota windows</h2>
+            <p class="eyebrow">Usage history</p>
+            <h2 id="accounts-heading">Burndown history</h2>
           </div>
-          <p id="connection-status" class="connection" role="status">
-            Connecting…
-          </p>
+          <div
+            id="range-controls"
+            class="range-controls"
+            aria-label="History range"
+          >
+            <button type="button" data-range-hours="24">24h</button>
+            <button type="button" data-range-hours="168" aria-pressed="true">
+              7d
+            </button>
+            <button type="button" data-range-hours="720">30d</button>
+            <button type="button" data-range-hours="2160">90d</button>
+          </div>
         </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Account</th>
-                <th scope="col">Platform</th>
-                <th scope="col">Plan</th>
-                <th scope="col">Limit</th>
-                <th scope="col">Used</th>
-                <th scope="col">Resets in</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody id="quota-rows">
-              <tr>
-                <td class="empty" colspan="7">Loading account data…</td>
-              </tr>
-            </tbody>
-          </table>
+        <div id="account-cards" class="account-grid" aria-live="polite">
+          <article class="empty-card">
+            <strong>Loading account history…</strong>
+            <span>Quota windows will appear as three graph columns.</span>
+          </article>
         </div>
       </section>
 
       <p class="footnote">
-        The dashboard refreshes every 60 seconds. Countdown clocks are derived
-        locally from provider reset timestamps. Unsupported metrics are never
-        estimated.
+        Scans and projections stay on this device. Rates require at least three
+        observations over 15 minutes. Dashed reset markers are inferred; solid
+        markers come from provider reset timestamps. Fable remains nested under
+        Claude's shared weekly pool.
+      </p>
+      <p class="last-checked">
+        Last checked: <time id="last-checked">Waiting…</time>
       </p>
       <noscript
         >This dashboard requires JavaScript to retrieve quota data.</noscript

@@ -9,6 +9,14 @@ import Fastify, {
 } from "fastify";
 import { z } from "zod";
 
+import { historyScansSchema } from "./domain/history.js";
+import { buildHistoryAnalytics } from "./history/analytics.js";
+import { createRecordingScanner } from "./history/recording-scanner.js";
+import {
+  createDefaultHistoryService,
+  HistoryUnavailableError,
+  type HistoryService,
+} from "./history/service.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
 import {
   createDefaultScanner,
@@ -27,6 +35,24 @@ const refreshQuerySchema = z
   })
   .strict();
 
+const historyScansQuerySchema = z
+  .object({
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    before: z.coerce.number().int().positive().optional(),
+  })
+  .strict();
+
+const historyAnalyticsQuerySchema = z
+  .object({
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
+    resolution: z.enum(["auto", "raw", "hour"]).default("auto"),
+    account: z.string().min(1).max(320).optional(),
+  })
+  .strict();
+
 type DashboardAssets = {
   html: string;
   javascript: string;
@@ -40,6 +66,7 @@ export type ServerOptions = {
   host?: string;
   port?: number;
   assets?: DashboardAssets;
+  history?: HistoryService;
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
@@ -86,6 +113,26 @@ function sendForbidden(reply: FastifyReply): FastifyReply {
   });
 }
 
+function historyRange(options: {
+  from: string | undefined;
+  to: string | undefined;
+  nowMilliseconds: number;
+  defaultDurationMilliseconds: number;
+  maximumDurationMilliseconds: number;
+}): { fromMilliseconds: number; toMilliseconds: number } {
+  const toMilliseconds =
+    options.to === undefined ? options.nowMilliseconds : Date.parse(options.to);
+  const fromMilliseconds =
+    options.from === undefined
+      ? toMilliseconds - options.defaultDurationMilliseconds
+      : Date.parse(options.from);
+  z.number()
+    .positive()
+    .max(options.maximumDurationMilliseconds)
+    .parse(toMilliseconds - fromMilliseconds);
+  return { fromMilliseconds, toMilliseconds };
+}
+
 export async function buildServer(
   options: ServerOptions = {},
 ): Promise<FastifyInstance> {
@@ -99,7 +146,16 @@ export async function buildServer(
   }
 
   const now = options.now ?? (() => new Date());
-  const scan = options.scan ?? createDefaultScanner();
+  const baseScan = options.scan ?? createDefaultScanner();
+  const scan =
+    options.history === undefined
+      ? baseScan
+      : createRecordingScanner({
+          scan: baseScan,
+          history: options.history,
+          source: "server",
+          now,
+        });
   const assets = options.assets ?? (await loadDashboardAssets());
   const cache = new SnapshotCache({
     scan,
@@ -123,28 +179,34 @@ export async function buildServer(
 
   server.setErrorHandler((error, _request, reply) => {
     const statusCode =
-      error instanceof z.ZodError ||
-      (error instanceof Error && "validation" in error)
-        ? 400
-        : error instanceof Error &&
-            "statusCode" in error &&
-            error.statusCode === 404
-          ? 404
-          : 500;
+      error instanceof HistoryUnavailableError
+        ? 503
+        : error instanceof z.ZodError ||
+            (error instanceof Error && "validation" in error)
+          ? 400
+          : error instanceof Error &&
+              "statusCode" in error &&
+              error.statusCode === 404
+            ? 404
+            : 500;
     void reply.code(statusCode).send({
       error: {
         code:
           statusCode === 400
             ? "invalid_request"
-            : statusCode === 404
-              ? "not_found"
-              : "internal_error",
+            : statusCode === 503
+              ? "history_unavailable"
+              : statusCode === 404
+                ? "not_found"
+                : "internal_error",
         message:
           statusCode === 400
             ? "Request parameters are invalid."
-            : statusCode === 404
-              ? "Route not found."
-              : "Request failed.",
+            : statusCode === 503
+              ? "Historical quota data is unavailable."
+              : statusCode === 404
+                ? "Route not found."
+                : "Request failed.",
       },
     });
   });
@@ -170,6 +232,86 @@ export async function buildServer(
     reply.header("Cache-Control", "no-store");
     return toPublicSnapshots(snapshots, now().getTime());
   });
+  server.get("/api/history/scans", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (options.history === undefined) {
+      throw new HistoryUnavailableError();
+    }
+    const query = historyScansQuerySchema.parse(request.query);
+    const nowMilliseconds = now().getTime();
+    const range = historyRange({
+      from: query.from,
+      to: query.to,
+      nowMilliseconds,
+      defaultDurationMilliseconds: 30 * 86_400_000,
+      maximumDurationMilliseconds: 31 * 86_400_000,
+    });
+    const runs = options.history.listScans({
+      ...range,
+      limit: query.limit + 1,
+      ...(query.before === undefined ? {} : { beforeId: query.before }),
+    });
+    const hasMore = runs.length > query.limit;
+    const page = hasMore ? runs.slice(0, query.limit) : runs;
+    return historyScansSchema.parse({
+      apiVersion: 1,
+      generatedAt: new Date(nowMilliseconds).toISOString(),
+      from: new Date(range.fromMilliseconds).toISOString(),
+      to: new Date(range.toMilliseconds).toISOString(),
+      historyHealth: options.history.health,
+      runs: page,
+      nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null,
+    });
+  });
+  server.get("/api/history/analytics", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (options.history === undefined) {
+      throw new HistoryUnavailableError();
+    }
+    const query = historyAnalyticsQuerySchema.parse(request.query);
+    const nowMilliseconds = now().getTime();
+    const range = historyRange({
+      from: query.from,
+      to: query.to,
+      nowMilliseconds,
+      defaultDurationMilliseconds: 7 * 86_400_000,
+      maximumDurationMilliseconds: 366 * 86_400_000,
+    });
+    const historyQuery = {
+      ...range,
+      resolution: query.resolution,
+      ...(query.account === undefined ? {} : { accountAlias: query.account }),
+    };
+    const latest = options.history.listScans({
+      fromMilliseconds: 0,
+      toMilliseconds: nowMilliseconds,
+      limit: 1,
+    })[0];
+    const snapshots =
+      latest?.snapshots.filter(
+        (snapshot) =>
+          query.account === undefined ||
+          snapshot.accountAlias.localeCompare(query.account, "en-US", {
+            sensitivity: "accent",
+          }) === 0,
+      ) ?? [];
+    return buildHistoryAnalytics({
+      snapshots,
+      series: options.history.readSeries(historyQuery),
+      resetEvents: options.history.listResetEvents(historyQuery),
+      historyHealth: options.history.health,
+      nowMilliseconds,
+      ...range,
+      requestedResolution: query.resolution,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  });
+
+  if (options.history !== undefined) {
+    server.addHook("onClose", () => {
+      options.history?.close();
+    });
+  }
 
   await server.ready();
   return server;
@@ -187,7 +329,10 @@ function readServerConfiguration(): { host: string; port: number } {
 
 async function main(): Promise<void> {
   const configuration = readServerConfiguration();
-  const server = await buildServer(configuration);
+  const server = await buildServer({
+    ...configuration,
+    history: createDefaultHistoryService(),
+  });
 
   const shutdown = async (): Promise<void> => {
     await server.close();

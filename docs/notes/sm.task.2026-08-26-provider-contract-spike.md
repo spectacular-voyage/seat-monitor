@@ -2,6 +2,7 @@
 id: c0439a296a2c9dec2fb78ae2
 title: 2026 08 26 Provider Contract Spike
 desc: Evidence and implementation baseline for Claude and Codex quota collection
+status: COMPLETED
 updated: 1788365763239
 created: 1787789951052
 ---

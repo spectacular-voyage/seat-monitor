@@ -276,6 +276,12 @@ function rowSortKey(row: QuotaReportRow): string {
   if (row.key === "base.session") {
     return "01";
   }
+  if (row.key.startsWith("codex.")) {
+    return `02.${row.key}`;
+  }
+  if (row.key.startsWith("codex_bengalfox.")) {
+    return `20.${row.key}`;
+  }
   return `10.${row.key}`;
 }
 

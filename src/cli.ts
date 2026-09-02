@@ -9,6 +9,11 @@ import {
   defaultAccountsConfigPath,
 } from "./config/accounts.js";
 import { isMainModule } from "./entry-point.js";
+import { createRecordingScanner } from "./history/recording-scanner.js";
+import {
+  createDefaultHistoryService,
+  type HistoryService,
+} from "./history/service.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
 import { buildQuotaReport } from "./presentation/quota-report.js";
 import { renderMarkdownReport } from "./presentation/table.js";
@@ -35,6 +40,7 @@ export type CliDependencies = {
   stdout?: { write: (value: string) => unknown };
   stderr?: { write: (value: string) => unknown };
   initializeConfig?: () => Promise<string>;
+  history?: HistoryService;
 };
 
 type OutputFormat = "text" | "md" | "json";
@@ -133,8 +139,28 @@ export async function runCli(
   }
 
   let scan: Scanner;
+  let ownedHistory: HistoryService | null = null;
   try {
-    scan = dependencies.scan ?? createDefaultScanner();
+    const baseScan = dependencies.scan ?? createDefaultScanner();
+    const history =
+      dependencies.history ??
+      (dependencies.scan === undefined
+        ? (ownedHistory = createDefaultHistoryService(
+            process.env,
+            dependencies.now,
+          ))
+        : null);
+    scan =
+      history === null
+        ? baseScan
+        : createRecordingScanner({
+            scan: baseScan,
+            history,
+            source: "cli",
+            ...(dependencies.now === undefined
+              ? {}
+              : { now: dependencies.now }),
+          });
   } catch (error) {
     const message =
       error instanceof AccountConfigurationError
@@ -149,8 +175,10 @@ export async function runCli(
     snapshots = await scan();
   } catch {
     stderr.write("Quota scan failed before producing account results.\n");
+    ownedHistory?.close();
     return 2;
   }
+  ownedHistory?.close();
 
   const now = (dependencies.now ?? (() => new Date()))();
   const output = toPublicSnapshots(snapshots, now.getTime());

@@ -2,6 +2,7 @@
 id: 2135ee1511100d0aa8923d2d
 title: 2026 08 29 CLI Output Rework
 desc: Decision-first quota ranking, hierarchy, provenance, and rendering rules
+status: COMPLETED
 updated: 1788069584848
 created: 1788055981286
 ---

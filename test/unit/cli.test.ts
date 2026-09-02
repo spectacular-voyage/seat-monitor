@@ -6,6 +6,8 @@ import {
   quotaSuccessSchema,
   type QuotaSnapshot,
 } from "../../src/domain/quota.js";
+import { HistoryService } from "../../src/history/service.js";
+import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
 
 function fixture(): QuotaSnapshot {
   return quotaSuccessSchema.parse({
@@ -156,5 +158,35 @@ describe("CLI", () => {
     expect(
       publicQuotaArraySchema.parse(JSON.parse(stdout.read())),
     ).toHaveLength(1);
+  });
+
+  it("records an injected scan when an explicit history service is supplied", async () => {
+    const history = new HistoryService(
+      openSqliteHistoryStore({
+        filePath: ":memory:",
+        rawRetentionDays: 30,
+        retentionDays: 365,
+      }),
+    );
+    const stdout = writer();
+    const observedAt = "2026-08-26T18:00:00.000Z";
+    const exitCode = await runCli(["--json"], {
+      scan: () => Promise.resolve([fixture()]),
+      history,
+      now: () => new Date(observedAt),
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.read())).toHaveLength(1);
+    expect(
+      history.listScans({
+        fromMilliseconds: Date.parse("2026-08-26T17:00:00.000Z"),
+        toMilliseconds: Date.parse("2026-08-26T19:00:00.000Z"),
+        limit: 10,
+      }),
+    ).toHaveLength(1);
+    history.close();
   });
 });
