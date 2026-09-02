@@ -2,7 +2,7 @@
 id: f1d7a429b18c9c0da11d5310
 title: 2026 08 30 Public Release Security Review
 desc: Release-readiness assessment, threat model, evidence, blockers, and publication runbook
-updated: 1788190690722
+updated: 1788381942000
 created: 1788130408282
 ---
 
@@ -123,6 +123,21 @@ The unscoped `seat-monitor` package is published and governed by the `spectacula
 7. Bump the package version before each later release and publish only through `Release npm`. OIDC publication will generate npm provenance automatically for the public package/repository.
 
 References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/), [scoped public packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/), [GitHub dependency review](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependency-review), and [GitHub secret scanning](https://docs.github.com/en/code-security/concepts/secret-security/about-alerts).
+
+### 4. Review local history storage — completed 2026-09-02
+
+Version 0.1.4 adds an optional `SEAT_MONITOR_HISTORY_PATH` override for the local SQLite database. CodeQL reported four high-severity path-injection candidates at directory existence, creation, permission, and database-open operations.
+
+The findings are accepted and dismissed as documented false positives under the existing same-user, local-only threat model:
+
+1. The configured value must be an absolute path and is supplied only through the local process environment.
+2. Seat Monitor is not privileged and cannot write beyond the invoking operating-system user's existing authority.
+3. The default remains a private file below `$XDG_STATE_HOME/seat-monitor` or `~/.local/state/seat-monitor`.
+4. Newly created state directories and the database are restricted to modes `0700` and `0600` where POSIX modes apply.
+5. SQLite schema creation and every history write are application-controlled; no provider or HTTP value becomes a filesystem path.
+6. The override is necessary for local backup, portable state roots, and test isolation, matching the accepted `SEAT_MONITOR_CONFIG` behavior.
+
+This review does not authorize remote configuration of the history path. Any future settings write API must preserve absolute-path validation, loopback controls, and the same-user boundary or undergo a new security review.
 
 ## Release gate
 
