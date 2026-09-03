@@ -55,6 +55,10 @@ const historyAnalyticsQuerySchema = z
     from: z.iso.datetime({ offset: true }).optional(),
     to: z.iso.datetime({ offset: true }).optional(),
     resolution: z.enum(["auto", "raw", "hour"]).default("auto"),
+    periods: z
+      .enum(["1", "2", "5", "10"])
+      .transform((value): 1 | 2 | 5 | 10 => Number(value) as 1 | 2 | 5 | 10)
+      .optional(),
     account: z.string().min(1).max(320).optional(),
   })
   .strict();
@@ -329,6 +333,9 @@ export async function buildServer(
       nowMilliseconds,
       ...range,
       requestedResolution: query.resolution,
+      ...(query.periods === undefined
+        ? {}
+        : { periodMultiplier: query.periods }),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
   });

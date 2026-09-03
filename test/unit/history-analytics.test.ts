@@ -147,6 +147,7 @@ describe("historical quota analytics", () => {
         parentKey: "base.weekly",
         currentUsedPercent: 60,
         headroomPercent: 40,
+        windowDurationMinutes: 10_080,
         resetAt: resetAfter(300),
         resetMarkers: [],
       }),
@@ -219,5 +220,51 @@ describe("historical quota analytics", () => {
     });
 
     expect(result.recommendations.fable).toBeNull();
+  });
+
+  it("filters chart points by each limit's selected quota periods", () => {
+    const snapshot = claudeSnapshot({
+      sessionRemainingMinutes: 120,
+      weeklyRemainingMinutes: 3_000,
+    });
+    const resetAt = resetAfter(3_000);
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        {
+          ...series("base.session", [], resetAfter(120)),
+          points: [
+            point(minutesBeforeNow(360), 5, resetAfter(120)),
+            point(minutesBeforeNow(300), 10, resetAfter(120)),
+            point(minutesBeforeNow(60), 15, resetAfter(120)),
+          ],
+        },
+        {
+          ...series("base.weekly", [], resetAt),
+          points: [
+            point(minutesBeforeNow(8 * 24 * 60), 5, resetAt),
+            point(minutesBeforeNow(6 * 24 * 60), 10, resetAt),
+            point(minutesBeforeNow(60), 15, resetAt),
+          ],
+        },
+      ],
+      resetEvents: [],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 10 * 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 1,
+      timeZone: "America/Los_Angeles",
+    });
+
+    const limits = result.accounts[0]?.limits;
+    expect(result.periodMultiplier).toBe(1);
+    expect(
+      limits?.find((limit) => limit.key === "base.session")?.points,
+    ).toHaveLength(2);
+    expect(
+      limits?.find((limit) => limit.key === "base.weekly")?.points,
+    ).toHaveLength(2);
   });
 });

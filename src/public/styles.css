@@ -381,6 +381,13 @@ button:focus-visible {
   background: #293a30;
 }
 
+.range-explanation {
+  margin: -8px 2px 14px;
+  color: #717a73;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
 .account-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -813,6 +820,10 @@ noscript {
 
   .range-controls button {
     flex: 1;
+  }
+
+  .range-explanation {
+    text-align: left;
   }
 
   .capacity-limit {

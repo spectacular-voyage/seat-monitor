@@ -200,6 +200,7 @@ describe("HTTP server", () => {
     expect(scans.headers["cache-control"]).toBe("no-store");
     expect(historyScansSchema.parse(scans.json()).runs).toHaveLength(1);
     const analyticsPayload = historyAnalyticsSchema.parse(analytics.json());
+    expect(analyticsPayload.periodMultiplier).toBeNull();
     expect(analyticsPayload.accounts[0]).toEqual(
       expect.objectContaining({
         accountAlias: "Codex_Work",
