@@ -55,6 +55,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain(
       'limit.projection.status === "exhausts_before_reset"',
     );
+    expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(css).toContain(".window-grid.single-panel .window-panel");
     expect(css).toContain(".combined-panel");

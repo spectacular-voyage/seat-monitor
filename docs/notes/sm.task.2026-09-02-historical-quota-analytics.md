@@ -391,11 +391,10 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, a two-column combined weekly/Fable history beside Session, period-normalized controls, current/reset/rate/outlook text, and evidence-based fixed/adjusted/inferred reset markers. Reset-first projections no longer create an empty forecast extension. Section titles and account identity are vertically compact, while secondary recommendations and diagnostic counts sit below history.
 - Documented storage location, environment configuration, retention, API behavior, projection limits, and Fable semantics in the README.
 
-Verification on 2026-09-02:
+Verification on 2026-09-03:
 
-- Node 24.20.0 type checking and all 100 tests pass.
-- Coverage passes the repository floors: 83.81% statements, 74.52% branches, 86.56% functions, and 83.71% lines.
+- Node 24.20.0 type checking and all 118 tests pass.
+- Coverage passes the repository floors: 84.91% statements, 77.04% branches, 87.25% functions, and 84.95% lines.
 - Lint, changed-file formatting, `git diff --check`, browser-JavaScript syntax, release-note validation, production build, and packed-package smoke tests pass.
 - `npm audit --audit-level=high` reports zero vulnerabilities; registry signatures and attestations verify.
-- The complete repository-wide formatting wrapper is currently obstructed by an unrelated untracked `docs/notes/sm.product-ideas.md`; this implementation does not modify that file.
-- Automated browser payload/static-asset coverage passes. Live visual QA could not run because the available browser extension blocks loopback URLs and no in-app browser was connected; responsive visual inspection remains the only manual follow-up.
+- Automated browser payload/static-asset coverage passes. Live visual QA could not run because the in-app browser bridge resolved a stale, missing runtime path; responsive visual inspection remains the only manual follow-up.

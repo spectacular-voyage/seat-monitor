@@ -302,6 +302,7 @@ function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
 
   const forecasts = series.filter(
     (entry) =>
+      entry.measured.length > 0 &&
       entry.projectionAt !== null &&
       Number.isFinite(entry.projectionAt) &&
       (entry.limit.projection.status === "exhausts_before_reset" ||
