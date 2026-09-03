@@ -273,38 +273,46 @@ function chartRangeStart(limit, queryStart, rangeEnd) {
   return Math.max(queryStart, rangeEnd - durationMilliseconds);
 }
 
-function createUsageGraph(limit, queryStart, rangeEnd) {
+function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
   const wrapper = element("div", "chart-wrap");
+  const chartLimits = [limit, ...overlays];
   const rangeStart = chartRangeStart(limit, queryStart, rangeEnd);
-  const measured = limit.points.filter((point) => {
-    const observedAt = Date.parse(point.observedAt);
-    return (
-      point.usedPercent !== null &&
-      Number.isFinite(observedAt) &&
-      observedAt >= rangeStart &&
-      observedAt <= rangeEnd
-    );
-  });
-  if (measured.length === 0) {
+  const series = chartLimits.map((chartLimit) => ({
+    limit: chartLimit,
+    measured: chartLimit.points.filter((point) => {
+      const observedAt = Date.parse(point.observedAt);
+      return (
+        point.usedPercent !== null &&
+        Number.isFinite(observedAt) &&
+        observedAt >= rangeStart &&
+        observedAt <= rangeEnd
+      );
+    }),
+    projectionAt:
+      chartLimit.projection.projectedExhaustionAt === null
+        ? null
+        : Date.parse(chartLimit.projection.projectedExhaustionAt),
+  }));
+  if (series.every((entry) => entry.measured.length === 0)) {
     wrapper.append(
       element("p", "chart-empty", "History begins after the next scan."),
     );
     return wrapper;
   }
 
-  const projectionAt =
-    limit.projection.projectedExhaustionAt === null
-      ? null
-      : Date.parse(limit.projection.projectedExhaustionAt);
-  const showsForecast =
-    projectionAt !== null &&
-    Number.isFinite(projectionAt) &&
-    (limit.projection.status === "exhausts_before_reset" ||
-      limit.projection.status === "exhaustion_projected");
+  const forecasts = series.filter(
+    (entry) =>
+      entry.projectionAt !== null &&
+      Number.isFinite(entry.projectionAt) &&
+      (entry.limit.projection.status === "exhausts_before_reset" ||
+        entry.limit.projection.status === "exhaustion_projected"),
+  );
   const maximumExtension = rangeEnd + (rangeEnd - rangeStart) * 0.25;
-  const chartEnd = showsForecast
-    ? Math.max(rangeEnd, Math.min(projectionAt, maximumExtension))
-    : rangeEnd;
+  const chartEnd = forecasts.reduce(
+    (end, entry) =>
+      Math.max(end, Math.min(entry.projectionAt ?? rangeEnd, maximumExtension)),
+    rangeEnd,
+  );
   const chartStart = rangeStart;
   const width = 640;
   const height = 176;
@@ -322,10 +330,15 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
   const svg = svgElement("svg", {
     viewBox: `0 0 ${width} ${height}`,
     role: "img",
-    "aria-label": `${limit.label} usage history, currently ${formatPercent(limit.currentUsedPercent)}`,
+    "aria-label": chartLimits
+      .map(
+        (chartLimit) =>
+          `${chartLimit.label} currently ${formatPercent(chartLimit.currentUsedPercent)}`,
+      )
+      .join("; "),
   });
   const title = svgElement("title");
-  title.textContent = `${limit.label} usage history`;
+  title.textContent = `${chartLimits.map((chartLimit) => chartLimit.label).join(" and ")} usage history`;
   svg.append(title);
 
   for (const percent of [0, 50, 100]) {
@@ -380,33 +393,45 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
     svg.append(line);
   }
 
-  svg.append(
-    svgElement("path", {
-      d: measured
-        .map((point, index) => {
-          const command = index === 0 ? "M" : "L";
-          return `${command}${x(Date.parse(point.observedAt)).toFixed(2)},${y(point.usedPercent).toFixed(2)}`;
-        })
-        .join(" "),
-      class: `usage-line ${limit.depth === 1 ? "nested" : ""}`,
-    }),
-  );
+  for (const entry of series) {
+    if (entry.measured.length === 0) {
+      continue;
+    }
+    const nestedClass = entry.limit.depth === 1 ? " nested" : "";
+    svg.append(
+      svgElement("path", {
+        d: entry.measured
+          .map((point, index) => {
+            const command = index === 0 ? "M" : "L";
+            return `${command}${x(Date.parse(point.observedAt)).toFixed(2)},${y(point.usedPercent).toFixed(2)}`;
+          })
+          .join(" "),
+        class: `usage-line${nestedClass}`,
+      }),
+    );
 
-  const latest = measured.at(-1);
-  if (latest) {
+    const latest = entry.measured.at(-1);
+    if (latest === undefined) {
+      continue;
+    }
     svg.append(
       svgElement("circle", {
         cx: x(Date.parse(latest.observedAt)),
         cy: y(latest.usedPercent),
         r: 4,
-        class: "usage-point",
+        class: `usage-point${nestedClass}`,
       }),
     );
-    if (showsForecast && projectionAt > Date.parse(latest.observedAt)) {
-      const forecastEnd = Math.min(projectionAt, chartEnd);
+    const showsForecast = forecasts.includes(entry);
+    if (
+      showsForecast &&
+      entry.projectionAt !== null &&
+      entry.projectionAt > Date.parse(latest.observedAt)
+    ) {
+      const forecastEnd = Math.min(entry.projectionAt, chartEnd);
       const forecastProgress =
         (forecastEnd - Date.parse(latest.observedAt)) /
-        (projectionAt - Date.parse(latest.observedAt));
+        (entry.projectionAt - Date.parse(latest.observedAt));
       const forecastUsed =
         latest.usedPercent + (100 - latest.usedPercent) * forecastProgress;
       svg.append(
@@ -415,7 +440,7 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
           y1: y(latest.usedPercent),
           x2: x(forecastEnd),
           y2: y(forecastUsed),
-          class: "forecast-line",
+          class: `forecast-line${nestedClass}`,
         }),
       );
     }
@@ -434,13 +459,31 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
     "text-anchor": "end",
   });
   endLabel.textContent =
-    showsForecast && chartEnd > rangeEnd ? "forecast" : "now";
+    forecasts.length > 0 && chartEnd > rangeEnd ? "forecast" : "now";
   svg.append(startLabel, endLabel);
   wrapper.append(svg);
   return wrapper;
 }
 
-function createLimit(limit, rangeStart, rangeEnd) {
+function createChartLegend(limits) {
+  const legend = element("div", "chart-legend");
+  for (const limit of limits) {
+    const item = element("span", "legend-item");
+    item.append(
+      element("span", `legend-swatch ${limit.depth === 1 ? "nested" : ""}`),
+      element("span", "legend-label", limit.label),
+      element(
+        "strong",
+        "legend-value",
+        formatPercent(limit.currentUsedPercent),
+      ),
+    );
+    legend.append(item);
+  }
+  return legend;
+}
+
+function createLimit(limit, rangeStart, rangeEnd, overlays = []) {
   const section = element(
     "section",
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
@@ -471,18 +514,32 @@ function createLimit(limit, rangeStart, rangeEnd) {
     element("span", "usage-caption", "used"),
   );
   heading.append(identity, usage);
-  section.append(heading, createUsageGraph(limit, rangeStart, rangeEnd));
+  section.append(heading);
+  if (overlays.length > 0) {
+    section.append(createChartLegend([limit, ...overlays]));
+  }
+  section.append(createUsageGraph(limit, rangeStart, rangeEnd, overlays));
 
   const metrics = element("div", "limit-metrics");
-  const rate = element("div");
-  rate.append(element("span", "metric-label", "Usage rate"));
-  rate.append(element("strong", "metric-value", formatRate(limit.projection)));
-  const forecast = element("div");
-  forecast.append(element("span", "metric-label", "Outlook"));
-  forecast.append(
-    element("strong", "metric-value", projectionText(limit.projection)),
-  );
-  metrics.append(rate, forecast);
+  for (const metricLimit of [limit, ...overlays]) {
+    const prefix =
+      overlays.length === 0
+        ? ""
+        : metricLimit.depth === 1
+          ? "Fable "
+          : "All-model ";
+    const rate = element("div");
+    rate.append(element("span", "metric-label", `${prefix}usage rate`));
+    rate.append(
+      element("strong", "metric-value", formatRate(metricLimit.projection)),
+    );
+    const forecast = element("div");
+    forecast.append(element("span", "metric-label", `${prefix}outlook`));
+    forecast.append(
+      element("strong", "metric-value", projectionText(metricLimit.projection)),
+    );
+    metrics.append(rate, forecast);
+  }
   section.append(metrics);
   return section;
 }
@@ -502,15 +559,30 @@ function panelClass(limit) {
 
 function createWindowPanels(account, rangeStart, rangeEnd) {
   const panels = element("div", "window-grid");
+  const entries = [];
   for (const limit of account.limits) {
+    if (
+      limit.depth === 1 &&
+      account.limits.some((candidate) => candidate.key === limit.parentKey)
+    ) {
+      continue;
+    }
+    const overlays = account.limits.filter(
+      (candidate) => candidate.depth === 1 && candidate.parentKey === limit.key,
+    );
+    entries.push({ limit, overlays });
+  }
+  for (const entry of entries) {
     const panel = element(
       "div",
-      `window-panel ${panelClass(limit)} ${limit.depth === 1 ? "subcap-panel" : ""}`,
+      `window-panel ${panelClass(entry.limit)} ${entry.overlays.length > 0 ? "combined-panel" : ""}`,
     );
-    panel.append(createLimit(limit, rangeStart, rangeEnd));
+    panel.append(
+      createLimit(entry.limit, rangeStart, rangeEnd, entry.overlays),
+    );
     panels.append(panel);
   }
-  if (account.limits.length === 1) {
+  if (entries.length === 1) {
     panels.classList.add("single-panel");
   }
   return panels;
@@ -636,28 +708,24 @@ function renderFleetCapacity(accounts) {
 function createAccountCard(account, rangeStart, rangeEnd) {
   const card = element("article", "account-card");
   const header = element("header", "account-header");
-  const identity = element("div");
+  const identity = element("div", "account-identity-line");
   identity.append(
-    element("p", "account-vendor", account.platform),
+    element("span", "account-vendor", account.platform),
     element("h3", "account-name", account.accountAlias),
     element(
-      "p",
-      "account-plan",
-      `${account.plan === null ? "Plan not reported" : `${account.plan} plan`}${
+      "span",
+      "account-meta",
+      `· ${account.plan === null ? "plan not reported" : `${account.plan} plan`} · ${
         account.lastActivityAt === null || account.lastActivityAt === undefined
-          ? " · no recent usage change"
-          : ` · active ${formatDateTime(account.lastActivityAt)}`
+          ? "no recent usage change"
+          : `active ${formatDateTime(account.lastActivityAt)}`
       }`,
     ),
   );
-  header.append(
-    identity,
-    element(
-      "span",
-      `pill ${account.status === "ok" ? "healthy" : "danger"}`,
-      account.status === "ok" ? "Current" : "Check failed",
-    ),
-  );
+  header.append(identity);
+  if (account.status === "error") {
+    header.append(element("span", "pill danger", "Check failed"));
+  }
   card.append(header);
 
   if (account.status === "error") {

@@ -256,8 +256,8 @@ button:focus-visible {
 
 .capacity,
 .accounts {
-  margin-top: 20px;
-  padding: 20px;
+  margin-top: 14px;
+  padding: 14px;
   border: 1px solid #282e2a;
   border-radius: 18px;
   background: rgb(20 23 21 / 91%);
@@ -272,11 +272,11 @@ button:focus-visible {
 
 .section-heading {
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .section-heading .eyebrow {
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .connection {
@@ -313,7 +313,7 @@ button:focus-visible {
 }
 
 .fleet-capacity {
-  margin-top: 14px;
+  margin-top: 8px;
   border: 1px solid #303732;
   border-radius: 14px;
   background: #101310;
@@ -466,17 +466,10 @@ button:focus-visible {
   background: #293a30;
 }
 
-.range-explanation {
-  margin: -8px 2px 14px;
-  color: #717a73;
-  font-size: 0.72rem;
-  text-align: right;
-}
-
 .account-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 18px;
+  gap: 12px;
 }
 
 .account-card,
@@ -492,14 +485,21 @@ button:focus-visible {
 }
 
 .account-header {
-  align-items: flex-start;
-  padding: 20px;
+  align-items: center;
+  padding: 11px 14px;
   border-bottom: 1px solid #292f2b;
   background: linear-gradient(120deg, rgb(143 211 171 / 5%), transparent 48%);
 }
 
+.account-identity-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+
 .account-vendor {
-  margin-bottom: 6px;
   color: #8fd3ab;
   font-size: 0.67rem;
   font-weight: 780;
@@ -508,16 +508,15 @@ button:focus-visible {
 }
 
 .account-name {
-  max-width: 460px;
-  margin-bottom: 5px;
-  font-size: 1.08rem;
+  max-width: 100%;
+  margin: 0;
+  font-size: 0.94rem;
   overflow-wrap: anywhere;
 }
 
-.account-plan {
-  margin: 0;
+.account-meta {
   color: #858d87;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: capitalize;
 }
 
@@ -548,9 +547,13 @@ button:focus-visible {
 
 .window-grid {
   display: grid;
-  padding: 16px;
+  padding: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
+}
+
+.combined-panel {
+  grid-column: span 2;
 }
 
 .window-panel {
@@ -583,7 +586,7 @@ button:focus-visible {
 
 .limit {
   min-width: 0;
-  padding: 20px;
+  padding: 14px;
   border-bottom: 0;
 }
 
@@ -653,9 +656,43 @@ button:focus-visible {
   color: #f4aaa4;
 }
 
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+  color: #8b948d;
+  font-size: 0.68rem;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 99px;
+  background: #8fd3ab;
+}
+
+.legend-swatch.nested {
+  height: 0;
+  border-top: 2px dashed #d8ac76;
+  border-radius: 0;
+  background: transparent;
+}
+
+.legend-value {
+  color: #d6dad6;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-wrap {
   min-height: 116px;
-  margin: 14px 0 12px;
+  margin: 10px 0 8px;
 }
 
 .chart-wrap svg {
@@ -696,6 +733,11 @@ button:focus-visible {
   stroke-width: 2;
 }
 
+.usage-point.nested {
+  fill: #ffe0ad;
+  stroke: #8f7049;
+}
+
 .reset-marker {
   stroke: #718178;
   stroke-width: 1;
@@ -717,6 +759,10 @@ button:focus-visible {
   stroke-dasharray: 3 4;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+}
+
+.forecast-line.nested {
+  stroke: #d8ac76;
 }
 
 .window-grid.single-panel .window-panel {
@@ -742,11 +788,11 @@ button:focus-visible {
 .limit-metrics {
   display: grid;
   grid-template-columns: 0.8fr 1.2fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .limit-metrics > div {
-  padding: 10px 11px;
+  padding: 8px 9px;
   border-radius: 9px;
   background: #191d1a;
 }
@@ -875,6 +921,10 @@ noscript {
   .window-grid {
     grid-template-columns: 1fr;
   }
+
+  .combined-panel {
+    grid-column: auto;
+  }
 }
 
 @media (min-width: 781px) and (max-width: 1080px) {
@@ -919,10 +969,6 @@ noscript {
 
   .range-controls button {
     flex: 1;
-  }
-
-  .range-explanation {
-    text-align: left;
   }
 
   .capacity-limit {
