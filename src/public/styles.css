@@ -235,7 +235,6 @@ button:focus-visible {
 }
 
 .summary-label,
-.metric-label,
 .strategy-label {
   display: block;
   color: #89918b;
@@ -547,6 +546,7 @@ button:focus-visible {
 
 .window-grid {
   display: grid;
+  align-items: stretch;
   padding: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
@@ -557,6 +557,7 @@ button:focus-visible {
 }
 
 .window-panel {
+  display: flex;
   min-width: 0;
   border: 1px solid #2c342f;
   border-radius: 14px;
@@ -585,9 +586,13 @@ button:focus-visible {
 }
 
 .limit {
+  display: flex;
   min-width: 0;
+  width: 100%;
+  height: 100%;
   padding: 14px;
   border-bottom: 0;
+  flex-direction: column;
 }
 
 .limit:last-child {
@@ -691,8 +696,15 @@ button:focus-visible {
 }
 
 .chart-wrap {
+  display: grid;
   min-height: 116px;
   margin: 10px 0 8px;
+  padding: 3px 5px 1px;
+  flex: 1;
+  align-items: center;
+  border: 1px solid #252d27;
+  border-radius: 9px;
+  background: #181c19;
 }
 
 .chart-wrap svg {
@@ -703,13 +715,13 @@ button:focus-visible {
 }
 
 .chart-grid-line {
-  stroke: #283029;
+  stroke: #3b463e;
   stroke-width: 1;
 }
 
 .chart-axis-label,
 .chart-time-label {
-  fill: #687069;
+  fill: #7d867f;
   font-size: 9px;
 }
 
@@ -786,26 +798,75 @@ button:focus-visible {
 }
 
 .limit-metrics {
-  display: grid;
-  grid-template-columns: 0.8fr 1.2fr;
-  gap: 8px;
-}
-
-.limit-metrics > div {
-  padding: 8px 9px;
+  width: 100%;
+  margin-top: auto;
+  border: 1px solid #2a322d;
+  border-spacing: 0;
   border-radius: 9px;
   background: #191d1a;
+  overflow: hidden;
+  table-layout: fixed;
 }
 
-.metric-label {
-  margin-bottom: 5px;
+.limit-metrics th,
+.limit-metrics td {
+  padding: 7px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.metric-column-heading {
+  color: #89918b;
   font-size: 0.61rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.metric-row-spacer,
+.metric-row-heading {
+  width: 82px;
+}
+
+.metric-row-heading {
+  color: #9ca49e;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.limit-metrics thead th:nth-child(2) {
+  width: 34%;
+}
+
+.limit-metrics tbody th,
+.limit-metrics tbody td {
+  border-top: 1px solid #2a322d;
+}
+
+.limit-metrics tr > * + * {
+  border-left: 1px solid #2a322d;
 }
 
 .metric-value {
+  display: block;
   color: #c9cec9;
   font-size: 0.73rem;
+  font-weight: 700;
   line-height: 1.35;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .account-error {
@@ -979,8 +1040,9 @@ noscript {
     display: none;
   }
 
-  .limit-metrics {
-    grid-template-columns: 1fr;
+  .metric-row-spacer,
+  .metric-row-heading {
+    width: 68px;
   }
 
   .nested-limit {

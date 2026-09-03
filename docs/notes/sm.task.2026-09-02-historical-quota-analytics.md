@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788474205000
+updated: 1788477075094
 created: 1788377021465
 ---
 
@@ -388,7 +388,7 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Added failure-tolerant scan recording around default CLI scans and inside the server's existing coalescing cache.
 - Added pure reset-epoch segmentation, median pairwise usage rate, exhaustion/reset comparison, inferred markers, and Fable-aware strategy while reusing the existing general `USE` and `WATCH` policy.
 - Added `GET /api/history/scans` and `GET /api/history/analytics` with strict queries, runtime-validated responses, pagination/range bounds, `no-store`, and the existing loopback security controls.
-- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, a two-column combined weekly/Fable history beside Session, period-normalized controls, current/reset/rate/outlook text, and evidence-based fixed/adjusted/inferred reset markers. Reset-first projections no longer create an empty forecast extension. Section titles and account identity are vertically compact, while secondary recommendations and diagnostic counts sit below history.
+- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, a two-column combined weekly/Fable history beside Session, period-normalized controls, current/reset/rate/outlook text, and evidence-based fixed/adjusted/inferred reset markers. Reset-first projections no longer create an empty forecast extension. History plots use a higher-contrast dark-gray field and grid, while rate/outlook details use an accessible shared table that keeps adjacent panels aligned. Section titles and account identity are vertically compact, while secondary recommendations and diagnostic counts sit below history.
 - Documented storage location, environment configuration, retention, API behavior, projection limits, and Fable semantics in the README.
 
 Verification on 2026-09-03:

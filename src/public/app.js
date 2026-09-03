@@ -484,6 +484,51 @@ function createChartLegend(limits) {
   return legend;
 }
 
+function createLimitMetrics(limits) {
+  const table = element("table", "limit-metrics");
+  table.append(
+    element("caption", "visually-hidden", "Usage rate and exhaustion outlook"),
+  );
+
+  const head = element("thead");
+  const headingRow = element("tr");
+  const rowHeadingSpacer = element("th", "metric-row-spacer");
+  rowHeadingSpacer.setAttribute("aria-hidden", "true");
+  const rateHeading = element("th", "metric-column-heading", "Usage rate");
+  rateHeading.scope = "col";
+  const outlookHeading = element("th", "metric-column-heading", "Outlook");
+  outlookHeading.scope = "col";
+  headingRow.append(rowHeadingSpacer, rateHeading, outlookHeading);
+  head.append(headingRow);
+
+  const body = element("tbody");
+  for (const limit of limits) {
+    const row = element("tr");
+    const rowHeading = element(
+      "th",
+      "metric-row-heading",
+      limits.length === 1
+        ? limit.label
+        : limit.depth === 1
+          ? "Fable"
+          : "All models",
+    );
+    rowHeading.scope = "row";
+    const rate = element("td", "metric-cell");
+    rate.append(
+      element("strong", "metric-value", formatRate(limit.projection)),
+    );
+    const outlook = element("td", "metric-cell");
+    outlook.append(
+      element("strong", "metric-value", projectionText(limit.projection)),
+    );
+    row.append(rowHeading, rate, outlook);
+    body.append(row);
+  }
+  table.append(head, body);
+  return table;
+}
+
 function createLimit(limit, rangeStart, rangeEnd, overlays = []) {
   const section = element(
     "section",
@@ -521,27 +566,7 @@ function createLimit(limit, rangeStart, rangeEnd, overlays = []) {
   }
   section.append(createUsageGraph(limit, rangeStart, rangeEnd, overlays));
 
-  const metrics = element("div", "limit-metrics");
-  for (const metricLimit of [limit, ...overlays]) {
-    const prefix =
-      overlays.length === 0
-        ? ""
-        : metricLimit.depth === 1
-          ? "Fable "
-          : "All-model ";
-    const rate = element("div");
-    rate.append(element("span", "metric-label", `${prefix}usage rate`));
-    rate.append(
-      element("strong", "metric-value", formatRate(metricLimit.projection)),
-    );
-    const forecast = element("div");
-    forecast.append(element("span", "metric-label", `${prefix}outlook`));
-    forecast.append(
-      element("strong", "metric-value", projectionText(metricLimit.projection)),
-    );
-    metrics.append(rate, forecast);
-  }
-  section.append(metrics);
+  section.append(createLimitMetrics([limit, ...overlays]));
   return section;
 }
 

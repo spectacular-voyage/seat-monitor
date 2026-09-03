@@ -41,6 +41,16 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
     expect(javascript).toContain("createChartLegend");
+    expect(javascript).toContain("createLimitMetrics");
+    expect(javascript).toContain('element("table", "limit-metrics")');
+    expect(javascript).toContain(
+      'element("th", "metric-column-heading", "Usage rate")',
+    );
+    expect(javascript).toContain(
+      'element("th", "metric-column-heading", "Outlook")',
+    );
+    expect(javascript).toContain('"All models"');
+    expect(javascript).toContain('"Fable"');
     expect(javascript).toContain("entry.overlays");
     expect(javascript).toContain("PERIOD_CONTEXT_MULTIPLIER = 1.05");
     expect(javascript).toContain("periods: String(periodMultiplier)");
@@ -60,6 +70,10 @@ describe("dashboard assets", () => {
     expect(css).toContain(".window-grid.single-panel .window-panel");
     expect(css).toContain(".combined-panel");
     expect(css).toContain("grid-column: span 2");
+    expect(css).toContain("background: #181c19");
+    expect(css).toContain("stroke: #3b463e");
+    expect(css).toContain("table-layout: fixed");
+    expect(css).toContain("align-items: stretch");
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 
