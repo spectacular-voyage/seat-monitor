@@ -54,7 +54,13 @@ function formatRate(projection) {
   if (projection.ratePercentPerHour === 0) {
     return "No measurable consumption";
   }
-  return `${formatPercent(projection.ratePercentPerHour)} per hour`;
+  const basis = {
+    epoch: "epoch pace",
+    recent_30m: "recent 30m",
+    recent_1h: "recent 1h",
+    recent_3h: "recent 3h",
+  }[projection.rateBasis];
+  return `${formatPercent(projection.ratePercentPerHour)} per hour${basis === undefined ? "" : ` · ${basis}`}`;
 }
 
 function formatDateTime(value) {
@@ -91,20 +97,35 @@ function formatCountdown(resetAt) {
 }
 
 function projectionText(projection) {
+  const exhaustion = formatExhaustionRange(projection);
   switch (projection.status) {
     case "already_exhausted":
       return "Quota is exhausted";
     case "exhausts_before_reset":
-      return `Projected empty ${formatDateTime(projection.projectedExhaustionAt)}`;
+      return `Projected empty ${exhaustion}`;
     case "reset_before_exhaustion":
       return "Reset is expected before exhaustion";
     case "exhaustion_projected":
-      return `Projected empty ${formatDateTime(projection.projectedExhaustionAt)}`;
+      return `Projected empty ${exhaustion}`;
     case "not_consuming":
       return "Usage is currently flat";
     default:
       return "Projection needs more history";
   }
+}
+
+function formatExhaustionRange(projection) {
+  if (projection.projectedExhaustionAt === null) {
+    return "at an unknown time";
+  }
+  const start = formatDateTime(projection.projectedExhaustionAt);
+  if (
+    projection.projectedExhaustionRangeEndAt === null ||
+    projection.projectedExhaustionRangeEndAt === undefined
+  ) {
+    return start;
+  }
+  return `${start}–${formatDateTime(projection.projectedExhaustionRangeEndAt)}`;
 }
 
 function formatInterval(seconds) {
@@ -199,7 +220,7 @@ function renderTopWarnings(payload) {
           ? "Quota is exhausted."
           : limit.projection.projectedExhaustionAt === null
             ? "Projected to exhaust before reset."
-            : `Projected to exhaust ${formatDateTime(limit.projection.projectedExhaustionAt)} before reset.`,
+            : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
       ),
     );
   }
@@ -806,7 +827,10 @@ function fallbackLimit(limit) {
     projection: {
       status: "insufficient_history",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: null,
       projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: 0,
       spanMinutes: 0,
     },

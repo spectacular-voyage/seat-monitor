@@ -25,6 +25,8 @@ const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const RESET_JITTER_MILLISECONDS = 120_000;
 
 type MeasuredPoint = HistorySeriesPoint & { usedPercent: number };
+type RateBasis = "epoch" | "recent_30m" | "recent_1h" | "recent_3h";
+type RateCandidate = { basis: RateBasis; rate: number };
 
 function isSparkLimit(key: string): boolean {
   return key.startsWith("codex_bengalfox.");
@@ -117,7 +119,13 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
     return [];
   }
   if (latest.resetAt !== null) {
-    return measured.filter((point) => point.resetAt === latest.resetAt);
+    const latestReset = Date.parse(latest.resetAt);
+    return measured.filter(
+      (point) =>
+        point.resetAt !== null &&
+        Math.abs(Date.parse(point.resetAt) - latestReset) <=
+          RESET_JITTER_MILLISECONDS,
+    );
   }
 
   let epochStart = 0;
@@ -135,18 +143,92 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
   return measured.slice(epochStart);
 }
 
+function monotonicUsage(points: readonly MeasuredPoint[]): MeasuredPoint[] {
+  let maximum = 0;
+  return points.map((point) => {
+    maximum = Math.max(maximum, point.usedPercent);
+    return { ...point, usedPercent: maximum };
+  });
+}
+
+function pairwiseRate(points: readonly MeasuredPoint[]): number | null {
+  const slopes: number[] = [];
+  for (let leftIndex = 0; leftIndex < points.length; leftIndex += 1) {
+    const left = points[leftIndex];
+    if (left === undefined) {
+      continue;
+    }
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < points.length;
+      rightIndex += 1
+    ) {
+      const right = points[rightIndex];
+      if (right === undefined) {
+        continue;
+      }
+      const hours =
+        (Date.parse(right.observedAt) - Date.parse(left.observedAt)) /
+        3_600_000;
+      if (hours > 0) {
+        slopes.push((right.usedPercent - left.usedPercent) / hours);
+      }
+    }
+  }
+  return slopes.length === 0 ? null : median(slopes);
+}
+
+function recentEndpointRate(
+  points: readonly MeasuredPoint[],
+  latestMilliseconds: number,
+  minutes: number,
+): number | null {
+  const recent = points.filter(
+    (point) =>
+      Date.parse(point.observedAt) >= latestMilliseconds - minutes * 60_000,
+  );
+  const first = recent[0];
+  const latest = recent.at(-1);
+  if (first === undefined || latest === undefined || recent.length < 3) {
+    return null;
+  }
+  const spanHours =
+    (Date.parse(latest.observedAt) - Date.parse(first.observedAt)) / 3_600_000;
+  const change = latest.usedPercent - first.usedPercent;
+  if (
+    spanHours * 60 < MINIMUM_RATE_SPAN_MINUTES ||
+    change < 2 ||
+    spanHours <= 0
+  ) {
+    return null;
+  }
+  return change / spanHours;
+}
+
+function projectedAt(
+  observedMilliseconds: number,
+  usedPercent: number,
+  rate: number,
+): number {
+  return observedMilliseconds + ((100 - usedPercent) / rate) * 3_600_000;
+}
+
 export function projectExhaustion(
   points: readonly HistorySeriesPoint[],
   effectiveResetAt: string | null,
 ): Projection {
   const epoch = latestEpoch(points);
-  const first = epoch[0];
-  const latest = epoch.at(-1);
+  const monotonicEpoch = monotonicUsage(epoch);
+  const first = monotonicEpoch[0];
+  const latest = monotonicEpoch.at(-1);
   if (first === undefined || latest === undefined) {
     return {
       status: "insufficient_history",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: null,
       projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: epoch.length,
       spanMinutes: 0,
     };
@@ -159,7 +241,10 @@ export function projectExhaustion(
     return {
       status: "already_exhausted",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: latest.usedPercent,
       projectedExhaustionAt: latest.observedAt,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: epoch.length,
       spanMinutes,
     };
@@ -174,61 +259,83 @@ export function projectExhaustion(
     return {
       status: "insufficient_history",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: latest.usedPercent,
       projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: epoch.length,
       spanMinutes,
     };
   }
 
-  const slopes: number[] = [];
-  for (let leftIndex = 0; leftIndex < epoch.length; leftIndex += 1) {
-    const left = epoch[leftIndex];
-    if (left === undefined) {
-      continue;
-    }
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < epoch.length;
-      rightIndex += 1
-    ) {
-      const right = epoch[rightIndex];
-      if (right === undefined) {
-        continue;
-      }
-      const hours =
-        (Date.parse(right.observedAt) - Date.parse(left.observedAt)) /
-        3_600_000;
-      if (hours > 0) {
-        slopes.push((right.usedPercent - left.usedPercent) / hours);
-      }
-    }
-  }
-  if (slopes.length === 0) {
+  const epochRate = pairwiseRate(monotonicEpoch);
+  if (epochRate === null) {
     return {
       status: "insufficient_history",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: latest.usedPercent,
       projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: epoch.length,
       spanMinutes,
     };
   }
-  const rate = median(slopes);
-  if (!Number.isFinite(rate) || rate <= 0) {
+  const latestMilliseconds = Date.parse(latest.observedAt);
+  const candidates: RateCandidate[] = [];
+  if (Number.isFinite(epochRate) && epochRate > 0) {
+    candidates.push({ basis: "epoch", rate: epochRate });
+  }
+  for (const window of [
+    { basis: "recent_30m", minutes: 30 },
+    { basis: "recent_1h", minutes: 60 },
+    { basis: "recent_3h", minutes: 180 },
+  ] as const) {
+    const rate = recentEndpointRate(
+      monotonicEpoch,
+      latestMilliseconds,
+      window.minutes,
+    );
+    if (rate !== null && Number.isFinite(rate) && rate > 0) {
+      candidates.push({ basis: window.basis, rate });
+    }
+  }
+  const selected = candidates.reduce<RateCandidate | null>(
+    (best, candidate) =>
+      best === null || candidate.rate > best.rate ? candidate : best,
+    null,
+  );
+  if (selected === null) {
     return {
       status: "not_consuming",
       ratePercentPerHour: 0,
+      rateBasis: null,
+      projectedFromUsedPercent: latest.usedPercent,
       projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
       sampleCount: epoch.length,
       spanMinutes,
     };
   }
 
-  const exhaustionMilliseconds =
-    Date.parse(latest.observedAt) +
-    ((100 - latest.usedPercent) / rate) * 3_600_000;
+  const exhaustionMilliseconds = projectedAt(
+    latestMilliseconds,
+    latest.usedPercent,
+    selected.rate,
+  );
   const projectedExhaustionAt = new Date(exhaustionMilliseconds).toISOString();
   const resetMilliseconds =
     effectiveResetAt === null ? null : Date.parse(effectiveResetAt);
+  const baselineExhaustionMilliseconds =
+    epochRate > 0
+      ? projectedAt(latestMilliseconds, latest.usedPercent, epochRate)
+      : exhaustionMilliseconds;
+  const projectedExhaustionRangeEndAt =
+    baselineExhaustionMilliseconds > exhaustionMilliseconds + 60_000 &&
+    (resetMilliseconds === null ||
+      baselineExhaustionMilliseconds < resetMilliseconds)
+      ? new Date(baselineExhaustionMilliseconds).toISOString()
+      : null;
   return {
     status:
       resetMilliseconds === null
@@ -236,8 +343,11 @@ export function projectExhaustion(
         : exhaustionMilliseconds < resetMilliseconds
           ? "exhausts_before_reset"
           : "reset_before_exhaustion",
-    ratePercentPerHour: Number(rate.toFixed(3)),
+    ratePercentPerHour: Number(selected.rate.toFixed(3)),
+    rateBasis: selected.basis,
+    projectedFromUsedPercent: latest.usedPercent,
     projectedExhaustionAt,
+    projectedExhaustionRangeEndAt,
     sampleCount: epoch.length,
     spanMinutes,
   };

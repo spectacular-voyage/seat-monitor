@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788420923000
+updated: 1788426193000
 created: 1788377021465
 ---
 
@@ -222,13 +222,17 @@ Requests are bounded by maximum date ranges, page sizes, and returned point coun
 - Use only the latest epoch.
 - Require at least three distinct observations spanning at least 15 minutes.
 - Require a measurable usage change rather than treating rounding noise as consumption.
-- Estimate percentage points per hour with the median of pairwise slopes.
+- Build a nondecreasing usage envelope inside the epoch so small provider corrections cannot move an exhaustion estimate later.
+- Use the median pairwise slope as the stable full-epoch pace.
+- Also calculate endpoint pace over supported 30-minute, one-hour, and three-hour windows when at least two percentage points changed.
+- Use the fastest supported pace for risk warnings and retain the full-epoch pace as the later uncertainty bound.
 - A non-positive or invalid slope yields no exhaustion projection.
 - Return sample count and observation span so the UI can label the estimate honestly.
 
 ### Exhaustion projection
 
-- Project from the most recent observed percentage at the estimated rate.
+- Project from the maximum observed percentage in the current epoch at the fastest supported rate.
+- Return an early-to-baseline exhaustion range when both bounds occur before reset; otherwise return the conservative early time.
 - Compare the projected 100% instant with the canonical reset instant.
 - Distinguish `exhausts_before_reset`, `reset_before_exhaustion`, `already_exhausted`, `not_consuming`, and `insufficient_history`.
 - Do not present more timestamp precision than the underlying samples justify.

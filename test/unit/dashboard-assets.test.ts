@@ -45,6 +45,8 @@ describe("dashboard assets", () => {
       'projection.status === "exhausts_before_reset"',
     );
     expect(javascript).toContain("lastActivityAt");
+    expect(javascript).toContain("projectedExhaustionRangeEndAt");
+    expect(javascript).toContain("recent 30m");
     expect(javascript).toContain(
       'limit.projection.status === "exhausts_before_reset"',
     );
