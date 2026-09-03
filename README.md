@@ -205,7 +205,7 @@ Defaults retain raw scans for 30 days and hourly rollups plus reset events for 3
 
 Raw retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
 
-Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Exhaustion timestamps are estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
+Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Projection uses a nondecreasing usage envelope so small provider regressions cannot move exhaustion later, then compares supported 30-minute, one-hour, three-hour, and full-epoch rates. Warnings use the fastest supported pace and show an early-to-baseline range when it is meaningful. Exhaustion times remain estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
 
 ### Server settings and scheduled scans
 

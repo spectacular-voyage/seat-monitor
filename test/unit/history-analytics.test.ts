@@ -96,6 +96,30 @@ describe("historical quota analytics", () => {
     expect(result.status).toBe("reset_before_exhaustion");
   });
 
+  it("uses a monotonic envelope and the fastest supported recent pace", () => {
+    const resetAt = resetAfter(600);
+    const result = projectExhaustion(
+      [
+        point(minutesBeforeNow(720), 50, resetAt),
+        point(minutesBeforeNow(180), 88, resetAt),
+        point(minutesBeforeNow(60), 92, resetAt),
+        point(minutesBeforeNow(30), 94, resetAt),
+        point(minutesBeforeNow(1), 96, resetAt),
+        point(minutesBeforeNow(0), 95, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("exhausts_before_reset");
+    expect(result.projectedFromUsedPercent).toBe(96);
+    expect(result.ratePercentPerHour).toBe(4);
+    expect(result.rateBasis).toBe("recent_30m");
+    expect(result.projectedExhaustionAt).toBe(
+      new Date(nowMilliseconds + 60 * 60_000).toISOString(),
+    );
+    expect(result.projectedExhaustionRangeEndAt).not.toBeNull();
+  });
+
   it("withholds projections for sparse or flat observations", () => {
     const resetAt = resetAfter(300);
     expect(

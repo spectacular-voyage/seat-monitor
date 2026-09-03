@@ -34,7 +34,12 @@ export const projectionSchema = z
       "exhaustion_projected",
     ]),
     ratePercentPerHour: z.number().nonnegative().nullable(),
+    rateBasis: z
+      .enum(["epoch", "recent_30m", "recent_1h", "recent_3h"])
+      .nullable(),
+    projectedFromUsedPercent: z.number().min(0).max(100).nullable(),
     projectedExhaustionAt: isoInstantSchema.nullable(),
+    projectedExhaustionRangeEndAt: isoInstantSchema.nullable(),
     sampleCount: z.number().int().nonnegative(),
     spanMinutes: z.number().nonnegative(),
   })
