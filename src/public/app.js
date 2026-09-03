@@ -275,11 +275,15 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
     limit.projection.projectedExhaustionAt === null
       ? null
       : Date.parse(limit.projection.projectedExhaustionAt);
+  const showsForecast =
+    projectionAt !== null &&
+    Number.isFinite(projectionAt) &&
+    (limit.projection.status === "exhausts_before_reset" ||
+      limit.projection.status === "exhaustion_projected");
   const maximumExtension = rangeEnd + (rangeEnd - rangeStart) * 0.25;
-  const chartEnd =
-    projectionAt !== null && Number.isFinite(projectionAt)
-      ? Math.max(rangeEnd, Math.min(projectionAt, maximumExtension))
-      : rangeEnd;
+  const chartEnd = showsForecast
+    ? Math.max(rangeEnd, Math.min(projectionAt, maximumExtension))
+    : rangeEnd;
   const chartStart = rangeStart;
   const width = 640;
   const height = 176;
@@ -344,7 +348,13 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
       class: `reset-marker ${marker.kind}`,
     });
     const markerTitle = svgElement("title");
-    markerTitle.textContent = `${marker.kind === "provider" ? "Provider" : "Inferred"} reset ${formatDateTime(marker.at)}`;
+    const markerLabel =
+      marker.kind === "provider"
+        ? "Provider reset"
+        : marker.kind === "adjustment"
+          ? "Provider reset adjustment"
+          : "Inferred reset";
+    markerTitle.textContent = `${markerLabel} ${formatDateTime(marker.at)}`;
     line.append(markerTitle);
     svg.append(line);
   }
@@ -371,17 +381,19 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
         class: "usage-point",
       }),
     );
-    if (
-      projectionAt !== null &&
-      projectionAt > Date.parse(latest.observedAt) &&
-      projectionAt <= chartEnd
-    ) {
+    if (showsForecast && projectionAt > Date.parse(latest.observedAt)) {
+      const forecastEnd = Math.min(projectionAt, chartEnd);
+      const forecastProgress =
+        (forecastEnd - Date.parse(latest.observedAt)) /
+        (projectionAt - Date.parse(latest.observedAt));
+      const forecastUsed =
+        latest.usedPercent + (100 - latest.usedPercent) * forecastProgress;
       svg.append(
         svgElement("line", {
           x1: x(Date.parse(latest.observedAt)),
           y1: y(latest.usedPercent),
-          x2: x(projectionAt),
-          y2: y(100),
+          x2: x(forecastEnd),
+          y2: y(forecastUsed),
           class: "forecast-line",
         }),
       );
@@ -401,7 +413,7 @@ function createUsageGraph(limit, queryStart, rangeEnd) {
     "text-anchor": "end",
   });
   endLabel.textContent =
-    projectionAt !== null && chartEnd > rangeEnd ? "forecast" : "now";
+    showsForecast && chartEnd > rangeEnd ? "forecast" : "now";
   svg.append(startLabel, endLabel);
   wrapper.append(svg);
   return wrapper;
@@ -476,6 +488,9 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
     );
     panel.append(createLimit(limit, rangeStart, rangeEnd));
     panels.append(panel);
+  }
+  if (account.limits.length === 1) {
+    panels.classList.add("single-panel");
   }
   return panels;
 }

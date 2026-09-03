@@ -81,6 +81,9 @@ export type ServerOptions = {
     intervalMilliseconds: number;
     scanOnStartup: boolean;
   };
+  analytics?: {
+    showSpark: boolean;
+  };
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
@@ -328,7 +331,6 @@ export async function buildServer(
     return buildHistoryAnalytics({
       snapshots,
       series: options.history.readSeries(historyQuery),
-      resetEvents: options.history.listResetEvents(historyQuery),
       historyHealth: options.history.health,
       nowMilliseconds,
       ...range,
@@ -342,6 +344,7 @@ export async function buildServer(
         : {
             scanIntervalSeconds: options.scheduler.intervalMilliseconds / 1_000,
           }),
+      showSpark: options.analytics?.showSpark ?? true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
   });
@@ -380,6 +383,7 @@ async function main(): Promise<void> {
       intervalMilliseconds: settings.scanIntervalSeconds * 1_000,
       scanOnStartup: settings.scanOnStartup,
     },
+    analytics: settings.dashboard,
   });
 
   const shutdown = async (): Promise<void> => {

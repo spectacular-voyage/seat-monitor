@@ -707,11 +707,20 @@ button:focus-visible {
   stroke-dasharray: 4 4;
 }
 
+.reset-marker.adjustment {
+  stroke: #b39ce0;
+  stroke-dasharray: 2 3;
+}
+
 .forecast-line {
   stroke: #c9b9ef;
   stroke-dasharray: 3 4;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+}
+
+.window-grid.single-panel .window-panel {
+  grid-column: 1 / -1;
 }
 
 .chart-empty,

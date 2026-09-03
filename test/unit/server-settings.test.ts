@@ -33,6 +33,7 @@ describe("server settings", () => {
       scanOnStartup: true,
       port: 3_000,
       history: { rawRetentionDays: 30, retentionDays: 365 },
+      dashboard: { showSpark: true },
     });
   });
 
@@ -45,6 +46,7 @@ describe("server settings", () => {
         scanOnStartup: false,
         port: 3_001,
         history: { rawRetentionDays: 14, retentionDays: 180 },
+        dashboard: { showSpark: false },
       }),
     );
 
@@ -55,6 +57,7 @@ describe("server settings", () => {
           SEAT_MONITOR_SCAN_ON_STARTUP: "true",
           SEAT_MONITOR_PORT: "4000",
           SEAT_MONITOR_HISTORY_RAW_DAYS: "7",
+          SEAT_MONITOR_SHOW_SPARK: "true",
         },
         filePath,
       ),
@@ -63,6 +66,7 @@ describe("server settings", () => {
       scanOnStartup: true,
       port: 4_000,
       history: { rawRetentionDays: 7, retentionDays: 180 },
+      dashboard: { showSpark: true },
     });
   });
 

@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788413757000
+updated: 1788420923000
 created: 1788377021465
 ---
 
@@ -235,7 +235,9 @@ Requests are bounded by maximum date ranges, page sizes, and returned point coun
 
 ### Reset markers
 
-- Emit solid provider markers from unique canonical reset instants.
+- Emit solid provider markers only when a previously reported fixed boundary is crossed and the provider advances the window.
+- Suppress rolling reset forecasts whose reset and observation timestamps advance in lockstep, along with small timestamp jitter.
+- Emit a distinct provider-adjustment marker when a reset moves significantly out of step before its boundary; this retains provider generosity and unexplained changes without turning forecasts into events.
 - Emit dashed inferred markers only for a material drop without a usable provider boundary.
 - Label inferred markers as approximate.
 - Fable uses its weekly parent clock for presentation so one shared reset is not drawn twice.
@@ -360,6 +362,7 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Provider and inferred reset markers are visually and structurally distinct.
 - General and `WATCH` policy remain compatible with the current CLI.
 - Fable strategy honors session, shared weekly, and nested sub-cap constraints without inventing quota.
+- Spark visibility is configurable for dashboard analytics; disabling it leaves raw quota and CLI behavior unchanged and expands a lone Codex primary graph across the history row.
 - The dashboard uses account cards and accessible local SVG graphs without weakening CSP.
 - History failures do not suppress fresh quota data or leak filesystem/database details.
 - No credentials or raw upstream payloads enter the database, API, logs, fixtures, or package.
@@ -381,7 +384,7 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Added failure-tolerant scan recording around default CLI scans and inside the server's existing coalescing cache.
 - Added pure reset-epoch segmentation, median pairwise usage rate, exhaustion/reset comparison, inferred markers, and Fable-aware strategy while reusing the existing general `USE` and `WATCH` policy.
 - Added `GET /api/history/scans` and `GET /api/history/analytics` with strict queries, runtime-validated responses, pagination/range bounds, `no-store`, and the existing loopback security controls.
-- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, three-column quota-window history, period-normalized range controls, current/reset/rate/outlook text, forecast lines, distinct reset-marker styles, and visually nested Fable treatment. Secondary recommendations and diagnostic counts sit below history.
+- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, three-column quota-window history, period-normalized range controls, current/reset/rate/outlook text, evidence-based fixed/adjusted/inferred reset markers, and visually nested Fable treatment. Reset-first projections no longer create an empty forecast extension. Secondary recommendations and diagnostic counts sit below history.
 - Documented storage location, environment configuration, retention, API behavior, projection limits, and Fable semantics in the README.
 
 Verification on 2026-09-02:

@@ -45,7 +45,11 @@ describe("dashboard assets", () => {
       'projection.status === "exhausts_before_reset"',
     );
     expect(javascript).toContain("lastActivityAt");
+    expect(javascript).toContain(
+      'limit.projection.status === "exhausts_before_reset"',
+    );
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+    expect(css).toContain(".window-grid.single-panel .window-panel");
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 
