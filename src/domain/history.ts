@@ -43,7 +43,7 @@ export const projectionSchema = z
 export const resetMarkerSchema = z
   .object({
     at: isoInstantSchema,
-    kind: z.enum(["provider", "inferred"]),
+    kind: z.enum(["provider", "adjustment", "inferred"]),
   })
   .strict();
 

@@ -3,7 +3,7 @@ id: 0da223a15c5746e09f55065a
 title: 2026 09 02 Server Scheduler Settings
 desc: Server-owned background scans and file-backed operational configuration
 status: COMPLETED
-updated: 1788383545000
+updated: 1788420923000
 created: 1788382897000
 ---
 
@@ -39,11 +39,14 @@ Initial shape:
   "history": {
     "rawRetentionDays": 30,
     "retentionDays": 365
+  },
+  "dashboard": {
+    "showSpark": true
   }
 }
 ```
 
-Precedence is environment variables, then settings file, then built-in defaults. Existing environment variables remain supported. Add `SEAT_MONITOR_SCAN_INTERVAL_SECONDS` and `SEAT_MONITOR_SCAN_ON_STARTUP`.
+Precedence is environment variables, then settings file, then built-in defaults. Existing environment variables remain supported. Add `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`, `SEAT_MONITOR_SCAN_ON_STARTUP`, and `SEAT_MONITOR_SHOW_SPARK`.
 
 The scan interval is bounded from 30 to 3600 seconds. History retention remains bounded from 1 to 3650 days, with raw retention no greater than total retention. Host is not exposed in the settings file; the existing loopback-only validation remains authoritative.
 
@@ -107,6 +110,7 @@ Completed on 2026-09-02:
 - Kept manual `?refresh=true` scans coalesced and restarted the scheduled interval from their completion.
 - Applied settings-file retention defaults to the server history store without adding a new CLI failure dependency.
 - Added `settings.example.json` to the published-package contract.
+- Added a compatibility-default-on `dashboard.showSpark` setting so installations can omit Spark from dashboard analytics without changing raw quota or CLI output.
 - Documented application scheduling versus optional OS process supervision.
 - Added focused configuration, scheduler, cache, and no-HTTP-client server tests.
 

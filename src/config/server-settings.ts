@@ -28,6 +28,12 @@ const settingsFileSchema = z
       })
       .strict()
       .optional(),
+    dashboard: z
+      .object({
+        showSpark: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -38,6 +44,9 @@ export type ServerSettings = {
   history: {
     rawRetentionDays: number;
     retentionDays: number;
+  };
+  dashboard: {
+    showSpark: boolean;
   };
 };
 
@@ -191,5 +200,12 @@ export function readServerSettings(
       { name: "SEAT_MONITOR_PORT", minimum: 1, maximum: 65_535 },
     ),
     history: { rawRetentionDays, retentionDays },
+    dashboard: {
+      showSpark: booleanEnvironment(
+        environment.SEAT_MONITOR_SHOW_SPARK,
+        file.dashboard?.showSpark ?? true,
+        "SEAT_MONITOR_SHOW_SPARK",
+      ),
+    },
   };
 }

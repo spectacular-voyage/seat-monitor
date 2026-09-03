@@ -221,6 +221,9 @@ Copy the packaged `settings.example.json` or create a private file with this sha
   "history": {
     "rawRetentionDays": 30,
     "retentionDays": 365
+  },
+  "dashboard": {
+    "showSpark": true
   }
 }
 ```
@@ -234,6 +237,9 @@ Environment variables override the settings file:
 - `SEAT_MONITOR_PORT`
 - `SEAT_MONITOR_HISTORY_RAW_DAYS`
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`
+- `SEAT_MONITOR_SHOW_SPARK`, as `true` or `false`
+
+Set `dashboard.showSpark` to `false` when Spark limits are not relevant. This hides Spark from dashboard analytics and activity ordering while preserving raw `/api/quota` output and CLI compatibility. A lone Codex primary graph expands across the complete three-column history row.
 
 The settings file cannot enable remote listening. `SEAT_MONITOR_HOST` remains compatibility-only and still accepts only `127.0.0.1` or `localhost`.
 

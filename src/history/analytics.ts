@@ -12,7 +12,6 @@ import { minutesUntilReset } from "../services/time.js";
 import type { HistoryHealth } from "./service.js";
 import type {
   HistoryLimitSeries,
-  HistoryResetEvent,
   HistoryResolution,
   HistorySeriesPoint,
 } from "./types.js";
@@ -23,8 +22,13 @@ const MINIMUM_MEASURABLE_CHANGE = 0.5;
 const MATERIAL_DROP_PERCENT = 5;
 const MAXIMUM_CHART_POINTS = 500;
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
+const RESET_JITTER_MILLISECONDS = 120_000;
 
 type MeasuredPoint = HistorySeriesPoint & { usedPercent: number };
+
+function isSparkLimit(key: string): boolean {
+  return key.startsWith("codex_bengalfox.");
+}
 
 function seriesKey(
   accountAlias: string,
@@ -262,6 +266,64 @@ function inferredMarkers(
   return markers;
 }
 
+export function providerResetMarkers(
+  points: readonly HistorySeriesPoint[],
+): { at: string; kind: "provider" | "adjustment" }[] {
+  const candidates = points
+    .filter(
+      (point): point is HistorySeriesPoint & { resetAt: string } =>
+        point.resetAt !== null,
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(left.observedAt) - Date.parse(right.observedAt),
+    );
+  const markers: { at: string; kind: "provider" | "adjustment" }[] = [];
+  const seen = new Set<string>();
+  for (let index = 1; index < candidates.length; index += 1) {
+    const previous = candidates[index - 1];
+    const current = candidates[index];
+    if (previous === undefined || current === undefined) {
+      continue;
+    }
+    const previousObserved = Date.parse(previous.observedAt);
+    const currentObserved = Date.parse(current.observedAt);
+    const previousReset = Date.parse(previous.resetAt);
+    const currentReset = Date.parse(current.resetAt);
+    const observedDelta = currentObserved - previousObserved;
+    const resetDelta = currentReset - previousReset;
+    if (
+      observedDelta <= 0 ||
+      Math.abs(resetDelta) <= RESET_JITTER_MILLISECONDS
+    ) {
+      continue;
+    }
+    const rollingTolerance = Math.max(
+      RESET_JITTER_MILLISECONDS,
+      observedDelta * 0.2,
+    );
+    if (Math.abs(resetDelta - observedDelta) <= rollingTolerance) {
+      continue;
+    }
+
+    const crossedBoundary =
+      previousReset >= previousObserved - RESET_JITTER_MILLISECONDS &&
+      previousReset <= currentObserved + RESET_JITTER_MILLISECONDS;
+    const marker = {
+      at: new Date(
+        crossedBoundary ? previousReset : currentObserved,
+      ).toISOString(),
+      kind: crossedBoundary ? ("provider" as const) : ("adjustment" as const),
+    };
+    const markerKey = `${marker.kind}\0${marker.at}`;
+    if (!seen.has(markerKey)) {
+      seen.add(markerKey);
+      markers.push(marker);
+    }
+  }
+  return markers;
+}
+
 function downsample(
   points: readonly HistorySeriesPoint[],
 ): HistorySeriesPoint[] {
@@ -365,7 +427,6 @@ function fableRecommendation(
 export function buildHistoryAnalytics(options: {
   snapshots: readonly QuotaSnapshot[];
   series: readonly HistoryLimitSeries[];
-  resetEvents: readonly HistoryResetEvent[];
   historyHealth: HistoryHealth;
   nowMilliseconds: number;
   fromMilliseconds: number;
@@ -374,6 +435,7 @@ export function buildHistoryAnalytics(options: {
   periodMultiplier?: 1 | 2 | 5 | 10;
   lastScanAt?: string;
   scanIntervalSeconds?: number;
+  showSpark?: boolean;
   timeZone: string;
 }): HistoryAnalytics {
   const publicSnapshots = toPublicSnapshots(
@@ -384,8 +446,12 @@ export function buildHistoryAnalytics(options: {
     nowMilliseconds: options.nowMilliseconds,
     timeZone: options.timeZone,
   });
+  const visibleSeries =
+    options.showSpark === false
+      ? options.series.filter((series) => !isSparkLimit(series.limit.key))
+      : options.series;
   const seriesByKey = new Map(
-    options.series.map((series) => [
+    visibleSeries.map((series) => [
       seriesKey(series.accountAlias, series.platform, series.limit.key),
       series,
     ]),
@@ -398,8 +464,10 @@ export function buildHistoryAnalytics(options: {
           account.accountAlias === snapshot.accountAlias &&
           account.platform === snapshot.platform,
       );
-      const reportRows = reportAccount?.rows ?? [];
-      const historicalSeries = options.series.filter(
+      const reportRows = (reportAccount?.rows ?? []).filter(
+        (row) => options.showSpark !== false || !isSparkLimit(row.key),
+      );
+      const historicalSeries = visibleSeries.filter(
         (series) =>
           series.accountAlias.toLocaleLowerCase("en-US") ===
             snapshot.accountAlias.toLocaleLowerCase("en-US") &&
@@ -448,17 +516,7 @@ export function buildHistoryAnalytics(options: {
         const chartPoints = points.filter(
           (point) => Date.parse(point.observedAt) >= periodStartMilliseconds,
         );
-        const providerMarkers = isFable
-          ? []
-          : options.resetEvents
-              .filter(
-                (event) =>
-                  event.platform === snapshot.platform &&
-                  event.accountAlias.toLocaleLowerCase("en-US") ===
-                    snapshot.accountAlias.toLocaleLowerCase("en-US") &&
-                  event.limitKey === key,
-              )
-              .map((event) => ({ at: event.resetAt, kind: event.kind }));
+        const providerMarkers = isFable ? [] : providerResetMarkers(points);
         return [
           {
             key,
@@ -499,7 +557,7 @@ export function buildHistoryAnalytics(options: {
         lastActivityAt: latestActivityAt(
           snapshot.accountAlias,
           snapshot.platform,
-          options.series,
+          visibleSeries,
         ),
         status: snapshot.status,
         error: snapshot.status === "error" ? snapshot.error : null,

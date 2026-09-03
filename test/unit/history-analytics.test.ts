@@ -4,6 +4,7 @@ import { quotaSuccessSchema } from "../../src/domain/quota.js";
 import {
   buildHistoryAnalytics,
   projectExhaustion,
+  providerResetMarkers,
 } from "../../src/history/analytics.js";
 import type {
   HistoryLimitSeries,
@@ -11,6 +12,7 @@ import type {
 } from "../../src/history/types.js";
 import {
   claudeSnapshot,
+  codexSnapshotWithSpark,
   nowMilliseconds,
   resetAfter,
 } from "../helpers/quota-fixtures.js";
@@ -122,7 +124,6 @@ describe("historical quota analytics", () => {
         series("base.weekly", [8, 9, 10], resetAfter(300)),
         series("fable.weekly", [50, 55, 60], resetAfter(300)),
       ],
-      resetEvents: [],
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
@@ -169,7 +170,6 @@ describe("historical quota analytics", () => {
         series("base.weekly", [8, 9, 10]),
         series("fable.weekly", [70, 80, 90]),
       ],
-      resetEvents: [],
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
@@ -210,7 +210,6 @@ describe("historical quota analytics", () => {
     const result = buildHistoryAnalytics({
       snapshots: [unsupported],
       series: [],
-      resetEvents: [],
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
@@ -248,7 +247,6 @@ describe("historical quota analytics", () => {
           ],
         },
       ],
-      resetEvents: [],
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 10 * 24 * 60 * 60_000,
@@ -294,7 +292,6 @@ describe("historical quota analytics", () => {
           ],
         },
       ],
-      resetEvents: [],
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
@@ -315,5 +312,53 @@ describe("historical quota analytics", () => {
     ]);
     expect(result.lastScanAt).toBe(new Date(nowMilliseconds).toISOString());
     expect(result.scanIntervalSeconds).toBe(60);
+  });
+
+  it("can hide Spark without changing the raw Codex snapshot", () => {
+    const snapshot = codexSnapshotWithSpark();
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      showSpark: false,
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(result.accounts[0]?.limits.map((limit) => limit.key)).toEqual([
+      "codex.primary",
+    ]);
+    expect(snapshot.status === "ok" ? snapshot.limits : []).toHaveLength(2);
+  });
+
+  it("suppresses rolling resets but preserves boundaries and adjustments", () => {
+    const start = Date.parse("2026-09-02T18:00:00.000Z");
+    const rolling = [0, 60, 120].map((minutes) =>
+      point(
+        new Date(start + minutes * 60_000).toISOString(),
+        0,
+        new Date(start + (minutes + 300) * 60_000).toISOString(),
+      ),
+    );
+    expect(providerResetMarkers(rolling)).toEqual([]);
+
+    const boundary = providerResetMarkers([
+      point("2026-09-02T18:59:00.000Z", 80, "2026-09-02T19:00:00.000Z"),
+      point("2026-09-02T19:01:00.000Z", 0, "2026-09-09T19:00:00.000Z"),
+    ]);
+    expect(boundary).toEqual([
+      { at: "2026-09-02T19:00:00.000Z", kind: "provider" },
+    ]);
+
+    const adjustment = providerResetMarkers([
+      point("2026-09-02T18:00:00.000Z", 10, "2026-09-02T23:00:00.000Z"),
+      point("2026-09-02T19:00:00.000Z", 10, "2026-09-03T01:00:00.000Z"),
+    ]);
+    expect(adjustment).toEqual([
+      { at: "2026-09-02T19:00:00.000Z", kind: "adjustment" },
+    ]);
   });
 });
