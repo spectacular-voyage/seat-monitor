@@ -88,16 +88,19 @@
           <div
             id="range-controls"
             class="range-controls"
-            aria-label="History range"
+            aria-label="Number of quota periods"
           >
-            <button type="button" data-range-hours="24">24h</button>
-            <button type="button" data-range-hours="168" aria-pressed="true">
-              7d
+            <button type="button" data-periods="1" aria-pressed="true">
+              1×
             </button>
-            <button type="button" data-range-hours="720">30d</button>
-            <button type="button" data-range-hours="2160">90d</button>
+            <button type="button" data-periods="2">2×</button>
+            <button type="button" data-periods="5">5×</button>
+            <button type="button" data-periods="10">10×</button>
           </div>
         </div>
+        <p class="range-explanation">
+          Each graph uses its own quota period, plus 5% context.
+        </p>
         <div id="account-cards" class="account-grid" aria-live="polite">
           <article class="empty-card">
             <strong>Loading account history…</strong>

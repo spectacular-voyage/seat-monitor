@@ -56,6 +56,7 @@ export const analyticsLimitSchema = z
     availability: z.enum(["available", "unsupported"]),
     currentUsedPercent: z.number().min(0).max(100).nullable(),
     headroomPercent: z.number().min(0).max(100).nullable(),
+    windowDurationMinutes: z.number().positive().nullable(),
     resetAt: isoInstantSchema.nullable(),
     minutesUntilReset: z.number().int().nonnegative().nullable(),
     points: z.array(historySeriesPointSchema),
@@ -116,6 +117,9 @@ export const historyAnalyticsSchema = z
     from: isoInstantSchema,
     to: isoInstantSchema,
     requestedResolution: z.enum(["auto", "raw", "hour"]),
+    periodMultiplier: z
+      .union([z.literal(1), z.literal(2), z.literal(5), z.literal(10)])
+      .nullable(),
     historyHealth: historyHealthSchema,
     accounts: z.array(analyticsAccountSchema),
     recommendations: z

@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788378557000
+updated: 1788412918000
 created: 1788377021465
 ---
 
@@ -191,11 +191,13 @@ Query:
 
 - `from` and `to`: ISO instants
 - `resolution`: `auto`, `raw`, or `hour`
+- `periods`: optional `1`, `2`, `5`, or `10` multiplier applied independently to each quota window
 - optional account alias filter
 
 Response:
 
 - history health and effective resolution
+- selected period multiplier
 - latest persisted snapshot batch
 - per-account/per-limit series
 - reset markers
@@ -277,7 +279,7 @@ Each card includes:
 
 Claude weekly and Fable remain visually hierarchical. Fable is indented or dashed beneath the shared weekly pool and does not receive an independent reset clock. Codex windows remain grouped by provider limit ID.
 
-Range controls initially support 24 hours, 7 days, 30 days, and 90 days. The client requests `auto` resolution. Empty, first-scan, partial-error, total-error, insufficient-history, and unavailable-history states must be explicit.
+Range controls support 1×, 2×, 5×, and 10× quota periods. Each graph uses its own effective window duration plus 5% context: five hours for Session, seven days for weekly limits, and the provider-reported duration when available. The client requests `auto` resolution. Empty, first-scan, partial-error, total-error, insufficient-history, and unavailable-history states must be explicit.
 
 Continue assigning provider-controlled strings through DOM `textContent`; do not introduce `innerHTML`, external chart scripts, CDN assets, or inline scripts that weaken CSP.
 
@@ -376,7 +378,7 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Added failure-tolerant scan recording around default CLI scans and inside the server's existing coalescing cache.
 - Added pure reset-epoch segmentation, median pairwise usage rate, exhaustion/reset comparison, inferred markers, and Fable-aware strategy while reusing the existing general `USE` and `WATCH` policy.
 - Added `GET /api/history/scans` and `GET /api/history/analytics` with strict queries, runtime-validated responses, pagination/range bounds, `no-store`, and the existing loopback security controls.
-- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive account cards, local SVG charts, three-column quota-window history, range controls, current/reset/rate/outlook text, forecast lines, distinct reset-marker styles, and visually nested Fable treatment.
+- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive account cards, local SVG charts, three-column quota-window history, period-normalized range controls, current/reset/rate/outlook text, forecast lines, distinct reset-marker styles, and visually nested Fable treatment.
 - Documented storage location, environment configuration, retention, API behavior, projection limits, and Fable semantics in the README.
 
 Verification on 2026-09-02:

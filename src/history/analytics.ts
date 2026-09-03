@@ -22,6 +22,7 @@ const MINIMUM_RATE_SAMPLES = 3;
 const MINIMUM_MEASURABLE_CHANGE = 0.5;
 const MATERIAL_DROP_PERCENT = 5;
 const MAXIMUM_CHART_POINTS = 500;
+const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 
 type MeasuredPoint = HistorySeriesPoint & { usedPercent: number };
 
@@ -320,6 +321,7 @@ export function buildHistoryAnalytics(options: {
   fromMilliseconds: number;
   toMilliseconds: number;
   requestedResolution: HistoryResolution;
+  periodMultiplier?: 1 | 2 | 5 | 10;
   timeZone: string;
 }): HistoryAnalytics {
   const publicSnapshots = toPublicSnapshots(
@@ -371,7 +373,29 @@ export function buildHistoryAnalytics(options: {
         const resetAt = isFable
           ? (parent?.resetAt ?? null)
           : (row?.resetAt ?? history?.points.at(-1)?.resetAt ?? null);
+        const windowDurationMinutes = isFable
+          ? (parent?.windowDurationMinutes ??
+            history?.points.at(-1)?.windowDurationMinutes ??
+            null)
+          : (row?.windowDurationMinutes ??
+            history?.points.at(-1)?.windowDurationMinutes ??
+            null);
         const points = history?.points ?? [];
+        const periodStartMilliseconds =
+          options.periodMultiplier === undefined ||
+          windowDurationMinutes === null
+            ? options.fromMilliseconds
+            : Math.max(
+                options.fromMilliseconds,
+                options.toMilliseconds -
+                  windowDurationMinutes *
+                    options.periodMultiplier *
+                    PERIOD_CONTEXT_MULTIPLIER *
+                    60_000,
+              );
+        const chartPoints = points.filter(
+          (point) => Date.parse(point.observedAt) >= periodStartMilliseconds,
+        );
         const providerMarkers = isFable
           ? []
           : options.resetEvents
@@ -399,12 +423,13 @@ export function buildHistoryAnalytics(options: {
               points.at(-1)?.usedPercent === undefined
                 ? null
                 : 100 - (points.at(-1)?.usedPercent ?? 100)),
+            windowDurationMinutes,
             resetAt,
             minutesUntilReset: minutesUntilReset(
               resetAt,
               options.nowMilliseconds,
             ),
-            points: downsample(points),
+            points: downsample(chartPoints),
             resetMarkers: isFable
               ? []
               : [...providerMarkers, ...inferredMarkers(points)].sort(
@@ -433,6 +458,7 @@ export function buildHistoryAnalytics(options: {
     from: new Date(options.fromMilliseconds).toISOString(),
     to: new Date(options.toMilliseconds).toISOString(),
     requestedResolution: options.requestedResolution,
+    periodMultiplier: options.periodMultiplier ?? null,
     historyHealth: options.historyHealth,
     accounts,
     recommendations: {

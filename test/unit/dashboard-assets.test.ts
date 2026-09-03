@@ -19,6 +19,8 @@ describe("dashboard assets", () => {
   it("uses account cards and local SVG charts instead of the quota table", () => {
     expect(html).toContain('id="account-cards"');
     expect(html).toContain('id="range-controls"');
+    expect(html).toContain('data-periods="10"');
+    expect(html).not.toContain("data-range-hours");
     expect(html).toContain('id="fleet-capacity"');
     expect(html.indexOf('id="fleet-capacity"')).toBeLessThan(
       html.indexOf('class="summary"'),
@@ -30,6 +32,8 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('return "weekly-panel"');
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
+    expect(javascript).toContain("PERIOD_CONTEXT_MULTIPLIER = 1.05");
+    expect(javascript).toContain("periods: String(periodMultiplier)");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
   });
 

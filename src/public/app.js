@@ -1,5 +1,6 @@
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-const DEFAULT_RANGE_HOURS = 168;
+const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
+const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 
 const refreshButton = document.querySelector("#refresh");
 const accountCards = document.querySelector("#account-cards");
@@ -16,7 +17,7 @@ const fleetCapacity = document.querySelector("#fleet-capacity");
 const rangeControls = document.querySelector("#range-controls");
 
 let loading = false;
-let rangeHours = DEFAULT_RANGE_HOURS;
+let periodMultiplier = 1;
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -120,13 +121,40 @@ function toneForLimit(limit) {
   return "healthy";
 }
 
-function createUsageGraph(limit, rangeStart, rangeEnd) {
+function inferredWindowDurationMinutes(limit) {
+  if (limit.windowDurationMinutes !== null) {
+    return limit.windowDurationMinutes;
+  }
+  if (limit.key === "base.session" || limit.key === "codex_bengalfox.primary") {
+    return 300;
+  }
+  if (limit.key.includes("weekly") || limit.key.endsWith(".secondary")) {
+    return LONGEST_QUOTA_PERIOD_MINUTES;
+  }
+  return LONGEST_QUOTA_PERIOD_MINUTES;
+}
+
+function chartRangeStart(limit, queryStart, rangeEnd) {
+  const durationMilliseconds =
+    inferredWindowDurationMinutes(limit) *
+    periodMultiplier *
+    PERIOD_CONTEXT_MULTIPLIER *
+    60_000;
+  return Math.max(queryStart, rangeEnd - durationMilliseconds);
+}
+
+function createUsageGraph(limit, queryStart, rangeEnd) {
   const wrapper = element("div", "chart-wrap");
-  const measured = limit.points.filter(
-    (point) =>
+  const rangeStart = chartRangeStart(limit, queryStart, rangeEnd);
+  const measured = limit.points.filter((point) => {
+    const observedAt = Date.parse(point.observedAt);
+    return (
       point.usedPercent !== null &&
-      Number.isFinite(Date.parse(point.observedAt)),
-  );
+      Number.isFinite(observedAt) &&
+      observedAt >= rangeStart &&
+      observedAt <= rangeEnd
+    );
+  });
   if (measured.length === 0) {
     wrapper.append(
       element("p", "chart-empty", "History begins after the next scan."),
@@ -143,7 +171,7 @@ function createUsageGraph(limit, rangeStart, rangeEnd) {
     projectionAt !== null && Number.isFinite(projectionAt)
       ? Math.max(rangeEnd, Math.min(projectionAt, maximumExtension))
       : rangeEnd;
-  const chartStart = Math.min(rangeStart, Date.parse(measured[0].observedAt));
+  const chartStart = rangeStart;
   const width = 640;
   const height = 176;
   const left = 36;
@@ -626,6 +654,7 @@ function fallbackLimit(limit) {
     currentUsedPercent: limit.usedPercent,
     headroomPercent:
       limit.usedPercent === null ? null : 100 - limit.usedPercent,
+    windowDurationMinutes: limit.windowDurationMinutes,
     resetAt: limit.key.startsWith("fable") ? null : limit.resetAt,
     minutesUntilReset: limit.minutesUntilReset,
     points: [],
@@ -652,7 +681,13 @@ function renderLiveFallback(snapshots) {
     limits: snapshot.status === "ok" ? snapshot.limits.map(fallbackLimit) : [],
   }));
   renderAnalytics({
-    from: new Date(now - rangeHours * 3_600_000).toISOString(),
+    from: new Date(
+      now -
+        LONGEST_QUOTA_PERIOD_MINUTES *
+          periodMultiplier *
+          PERIOD_CONTEXT_MULTIPLIER *
+          60_000,
+    ).toISOString(),
     to: new Date(now).toISOString(),
     accounts,
     historyHealth: "degraded",
@@ -740,11 +775,18 @@ async function fetchDashboard(forceRefresh = false) {
       throw new Error("Quota response was invalid.");
     }
     const to = new Date();
-    const from = new Date(to.getTime() - rangeHours * 3_600_000);
+    const from = new Date(
+      to.getTime() -
+        LONGEST_QUOTA_PERIOD_MINUTES *
+          periodMultiplier *
+          PERIOD_CONTEXT_MULTIPLIER *
+          60_000,
+    );
     const query = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
       resolution: "auto",
+      periods: String(periodMultiplier),
     });
     const analytics = await requestJson(`/api/history/analytics?${query}`);
     renderAnalytics(analytics);
@@ -782,11 +824,11 @@ refreshButton.addEventListener("click", () => {
   void fetchDashboard(true);
 });
 rangeControls.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-range-hours]");
+  const button = event.target.closest("button[data-periods]");
   if (!button) {
     return;
   }
-  rangeHours = Number(button.dataset.rangeHours);
+  periodMultiplier = Number(button.dataset.periods);
   for (const candidate of rangeControls.querySelectorAll("button")) {
     candidate.setAttribute("aria-pressed", String(candidate === button));
   }

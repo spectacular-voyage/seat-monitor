@@ -184,12 +184,12 @@ Start the local server:
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Range controls cover 24 hours, 7 days, 30 days, and 90 days.
+Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. History controls show 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
-- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations.
+- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=1|2|5|10` query filters and downsamples every series against its own effective quota duration.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 
