@@ -22,7 +22,12 @@ describe("dashboard assets", () => {
     expect(html).toContain('data-periods="10"');
     expect(html).not.toContain("data-range-hours");
     expect(html).toContain('id="fleet-capacity"');
+    expect(html).toContain('id="top-warnings"');
+    expect(html).not.toContain('id="refresh"');
     expect(html.indexOf('id="fleet-capacity"')).toBeLessThan(
+      html.indexOf('class="summary"'),
+    );
+    expect(html.indexOf('id="account-cards"')).toBeLessThan(
       html.indexOf('class="summary"'),
     );
     expect(html).not.toContain("<table");
@@ -34,7 +39,14 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("createCapacityMeter");
     expect(javascript).toContain("PERIOD_CONTEXT_MULTIPLIER = 1.05");
     expect(javascript).toContain("periods: String(periodMultiplier)");
+    expect(javascript).toContain("Scheduled scans are stale");
+    expect(javascript).toContain('{ label: "Refresh now"');
+    expect(javascript).toContain(
+      'projection.status === "exhausts_before_reset"',
+    );
+    expect(javascript).toContain("lastActivityAt");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+    expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 
   it("keeps provider-controlled rendering on textContent", () => {

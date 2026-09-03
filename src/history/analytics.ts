@@ -34,6 +34,56 @@ function seriesKey(
   return `${platform}\0${accountAlias.toLocaleLowerCase("en-US")}\0${limitKey}`;
 }
 
+function latestActivityAt(
+  accountAlias: string,
+  platform: string,
+  series: readonly HistoryLimitSeries[],
+): string | null {
+  let latestMilliseconds: number | null = null;
+  for (const limit of series) {
+    if (
+      limit.platform !== platform ||
+      limit.accountAlias.toLocaleLowerCase("en-US") !==
+        accountAlias.toLocaleLowerCase("en-US")
+    ) {
+      continue;
+    }
+    const measured = limit.points
+      .filter(
+        (point): point is HistorySeriesPoint & { usedPercent: number } =>
+          point.usedPercent !== null,
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(left.observedAt) - Date.parse(right.observedAt),
+      );
+    const first = measured[0];
+    if (first !== undefined && first.usedPercent > 0) {
+      latestMilliseconds = Math.max(
+        latestMilliseconds ?? Number.NEGATIVE_INFINITY,
+        Date.parse(first.observedAt),
+      );
+    }
+    for (let index = 1; index < measured.length; index += 1) {
+      const previous = measured[index - 1];
+      const current = measured[index];
+      if (
+        previous !== undefined &&
+        current !== undefined &&
+        current.usedPercent > previous.usedPercent
+      ) {
+        latestMilliseconds = Math.max(
+          latestMilliseconds ?? Number.NEGATIVE_INFINITY,
+          Date.parse(current.observedAt),
+        );
+      }
+    }
+  }
+  return latestMilliseconds === null
+    ? null
+    : new Date(latestMilliseconds).toISOString();
+}
+
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -322,6 +372,8 @@ export function buildHistoryAnalytics(options: {
   toMilliseconds: number;
   requestedResolution: HistoryResolution;
   periodMultiplier?: 1 | 2 | 5 | 10;
+  lastScanAt?: string;
+  scanIntervalSeconds?: number;
   timeZone: string;
 }): HistoryAnalytics {
   const publicSnapshots = toPublicSnapshots(
@@ -444,11 +496,27 @@ export function buildHistoryAnalytics(options: {
         platform: snapshot.platform,
         plan: snapshot.plan,
         observedAt: snapshot.observedAt,
+        lastActivityAt: latestActivityAt(
+          snapshot.accountAlias,
+          snapshot.platform,
+          options.series,
+        ),
         status: snapshot.status,
         error: snapshot.status === "error" ? snapshot.error : null,
         limits,
       };
     },
+  );
+  accounts.sort(
+    (left, right) =>
+      (right.lastActivityAt === null
+        ? Number.NEGATIVE_INFINITY
+        : Date.parse(right.lastActivityAt)) -
+        (left.lastActivityAt === null
+          ? Number.NEGATIVE_INFINITY
+          : Date.parse(left.lastActivityAt)) ||
+      Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+      left.accountAlias.localeCompare(right.accountAlias),
   );
   const watch = report.watch;
 
@@ -459,6 +527,8 @@ export function buildHistoryAnalytics(options: {
     to: new Date(options.toMilliseconds).toISOString(),
     requestedResolution: options.requestedResolution,
     periodMultiplier: options.periodMultiplier ?? null,
+    lastScanAt: options.lastScanAt ?? null,
+    scanIntervalSeconds: options.scanIntervalSeconds ?? null,
     historyHealth: options.historyHealth,
     accounts,
     recommendations: {

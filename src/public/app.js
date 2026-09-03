@@ -2,7 +2,6 @@ const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 
-const refreshButton = document.querySelector("#refresh");
 const accountCards = document.querySelector("#account-cards");
 const accountCount = document.querySelector("#account-count");
 const limitCount = document.querySelector("#limit-count");
@@ -14,6 +13,7 @@ const generalStrategy = document.querySelector("#general-strategy");
 const fableStrategy = document.querySelector("#fable-strategy");
 const watchStrategy = document.querySelector("#watch-strategy");
 const fleetCapacity = document.querySelector("#fleet-capacity");
+const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
 
 let loading = false;
@@ -105,6 +105,115 @@ function projectionText(projection) {
     default:
       return "Projection needs more history";
   }
+}
+
+function formatInterval(seconds) {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = seconds / 60;
+  return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
+}
+
+function createWarning(tone, title, detail, action) {
+  const warning = element("article", `warning-item ${tone}`);
+  const marker = element(
+    "span",
+    "warning-marker",
+    tone === "healthy" ? "✓" : "!",
+  );
+  marker.setAttribute("aria-hidden", "true");
+  const copy = element("div", "warning-copy");
+  copy.append(
+    element("strong", "warning-title", title),
+    element("p", "warning-detail", detail),
+  );
+  if (action !== undefined) {
+    const button = element("button", "warning-action", action.label);
+    button.type = "button";
+    button.addEventListener("click", action.run);
+    copy.append(button);
+  }
+  warning.append(marker, copy);
+  return warning;
+}
+
+function renderTopWarnings(payload) {
+  const warnings = [];
+  const scanIntervalSeconds = payload.scanIntervalSeconds ?? null;
+  const lastScanAt = payload.lastScanAt ?? null;
+  const generatedAt = Number.isFinite(Date.parse(payload.generatedAt))
+    ? Date.parse(payload.generatedAt)
+    : Date.now();
+  if (scanIntervalSeconds !== null) {
+    if (lastScanAt === null) {
+      warnings.push(
+        createWarning(
+          "warning",
+          "Waiting for the first scheduled scan",
+          `Expected every ${formatInterval(scanIntervalSeconds)} after completion.`,
+        ),
+      );
+    } else {
+      const ageMilliseconds = generatedAt - Date.parse(lastScanAt);
+      const staleAfterMilliseconds = scanIntervalSeconds * 2 * 1_000;
+      if (ageMilliseconds > staleAfterMilliseconds) {
+        warnings.push(
+          createWarning(
+            "danger",
+            "Scheduled scans are stale",
+            `Last completed ${formatDateTime(lastScanAt)}; expected within two ${formatInterval(scanIntervalSeconds)} intervals.`,
+            { label: "Refresh now", run: () => void fetchDashboard(true) },
+          ),
+        );
+      }
+    }
+  }
+
+  const exhaustions = payload.accounts
+    .filter((account) => account.status === "ok")
+    .flatMap((account) =>
+      account.limits
+        .filter(
+          (limit) =>
+            limit.projection.status === "already_exhausted" ||
+            limit.projection.status === "exhausts_before_reset",
+        )
+        .map((limit) => ({ account, limit })),
+    )
+    .sort((left, right) => {
+      const leftAt = left.limit.projection.projectedExhaustionAt;
+      const rightAt = right.limit.projection.projectedExhaustionAt;
+      return (
+        (leftAt === null ? Number.NEGATIVE_INFINITY : Date.parse(leftAt)) -
+        (rightAt === null ? Number.NEGATIVE_INFINITY : Date.parse(rightAt))
+      );
+    });
+  for (const { account, limit } of exhaustions) {
+    const exhausted = limit.projection.status === "already_exhausted";
+    warnings.push(
+      createWarning(
+        exhausted ? "danger" : "warning",
+        `${account.accountAlias} · ${limit.label}`,
+        exhausted
+          ? "Quota is exhausted."
+          : limit.projection.projectedExhaustionAt === null
+            ? "Projected to exhaust before reset."
+            : `Projected to exhaust ${formatDateTime(limit.projection.projectedExhaustionAt)} before reset.`,
+      ),
+    );
+  }
+
+  if (warnings.length === 0) {
+    const scanDetail =
+      lastScanAt === null
+        ? "Current scan timing is unavailable."
+        : `Last scan completed ${formatDateTime(lastScanAt)}.`;
+    warnings.push(
+      createWarning("healthy", "No projected exhaustions", scanDetail),
+    );
+  }
+  topWarnings.replaceChildren(...warnings);
 }
 
 function toneForLimit(limit) {
@@ -498,7 +607,11 @@ function createAccountCard(account, rangeStart, rangeEnd) {
     element(
       "p",
       "account-plan",
-      account.plan === null ? "Plan not reported" : `${account.plan} plan`,
+      `${account.plan === null ? "Plan not reported" : `${account.plan} plan`}${
+        account.lastActivityAt === null || account.lastActivityAt === undefined
+          ? " · no recent usage change"
+          : ` · active ${formatDateTime(account.lastActivityAt)}`
+      }`,
     ),
   );
   header.append(
@@ -612,7 +725,22 @@ function renderAnalytics(payload) {
   accountCards.replaceChildren();
   const rangeStart = Date.parse(payload.from);
   const rangeEnd = Date.parse(payload.to);
-  if (payload.accounts.length === 0) {
+  const accounts = [...payload.accounts].sort((left, right) => {
+    const leftActivity =
+      left.lastActivityAt === null || left.lastActivityAt === undefined
+        ? Number.NEGATIVE_INFINITY
+        : Date.parse(left.lastActivityAt);
+    const rightActivity =
+      right.lastActivityAt === null || right.lastActivityAt === undefined
+        ? Number.NEGATIVE_INFINITY
+        : Date.parse(right.lastActivityAt);
+    return (
+      rightActivity - leftActivity ||
+      Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+      left.accountAlias.localeCompare(right.accountAlias)
+    );
+  });
+  if (accounts.length === 0) {
     accountCards.append(
       element(
         "article",
@@ -621,25 +749,26 @@ function renderAnalytics(payload) {
       ),
     );
   } else {
-    for (const account of payload.accounts) {
+    for (const account of accounts) {
       accountCards.append(createAccountCard(account, rangeStart, rangeEnd));
     }
   }
-  const limits = payload.accounts.reduce(
+  const limits = accounts.reduce(
     (total, account) => total + account.limits.length,
     0,
   );
-  const errors = payload.accounts.filter(
+  const errors = accounts.filter(
     (account) => account.status === "error",
   ).length;
-  accountCount.textContent = String(payload.accounts.length);
+  accountCount.textContent = String(accounts.length);
   limitCount.textContent = String(limits);
   errorCount.textContent = String(errors);
   historyStatus.textContent =
     payload.historyHealth === "ready" ? "Local · ready" : "Local · degraded";
   historyStatus.className =
     payload.historyHealth === "ready" ? "healthy-text" : "warning-text";
-  renderFleetCapacity(payload.accounts);
+  renderTopWarnings({ ...payload, accounts });
+  renderFleetCapacity(accounts);
   renderRecommendations(payload.recommendations);
   updateCountdowns();
 }
@@ -676,11 +805,13 @@ function renderLiveFallback(snapshots) {
     platform: snapshot.platform,
     plan: snapshot.plan,
     observedAt: snapshot.observedAt,
+    lastActivityAt: null,
     status: snapshot.status,
     error: snapshot.status === "error" ? snapshot.error : null,
     limits: snapshot.status === "ok" ? snapshot.limits.map(fallbackLimit) : [],
   }));
   renderAnalytics({
+    generatedAt: new Date(now).toISOString(),
     from: new Date(
       now -
         LONGEST_QUOTA_PERIOD_MINUTES *
@@ -691,6 +822,12 @@ function renderLiveFallback(snapshots) {
     to: new Date(now).toISOString(),
     accounts,
     historyHealth: "degraded",
+    lastScanAt:
+      snapshots
+        .map((snapshot) => snapshot.observedAt)
+        .sort()
+        .at(-1) ?? null,
+    scanIntervalSeconds: null,
     recommendations: { general: null, fable: null, watch: null },
   });
 }
@@ -701,6 +838,13 @@ function renderUnavailableShell() {
   errorCount.textContent = "—";
   historyStatus.textContent = "Not connected";
   historyStatus.className = "warning-text";
+  topWarnings.replaceChildren(
+    createWarning(
+      "danger",
+      "Seat Monitor is not connected",
+      "Start seat-monitor-server to resume scheduled scans.",
+    ),
+  );
   fleetCapacity.replaceChildren(
     element(
       "p",
@@ -761,8 +905,6 @@ async function fetchDashboard(forceRefresh = false) {
     return;
   }
   loading = true;
-  refreshButton.disabled = true;
-  refreshButton.classList.add("spinning");
   connectionStatus.textContent = "Refreshing…";
   connectionStatus.className = "connection";
 
@@ -810,8 +952,6 @@ async function fetchDashboard(forceRefresh = false) {
     }
   } finally {
     loading = false;
-    refreshButton.disabled = false;
-    refreshButton.classList.remove("spinning");
     lastChecked.textContent = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
@@ -820,9 +960,6 @@ async function fetchDashboard(forceRefresh = false) {
   }
 }
 
-refreshButton.addEventListener("click", () => {
-  void fetchDashboard(true);
-});
 rangeControls.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-periods]");
   if (!button) {

@@ -11,72 +11,36 @@
   <body>
     <main class="shell">
       <header class="masthead">
-        <div>
+        <div class="brand">
           <p class="eyebrow">Local quota telemetry</p>
           <h1>Seat Monitor</h1>
           <p class="lede">
             Current headroom, historical pace, and what resets first.
           </p>
         </div>
-        <button id="refresh" class="refresh" type="button">
-          <span aria-hidden="true">↻</span>
-          Refresh
-        </button>
+        <section
+          id="top-warnings"
+          class="top-warnings"
+          aria-label="Quota warnings"
+          aria-live="polite"
+        >
+          <p class="warning-placeholder">Checking quota warnings…</p>
+        </section>
       </header>
 
-      <section class="strategy" aria-labelledby="strategy-heading">
+      <section class="capacity" aria-labelledby="capacity-heading">
         <div class="section-heading">
           <div>
             <p class="eyebrow">At a glance</p>
-            <h2 id="strategy-heading">Capacity now</h2>
+            <h2 id="capacity-heading">Capacity now</h2>
           </div>
           <p id="connection-status" class="connection" role="status">
             Connecting…
           </p>
         </div>
-        <div class="strategy-grid">
-          <article id="general-strategy" class="strategy-card">
-            <span class="strategy-label">General work</span>
-            <strong class="strategy-value">Waiting for a scan</strong>
-            <p class="strategy-detail">Current headroom will appear here.</p>
-          </article>
-          <article id="fable-strategy" class="strategy-card">
-            <span class="strategy-label">Fable work</span>
-            <strong class="strategy-value">Waiting for a scan</strong>
-            <p class="strategy-detail">
-              Nested weekly capacity will appear here.
-            </p>
-          </article>
-          <article id="watch-strategy" class="strategy-card">
-            <span class="strategy-label">Fleet watch</span>
-            <strong class="strategy-value">Waiting for a scan</strong>
-            <p class="strategy-detail">
-              The tightest account-wide limit will appear here.
-            </p>
-          </article>
-        </div>
         <div id="fleet-capacity" class="fleet-capacity" aria-live="polite">
           <p class="fleet-loading">Loading fleet capacity…</p>
         </div>
-      </section>
-
-      <section class="summary" aria-label="Quota summary">
-        <article>
-          <span class="summary-label">Accounts</span>
-          <strong id="account-count">—</strong>
-        </article>
-        <article>
-          <span class="summary-label">Reported limits</span>
-          <strong id="limit-count">—</strong>
-        </article>
-        <article>
-          <span class="summary-label">Account errors</span>
-          <strong id="error-count">—</strong>
-        </article>
-        <article>
-          <span class="summary-label">History</span>
-          <strong id="history-status">Waiting…</strong>
-        </article>
       </section>
 
       <section class="accounts" aria-labelledby="accounts-heading">
@@ -107,6 +71,52 @@
             <span>Quota windows will appear as three graph columns.</span>
           </article>
         </div>
+      </section>
+
+      <section
+        class="bottom-dashboard"
+        aria-label="Secondary dashboard information"
+      >
+        <div class="strategy-grid">
+          <article id="general-strategy" class="strategy-card">
+            <span class="strategy-label">General work</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">Current headroom will appear here.</p>
+          </article>
+          <article id="fable-strategy" class="strategy-card">
+            <span class="strategy-label">Fable work</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">
+              Nested weekly capacity will appear here.
+            </p>
+          </article>
+          <article id="watch-strategy" class="strategy-card">
+            <span class="strategy-label">Fleet watch</span>
+            <strong class="strategy-value">Waiting for a scan</strong>
+            <p class="strategy-detail">
+              The tightest account-wide limit will appear here.
+            </p>
+          </article>
+        </div>
+
+        <section class="summary" aria-label="Quota summary">
+          <article>
+            <span class="summary-label">Accounts</span>
+            <strong id="account-count">—</strong>
+          </article>
+          <article>
+            <span class="summary-label">Reported limits</span>
+            <strong id="limit-count">—</strong>
+          </article>
+          <article>
+            <span class="summary-label">Account errors</span>
+            <strong id="error-count">—</strong>
+          </article>
+          <article>
+            <span class="summary-label">History</span>
+            <strong id="history-status">Waiting…</strong>
+          </article>
+        </section>
       </section>
 
       <p class="footnote">
