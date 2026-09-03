@@ -46,6 +46,17 @@ button {
   gap: 24px;
 }
 
+.masthead {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(190px, auto) minmax(300px, 1fr);
+  gap: 18px;
+}
+
+.brand {
+  min-width: 0;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: #8fd3ab;
@@ -64,12 +75,12 @@ p {
 }
 
 h1 {
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.25rem, 4.6vw, 3.75rem);
+  font-size: clamp(1.2rem, 2.3vw, 1.875rem);
   font-weight: 500;
   letter-spacing: -0.055em;
-  line-height: 0.9;
+  line-height: 1;
 }
 
 h2 {
@@ -82,10 +93,10 @@ h2 {
   max-width: 650px;
   margin-bottom: 0;
   color: #a7ada8;
-  font-size: 0.94rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
-.refresh,
 .range-controls button {
   border: 1px solid #344039;
   color: #f7f6f2;
@@ -98,17 +109,100 @@ h2 {
     transform 140ms ease;
 }
 
-.refresh {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 9px;
-  justify-content: center;
-  padding: 0 18px;
-  border-radius: 999px;
+.top-warnings {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
 }
 
-.refresh:hover:not(:disabled),
+.warning-placeholder {
+  margin: 0;
+  color: #7d857f;
+  font-size: 0.76rem;
+}
+
+.warning-item {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  padding: 8px 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  border: 1px solid #303732;
+  border-radius: 10px;
+  background: rgb(18 22 19 / 82%);
+}
+
+.warning-item.warning {
+  border-color: rgb(206 156 91 / 38%);
+  background: rgb(117 78 30 / 12%);
+}
+
+.warning-item.danger {
+  border-color: rgb(212 100 91 / 42%);
+  background: rgb(163 67 60 / 13%);
+}
+
+.warning-marker {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  color: #9ee0b8;
+  background: rgb(77 153 107 / 16%);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.warning-item.warning .warning-marker {
+  color: #ecc583;
+  background: rgb(182 127 52 / 20%);
+}
+
+.warning-item.danger .warning-marker {
+  color: #f4aaa4;
+  background: rgb(163 67 60 / 22%);
+}
+
+.warning-copy {
+  min-width: 0;
+}
+
+.warning-title {
+  display: block;
+  color: #e7e9e6;
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warning-detail {
+  margin: 2px 0 0;
+  color: #858e87;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.warning-action {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  color: #e8bf7d;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.warning-action:hover {
+  color: #ffe0a9;
+}
+
 .range-controls button:hover {
   border-color: #70917e;
   background: #222a25;
@@ -120,24 +214,9 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
-.refresh:disabled {
-  cursor: wait;
-  opacity: 0.62;
-}
-
-.refresh.spinning span {
-  animation: spin 850ms linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .summary {
   display: grid;
-  margin: 14px 0 18px;
+  margin: 12px 0 0;
   grid-template-columns: repeat(4, 1fr);
   border: 1px solid #282e2a;
   border-radius: 18px;
@@ -175,7 +254,7 @@ button:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.strategy,
+.capacity,
 .accounts {
   margin-top: 20px;
   padding: 20px;
@@ -183,6 +262,12 @@ button:focus-visible {
   border-radius: 18px;
   background: rgb(20 23 21 / 91%);
   box-shadow: 0 30px 80px rgb(0 0 0 / 16%);
+}
+
+.bottom-dashboard {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #282e2a;
 }
 
 .section-heading {
@@ -742,13 +827,18 @@ noscript {
 
 @media (max-width: 780px) {
   .shell {
-    padding-top: 36px;
+    padding-top: 22px;
   }
 
-  .masthead,
   .section-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .masthead {
+    align-items: start;
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .summary,
@@ -805,7 +895,7 @@ noscript {
     border-bottom: 0;
   }
 
-  .strategy,
+  .capacity,
   .accounts {
     padding: 17px;
   }

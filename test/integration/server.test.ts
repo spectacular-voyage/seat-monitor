@@ -171,6 +171,10 @@ describe("HTTP server", () => {
       scan: () => Promise.resolve([snapshot()]),
       history: historyService,
       now: () => new Date(now),
+      scheduler: {
+        intervalMilliseconds: 60_000,
+        scanOnStartup: false,
+      },
     });
 
     const quota = await server.inject({
@@ -201,6 +205,8 @@ describe("HTTP server", () => {
     expect(historyScansSchema.parse(scans.json()).runs).toHaveLength(1);
     const analyticsPayload = historyAnalyticsSchema.parse(analytics.json());
     expect(analyticsPayload.periodMultiplier).toBeNull();
+    expect(analyticsPayload.lastScanAt).toBe(now);
+    expect(analyticsPayload.scanIntervalSeconds).toBe(60);
     expect(analyticsPayload.accounts[0]).toEqual(
       expect.objectContaining({
         accountAlias: "Codex_Work",

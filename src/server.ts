@@ -336,6 +336,12 @@ export async function buildServer(
       ...(query.periods === undefined
         ? {}
         : { periodMultiplier: query.periods }),
+      ...(latest === undefined ? {} : { lastScanAt: latest.completedAt }),
+      ...(options.scheduler === undefined
+        ? {}
+        : {
+            scanIntervalSeconds: options.scheduler.intervalMilliseconds / 1_000,
+          }),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
   });

@@ -71,6 +71,7 @@ export const analyticsAccountSchema = z
     platform: platformSchema,
     plan: z.string().min(1).nullable(),
     observedAt: isoInstantSchema,
+    lastActivityAt: isoInstantSchema.nullable(),
     status: z.enum(["ok", "error"]),
     error: quotaErrorSchema.nullable(),
     limits: z.array(analyticsLimitSchema),
@@ -120,6 +121,8 @@ export const historyAnalyticsSchema = z
     periodMultiplier: z
       .union([z.literal(1), z.literal(2), z.literal(5), z.literal(10)])
       .nullable(),
+    lastScanAt: isoInstantSchema.nullable(),
+    scanIntervalSeconds: z.number().positive().nullable(),
     historyHealth: historyHealthSchema,
     accounts: z.array(analyticsAccountSchema),
     recommendations: z

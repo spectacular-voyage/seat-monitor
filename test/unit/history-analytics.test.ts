@@ -267,4 +267,53 @@ describe("historical quota analytics", () => {
       limits?.find((limit) => limit.key === "base.weekly")?.points,
     ).toHaveLength(2);
   });
+
+  it("sorts accounts by their latest observed usage increase", () => {
+    const older = claudeSnapshot({ alias: "claude-older@example.com" });
+    const recent = claudeSnapshot({ alias: "claude-recent@example.com" });
+    const resetAt = resetAfter(300);
+    const result = buildHistoryAnalytics({
+      snapshots: [older, recent],
+      series: [
+        {
+          ...series("base.session", [], resetAt),
+          accountAlias: "claude-older@example.com",
+          points: [
+            point(minutesBeforeNow(180), 0, resetAt),
+            point(minutesBeforeNow(120), 5, resetAt),
+            point(minutesBeforeNow(60), 5, resetAt),
+          ],
+        },
+        {
+          ...series("base.session", [], resetAt),
+          accountAlias: "claude-recent@example.com",
+          points: [
+            point(minutesBeforeNow(180), 0, resetAt),
+            point(minutesBeforeNow(30), 10, resetAt),
+            point(minutesBeforeNow(0), 10, resetAt),
+          ],
+        },
+      ],
+      resetEvents: [],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      lastScanAt: new Date(nowMilliseconds).toISOString(),
+      scanIntervalSeconds: 60,
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(result.accounts.map((account) => account.accountAlias)).toEqual([
+      "claude-recent@example.com",
+      "claude-older@example.com",
+    ]);
+    expect(result.accounts.map((account) => account.lastActivityAt)).toEqual([
+      minutesBeforeNow(30),
+      minutesBeforeNow(120),
+    ]);
+    expect(result.lastScanAt).toBe(new Date(nowMilliseconds).toISOString());
+    expect(result.scanIntervalSeconds).toBe(60);
+  });
 });

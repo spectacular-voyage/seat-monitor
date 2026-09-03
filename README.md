@@ -184,7 +184,7 @@ Start the local server:
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds and has a manual refresh control. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. History controls show 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days.
+Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. History controls show 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days. Recommendation cards and diagnostic counts are kept below the burndown history.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
@@ -225,7 +225,7 @@ Copy the packaged `settings.example.json` or create a private file with this sha
 }
 ```
 
-The scan interval accepts 30 through 3600 seconds. Scheduling is completion-based: Seat Monitor finishes a fleet scan, waits the configured interval, and then starts the next scan. Slow provider checks therefore never accumulate overlapping scheduled work. A manual dashboard refresh coalesces with an in-flight scan and restarts the countdown.
+The scan interval accepts 30 through 3600 seconds. Scheduling is completion-based: Seat Monitor finishes a fleet scan, waits the configured interval, and then starts the next scan. Slow provider checks therefore never accumulate overlapping scheduled work. The stale-scan warning's contextual refresh coalesces with an in-flight scan and restarts the countdown.
 
 Environment variables override the settings file:
 
