@@ -21,6 +21,9 @@ describe("dashboard assets", () => {
     expect(html).toContain('id="range-controls"');
     expect(html).toContain('data-periods="10"');
     expect(html).not.toContain("data-range-hours");
+    expect(html).not.toContain("Capacity now");
+    expect(html).not.toContain("Burndown history");
+    expect(html).not.toContain("Each graph uses its own quota period");
     expect(html).toContain('id="fleet-capacity"');
     expect(html).toContain('id="top-warnings"');
     expect(html).not.toContain('id="refresh"');
@@ -37,6 +40,8 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('return "weekly-panel"');
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
+    expect(javascript).toContain("createChartLegend");
+    expect(javascript).toContain("entry.overlays");
     expect(javascript).toContain("PERIOD_CONTEXT_MULTIPLIER = 1.05");
     expect(javascript).toContain("periods: String(periodMultiplier)");
     expect(javascript).toContain("Scheduled scans are stale");
@@ -50,8 +55,11 @@ describe("dashboard assets", () => {
     expect(javascript).toContain(
       'limit.projection.status === "exhausts_before_reset"',
     );
+    expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(css).toContain(".window-grid.single-panel .window-panel");
+    expect(css).toContain(".combined-panel");
+    expect(css).toContain("grid-column: span 2");
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 

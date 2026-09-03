@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788426193000
+updated: 1788474205000
 created: 1788377021465
 ---
 
@@ -286,7 +286,7 @@ Each card includes:
 
 The masthead warning region reports projected exhaustion for active account limits and reports stale collection when the latest completed scan is older than two configured server intervals. There is no persistent manual scan button; a contextual `Refresh now` action appears only with the stale warning. Accounts are ordered by their latest observed usage increase, followed by observation time and stable alias tie-breaks. Recommendation cards and fleet diagnostic counts are secondary information below the complete history list.
 
-Claude weekly and Fable remain visually hierarchical. Fable is indented or dashed beneath the shared weekly pool and does not receive an independent reset clock. Codex windows remain grouped by provider limit ID.
+Claude weekly and Fable share one graph because they use the same weekly clock. Weekly is a solid primary series; Fable is a dashed secondary series with separate current, rate, and outlook metrics and no independent reset clock. The combined graph spans two desktop columns while Session occupies the third. Codex windows remain grouped by provider limit ID.
 
 Range controls support 1×, 2×, 5×, and 10× quota periods. Each graph uses its own effective window duration plus 5% context: five hours for Session, seven days for weekly limits, and the provider-reported duration when available. The client requests `auto` resolution. Empty, first-scan, partial-error, total-error, insufficient-history, and unavailable-history states must be explicit.
 
@@ -388,14 +388,13 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 - Added failure-tolerant scan recording around default CLI scans and inside the server's existing coalescing cache.
 - Added pure reset-epoch segmentation, median pairwise usage rate, exhaustion/reset comparison, inferred markers, and Fable-aware strategy while reusing the existing general `USE` and `WATCH` policy.
 - Added `GET /api/history/scans` and `GET /api/history/analytics` with strict queries, runtime-validated responses, pagination/range bounds, `no-store`, and the existing loopback security controls.
-- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, three-column quota-window history, period-normalized range controls, current/reset/rate/outlook text, evidence-based fixed/adjusted/inferred reset markers, and visually nested Fable treatment. Reset-first projections no longer create an empty forecast extension. Secondary recommendations and diagnostic counts sit below history.
+- Replaced the quota table with a compact CLI-inspired fleet-capacity overview plus responsive activity-sorted account cards, masthead exhaustion/staleness warnings, local SVG charts, a two-column combined weekly/Fable history beside Session, period-normalized controls, current/reset/rate/outlook text, and evidence-based fixed/adjusted/inferred reset markers. Reset-first projections no longer create an empty forecast extension. Section titles and account identity are vertically compact, while secondary recommendations and diagnostic counts sit below history.
 - Documented storage location, environment configuration, retention, API behavior, projection limits, and Fable semantics in the README.
 
-Verification on 2026-09-02:
+Verification on 2026-09-03:
 
-- Node 24.20.0 type checking and all 100 tests pass.
-- Coverage passes the repository floors: 83.81% statements, 74.52% branches, 86.56% functions, and 83.71% lines.
+- Node 24.20.0 type checking and all 118 tests pass.
+- Coverage passes the repository floors: 84.91% statements, 77.04% branches, 87.25% functions, and 84.95% lines.
 - Lint, changed-file formatting, `git diff --check`, browser-JavaScript syntax, release-note validation, production build, and packed-package smoke tests pass.
 - `npm audit --audit-level=high` reports zero vulnerabilities; registry signatures and attestations verify.
-- The complete repository-wide formatting wrapper is currently obstructed by an unrelated untracked `docs/notes/sm.product-ideas.md`; this implementation does not modify that file.
-- Automated browser payload/static-asset coverage passes. Live visual QA could not run because the available browser extension blocks loopback URLs and no in-app browser was connected; responsive visual inspection remains the only manual follow-up.
+- Automated browser payload/static-asset coverage passes. Live visual QA could not run because the in-app browser bridge resolved a stale, missing runtime path; responsive visual inspection remains the only manual follow-up.
