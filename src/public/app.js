@@ -15,6 +15,7 @@ const watchStrategy = document.querySelector("#watch-strategy");
 const fleetCapacity = document.querySelector("#fleet-capacity");
 const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
+const stackedHistoryMedia = window.matchMedia("(max-width: 780px)");
 
 let loading = false;
 let periodMultiplier = 1;
@@ -69,6 +70,15 @@ function formatDateTime(value) {
     month: "short",
     day: "numeric",
     hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatAxisDateTime(value) {
+  return new Intl.DateTimeFormat([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
 }
@@ -273,26 +283,54 @@ function chartRangeStart(limit, queryStart, rangeEnd) {
   return Math.max(queryStart, rangeEnd - durationMilliseconds);
 }
 
-function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
+function projectionLineEnd(limit, projectionAt) {
+  if (projectionAt === null || !Number.isFinite(projectionAt)) {
+    return null;
+  }
+  if (
+    limit.projection.status === "exhausts_before_reset" ||
+    limit.projection.status === "exhaustion_projected"
+  ) {
+    return projectionAt;
+  }
+  if (limit.projection.status !== "reset_before_exhaustion") {
+    return null;
+  }
+  const resetAt =
+    limit.resetAt === null ? Number.NaN : Date.parse(limit.resetAt);
+  return Number.isFinite(resetAt) ? Math.min(resetAt, projectionAt) : null;
+}
+
+function createUsageGraph(
+  limit,
+  queryStart,
+  rangeEnd,
+  overlays = [],
+  chartWidth = 640,
+) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
   const rangeStart = chartRangeStart(limit, queryStart, rangeEnd);
-  const series = chartLimits.map((chartLimit) => ({
-    limit: chartLimit,
-    measured: chartLimit.points.filter((point) => {
-      const observedAt = Date.parse(point.observedAt);
-      return (
-        point.usedPercent !== null &&
-        Number.isFinite(observedAt) &&
-        observedAt >= rangeStart &&
-        observedAt <= rangeEnd
-      );
-    }),
-    projectionAt:
+  const series = chartLimits.map((chartLimit) => {
+    const projectionAt =
       chartLimit.projection.projectedExhaustionAt === null
         ? null
-        : Date.parse(chartLimit.projection.projectedExhaustionAt),
-  }));
+        : Date.parse(chartLimit.projection.projectedExhaustionAt);
+    return {
+      limit: chartLimit,
+      measured: chartLimit.points.filter((point) => {
+        const observedAt = Date.parse(point.observedAt);
+        return (
+          point.usedPercent !== null &&
+          Number.isFinite(observedAt) &&
+          observedAt >= rangeStart &&
+          observedAt <= rangeEnd
+        );
+      }),
+      projectionAt,
+      projectionLineEndAt: projectionLineEnd(chartLimit, projectionAt),
+    };
+  });
   if (series.every((entry) => entry.measured.length === 0)) {
     wrapper.append(
       element("p", "chart-empty", "History begins after the next scan."),
@@ -305,17 +343,22 @@ function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
       entry.measured.length > 0 &&
       entry.projectionAt !== null &&
       Number.isFinite(entry.projectionAt) &&
-      (entry.limit.projection.status === "exhausts_before_reset" ||
-        entry.limit.projection.status === "exhaustion_projected"),
+      entry.projectionLineEndAt !== null &&
+      Number.isFinite(entry.projectionLineEndAt) &&
+      entry.projectionLineEndAt >
+        Date.parse(entry.measured.at(-1)?.observedAt ?? ""),
   );
   const maximumExtension = rangeEnd + (rangeEnd - rangeStart) * 0.25;
   const chartEnd = forecasts.reduce(
     (end, entry) =>
-      Math.max(end, Math.min(entry.projectionAt ?? rangeEnd, maximumExtension)),
+      Math.max(
+        end,
+        Math.min(entry.projectionLineEndAt ?? rangeEnd, maximumExtension),
+      ),
     rangeEnd,
   );
   const chartStart = rangeStart;
-  const width = 640;
+  const width = chartWidth;
   const height = 176;
   const left = 36;
   const right = 12;
@@ -427,9 +470,10 @@ function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
     if (
       showsForecast &&
       entry.projectionAt !== null &&
+      entry.projectionLineEndAt !== null &&
       entry.projectionAt > Date.parse(latest.observedAt)
     ) {
-      const forecastEnd = Math.min(entry.projectionAt, chartEnd);
+      const forecastEnd = Math.min(entry.projectionLineEndAt, chartEnd);
       const forecastProgress =
         (forecastEnd - Date.parse(latest.observedAt)) /
         (entry.projectionAt - Date.parse(latest.observedAt));
@@ -460,7 +504,9 @@ function createUsageGraph(limit, queryStart, rangeEnd, overlays = []) {
     "text-anchor": "end",
   });
   endLabel.textContent =
-    forecasts.length > 0 && chartEnd > rangeEnd ? "forecast" : "now";
+    forecasts.length > 0 && chartEnd > rangeEnd
+      ? `forecast · ${formatAxisDateTime(chartEnd)}`
+      : "now";
   svg.append(startLabel, endLabel);
   wrapper.append(svg);
   return wrapper;
@@ -484,7 +530,58 @@ function createChartLegend(limits) {
   return legend;
 }
 
-function createLimit(limit, rangeStart, rangeEnd, overlays = []) {
+function createLimitMetrics(limits) {
+  const table = element("table", "limit-metrics");
+  table.append(
+    element("caption", "visually-hidden", "Usage rate and exhaustion outlook"),
+  );
+
+  const head = element("thead");
+  const headingRow = element("tr");
+  const rowHeadingSpacer = element("th", "metric-row-spacer");
+  rowHeadingSpacer.setAttribute("aria-hidden", "true");
+  const rateHeading = element("th", "metric-column-heading", "Usage rate");
+  rateHeading.scope = "col";
+  const outlookHeading = element("th", "metric-column-heading", "Outlook");
+  outlookHeading.scope = "col";
+  headingRow.append(rowHeadingSpacer, rateHeading, outlookHeading);
+  head.append(headingRow);
+
+  const body = element("tbody");
+  for (const limit of limits) {
+    const row = element("tr");
+    const rowHeading = element(
+      "th",
+      "metric-row-heading",
+      limits.length === 1
+        ? limit.label
+        : limit.depth === 1
+          ? "Fable"
+          : "All models",
+    );
+    rowHeading.scope = "row";
+    const rate = element("td", "metric-cell");
+    rate.append(
+      element("strong", "metric-value", formatRate(limit.projection)),
+    );
+    const outlook = element("td", "metric-cell");
+    outlook.append(
+      element("strong", "metric-value", projectionText(limit.projection)),
+    );
+    row.append(rowHeading, rate, outlook);
+    body.append(row);
+  }
+  table.append(head, body);
+  return table;
+}
+
+function createLimit(
+  limit,
+  rangeStart,
+  rangeEnd,
+  overlays = [],
+  chartWidth = 640,
+) {
   const section = element(
     "section",
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
@@ -510,38 +607,35 @@ function createLimit(limit, rangeStart, rangeEnd, overlays = []) {
   }
   identity.append(reset);
   const usage = element("div", `current-usage ${toneForLimit(limit)}`);
-  usage.append(
-    element("strong", "usage-value", formatPercent(limit.currentUsedPercent)),
-    element("span", "usage-caption", "used"),
+  const usageValue = element("strong", "usage-value");
+  const primaryUsage = element("span", "usage-primary-value");
+  primaryUsage.append(
+    element("span", "", formatPercent(limit.currentUsedPercent)),
+    element("span", "usage-series-label", " all"),
   );
+  usageValue.append(primaryUsage);
+  for (const overlay of overlays) {
+    const overlayUsage = element(
+      "span",
+      `usage-overlay-value ${toneForLimit(overlay)}-text`,
+    );
+    overlayUsage.append(
+      element("span", "", formatPercent(overlay.currentUsedPercent)),
+      element("span", "usage-series-label", " fable"),
+    );
+    usageValue.append(element("span", "usage-divider", " / "), overlayUsage);
+  }
+  usage.append(usageValue, element("span", "usage-caption", "used"));
   heading.append(identity, usage);
   section.append(heading);
   if (overlays.length > 0) {
     section.append(createChartLegend([limit, ...overlays]));
   }
-  section.append(createUsageGraph(limit, rangeStart, rangeEnd, overlays));
+  section.append(
+    createUsageGraph(limit, rangeStart, rangeEnd, overlays, chartWidth),
+  );
 
-  const metrics = element("div", "limit-metrics");
-  for (const metricLimit of [limit, ...overlays]) {
-    const prefix =
-      overlays.length === 0
-        ? ""
-        : metricLimit.depth === 1
-          ? "Fable "
-          : "All-model ";
-    const rate = element("div");
-    rate.append(element("span", "metric-label", `${prefix}usage rate`));
-    rate.append(
-      element("strong", "metric-value", formatRate(metricLimit.projection)),
-    );
-    const forecast = element("div");
-    forecast.append(element("span", "metric-label", `${prefix}outlook`));
-    forecast.append(
-      element("strong", "metric-value", projectionText(metricLimit.projection)),
-    );
-    metrics.append(rate, forecast);
-  }
-  section.append(metrics);
+  section.append(createLimitMetrics([limit, ...overlays]));
   return section;
 }
 
@@ -578,8 +672,20 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
       "div",
       `window-panel ${panelClass(entry.limit)} ${entry.overlays.length > 0 ? "combined-panel" : ""}`,
     );
+    const chartWidth =
+      entry.limit.key === "base.session" &&
+      entries.length > 1 &&
+      !stackedHistoryMedia.matches
+        ? 304
+        : 640;
     panel.append(
-      createLimit(entry.limit, rangeStart, rangeEnd, entry.overlays),
+      createLimit(
+        entry.limit,
+        rangeStart,
+        rangeEnd,
+        entry.overlays,
+        chartWidth,
+      ),
     );
     panels.append(panel);
   }
@@ -707,7 +813,13 @@ function renderFleetCapacity(accounts) {
 }
 
 function createAccountCard(account, rangeStart, rangeEnd) {
-  const card = element("article", "account-card");
+  const providerClass =
+    account.platform === "Claude"
+      ? "claude-history"
+      : account.platform === "Codex"
+        ? "codex-history"
+        : "";
+  const card = element("article", `account-card ${providerClass}`);
   const header = element("header", "account-header");
   const identity = element("div", "account-identity-line");
   identity.append(
@@ -1077,6 +1189,9 @@ rangeControls.addEventListener("click", (event) => {
   for (const candidate of rangeControls.querySelectorAll("button")) {
     candidate.setAttribute("aria-pressed", String(candidate === button));
   }
+  void fetchDashboard(false);
+});
+stackedHistoryMedia.addEventListener("change", () => {
   void fetchDashboard(false);
 });
 setInterval(updateCountdowns, 1_000);

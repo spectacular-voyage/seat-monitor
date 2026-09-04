@@ -184,12 +184,12 @@ Start the local server:
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. The server scans immediately at startup and continues scanning every 60 seconds by default, even when no dashboard is open. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. History controls show 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days. Recommendation cards and diagnostic counts are kept below history.
+Open <http://127.0.0.1:3000>. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. History controls show ½, 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days. Recommendation cards and diagnostic counts are kept below history.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
-- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=1|2|5|10` query filters and downsamples every series against its own effective quota duration.
+- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 
@@ -272,6 +272,8 @@ npm run format:check
 npm test
 npm run build
 ```
+
+`npm run dev` rereads the dashboard HTML, CSS, and JavaScript on each request and disables browser caching for those assets. Refreshing the page therefore reflects public-asset edits without restarting the development server. The packaged server continues caching its immutable built assets at startup.
 
 Run the complete quality gate with:
 

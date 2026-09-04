@@ -51,6 +51,79 @@ function history(now: string): HistoryService {
 }
 
 describe("HTTP server", () => {
+  it("reloads dashboard assets per request in source development", async () => {
+    let currentAssets = {
+      html: "<!doctype html><title>Version 1</title>",
+      javascript: "window.version = 1;",
+      css: "body { --version: 1; }",
+    };
+    const dashboardAssetLoader = vi.fn(() => Promise.resolve(currentAssets));
+    const server = await buildServer({
+      dashboardAssetLoader,
+      reloadDashboardAssets: true,
+      scan: () => Promise.resolve([]),
+    });
+
+    const first = await Promise.all(
+      ["/", "/app.js", "/styles.css"].map((url) =>
+        server.inject({ method: "GET", url, headers: allowedHeaders }),
+      ),
+    );
+    currentAssets = {
+      html: "<!doctype html><title>Version 2</title>",
+      javascript: "window.version = 2;",
+      css: "body { --version: 2; }",
+    };
+    const second = await Promise.all(
+      ["/", "/app.js", "/styles.css"].map((url) =>
+        server.inject({ method: "GET", url, headers: allowedHeaders }),
+      ),
+    );
+    await server.close();
+
+    expect(first.map((response) => response.body)).toEqual([
+      "<!doctype html><title>Version 1</title>",
+      "window.version = 1;",
+      "body { --version: 1; }",
+    ]);
+    expect(second.map((response) => response.body)).toEqual([
+      "<!doctype html><title>Version 2</title>",
+      "window.version = 2;",
+      "body { --version: 2; }",
+    ]);
+    expect(
+      second.every(
+        (response) => response.headers["cache-control"] === "no-store",
+      ),
+    ).toBe(true);
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(6);
+  });
+
+  it("keeps supplied packaged dashboard assets cached", async () => {
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+    });
+
+    const responses = await Promise.all(
+      ["/", "/app.js", "/styles.css"].map((url) =>
+        server.inject({ method: "GET", url, headers: allowedHeaders }),
+      ),
+    );
+    await server.close();
+
+    expect(responses.map((response) => response.body)).toEqual([
+      assets.html,
+      assets.javascript,
+      assets.css,
+    ]);
+    expect(
+      responses.every(
+        (response) => response.headers["cache-control"] === undefined,
+      ),
+    ).toBe(true);
+  });
+
   it("serves the shared public DTO with fresh countdowns and no-store", async () => {
     const server = await buildServer({
       assets,
@@ -197,6 +270,11 @@ describe("HTTP server", () => {
       url: "/api/history/analytics",
       headers: allowedHeaders,
     });
+    const halfPeriodAnalytics = await server.inject({
+      method: "GET",
+      url: "/api/history/analytics?periods=0.5",
+      headers: allowedHeaders,
+    });
 
     expect(quota.statusCode).toBe(200);
     expect(cachedQuota.statusCode).toBe(200);
@@ -204,7 +282,11 @@ describe("HTTP server", () => {
     expect(scans.headers["cache-control"]).toBe("no-store");
     expect(historyScansSchema.parse(scans.json()).runs).toHaveLength(1);
     const analyticsPayload = historyAnalyticsSchema.parse(analytics.json());
+    const halfPeriodPayload = historyAnalyticsSchema.parse(
+      halfPeriodAnalytics.json(),
+    );
     expect(analyticsPayload.periodMultiplier).toBeNull();
+    expect(halfPeriodPayload.periodMultiplier).toBe(0.5);
     expect(analyticsPayload.lastScanAt).toBe(now);
     expect(analyticsPayload.scanIntervalSeconds).toBe(60);
     expect(analyticsPayload.accounts[0]).toEqual(

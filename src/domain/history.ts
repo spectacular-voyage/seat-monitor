@@ -124,7 +124,13 @@ export const historyAnalyticsSchema = z
     to: isoInstantSchema,
     requestedResolution: z.enum(["auto", "raw", "hour"]),
     periodMultiplier: z
-      .union([z.literal(1), z.literal(2), z.literal(5), z.literal(10)])
+      .union([
+        z.literal(0.5),
+        z.literal(1),
+        z.literal(2),
+        z.literal(5),
+        z.literal(10),
+      ])
       .nullable(),
     lastScanAt: isoInstantSchema.nullable(),
     scanIntervalSeconds: z.number().positive().nullable(),
