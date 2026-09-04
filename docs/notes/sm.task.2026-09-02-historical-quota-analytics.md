@@ -3,7 +3,7 @@ id: 7bdb5783b2c14d75b6dcad4e
 title: 2026 09 02 Historical Quota Analytics
 desc: Local snapshot history, projections, retention, Fable strategy, and dashboard cards
 status: COMPLETED
-updated: 1788485309757
+updated: 1788485907669
 created: 1788377021465
 ---
 
@@ -393,8 +393,8 @@ Exit: a clean Node 24 installation records local history, serves analytics on lo
 
 Verification on 2026-09-03:
 
-- Node 24.20.0 type checking and all 119 tests pass.
-- Coverage passes the repository floors: 84.83% statements, 77.02% branches, 87.94% functions, and 84.87% lines.
+- Node 24.20.0 type checking and all 120 tests pass.
+- Coverage passes the repository floors: 85.35% statements, 77.43% branches, 88.59% functions, and 85.40% lines.
 - Lint, changed-file formatting, `git diff --check`, browser-JavaScript syntax, release-note validation, production build, and packed-package smoke tests pass.
 - `npm audit --audit-level=high` reports zero vulnerabilities; registry signatures and attestations verify.
 - Automated browser payload/static-asset coverage passes. Live visual QA could not run because the in-app browser bridge resolved a stale, missing runtime path; responsive visual inspection remains the only manual follow-up.
