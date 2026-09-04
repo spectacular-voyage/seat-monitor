@@ -251,26 +251,27 @@ describe("historical quota analytics", () => {
       weeklyRemainingMinutes: 3_000,
     });
     const resetAt = resetAfter(3_000);
+    const historicalSeries = [
+      {
+        ...series("base.session", [], resetAfter(120)),
+        points: [
+          point(minutesBeforeNow(360), 5, resetAfter(120)),
+          point(minutesBeforeNow(300), 10, resetAfter(120)),
+          point(minutesBeforeNow(60), 15, resetAfter(120)),
+        ],
+      },
+      {
+        ...series("base.weekly", [], resetAt),
+        points: [
+          point(minutesBeforeNow(8 * 24 * 60), 5, resetAt),
+          point(minutesBeforeNow(6 * 24 * 60), 10, resetAt),
+          point(minutesBeforeNow(60), 15, resetAt),
+        ],
+      },
+    ];
     const result = buildHistoryAnalytics({
       snapshots: [snapshot],
-      series: [
-        {
-          ...series("base.session", [], resetAfter(120)),
-          points: [
-            point(minutesBeforeNow(360), 5, resetAfter(120)),
-            point(minutesBeforeNow(300), 10, resetAfter(120)),
-            point(minutesBeforeNow(60), 15, resetAfter(120)),
-          ],
-        },
-        {
-          ...series("base.weekly", [], resetAt),
-          points: [
-            point(minutesBeforeNow(8 * 24 * 60), 5, resetAt),
-            point(minutesBeforeNow(6 * 24 * 60), 10, resetAt),
-            point(minutesBeforeNow(60), 15, resetAt),
-          ],
-        },
-      ],
+      series: historicalSeries,
       historyHealth: "ready",
       nowMilliseconds,
       fromMilliseconds: nowMilliseconds - 10 * 24 * 60 * 60_000,
@@ -288,6 +289,29 @@ describe("historical quota analytics", () => {
     expect(
       limits?.find((limit) => limit.key === "base.weekly")?.points,
     ).toHaveLength(2);
+
+    const halfPeriodResult = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: historicalSeries,
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 10 * 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 0.5,
+      timeZone: "America/Los_Angeles",
+    });
+    expect(halfPeriodResult.periodMultiplier).toBe(0.5);
+    expect(
+      halfPeriodResult.accounts[0]?.limits.find(
+        (limit) => limit.key === "base.session",
+      )?.points,
+    ).toHaveLength(1);
+    expect(
+      halfPeriodResult.accounts[0]?.limits.find(
+        (limit) => limit.key === "base.weekly",
+      )?.points,
+    ).toHaveLength(1);
   });
 
   it("sorts accounts by their latest observed usage increase", () => {

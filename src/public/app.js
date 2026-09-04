@@ -676,7 +676,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
       entry.limit.key === "base.session" &&
       entries.length > 1 &&
       !stackedHistoryMedia.matches
-        ? 320
+        ? 304
         : 640;
     panel.append(
       createLimit(

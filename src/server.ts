@@ -56,8 +56,10 @@ const historyAnalyticsQuerySchema = z
     to: z.iso.datetime({ offset: true }).optional(),
     resolution: z.enum(["auto", "raw", "hour"]).default("auto"),
     periods: z
-      .enum(["1", "2", "5", "10"])
-      .transform((value): 1 | 2 | 5 | 10 => Number(value) as 1 | 2 | 5 | 10)
+      .enum(["0.5", "1", "2", "5", "10"])
+      .transform(
+        (value): 0.5 | 1 | 2 | 5 | 10 => Number(value) as 0.5 | 1 | 2 | 5 | 10,
+      )
       .optional(),
     account: z.string().min(1).max(320).optional(),
   })
@@ -69,6 +71,8 @@ type DashboardAssets = {
   css: string;
 };
 
+type DashboardAssetLoader = () => Promise<DashboardAssets>;
+
 export type ServerOptions = {
   scan?: Scanner;
   now?: () => Date;
@@ -76,6 +80,8 @@ export type ServerOptions = {
   host?: string;
   port?: number;
   assets?: DashboardAssets;
+  dashboardAssetLoader?: DashboardAssetLoader;
+  reloadDashboardAssets?: boolean;
   history?: HistoryService;
   scheduler?: {
     intervalMilliseconds: number;
@@ -173,7 +179,15 @@ export async function buildServer(
           source: "server",
           now,
         });
-  const assets = options.assets ?? (await loadDashboardAssets());
+  const dashboardAssetLoader =
+    options.dashboardAssetLoader ?? loadDashboardAssets;
+  const assets =
+    options.assets ??
+    (options.reloadDashboardAssets === true
+      ? null
+      : await dashboardAssetLoader());
+  const readDashboardAssets = async (): Promise<DashboardAssets> =>
+    assets ?? dashboardAssetLoader();
   const cache = new SnapshotCache({
     scan,
     freshnessMilliseconds:
@@ -242,13 +256,27 @@ export async function buildServer(
   });
 
   server.get("/", async (_request, reply) => {
-    return reply.type("text/html; charset=utf-8").send(assets.html);
+    const currentAssets = await readDashboardAssets();
+    if (options.reloadDashboardAssets === true) {
+      reply.header("Cache-Control", "no-store");
+    }
+    return reply.type("text/html; charset=utf-8").send(currentAssets.html);
   });
   server.get("/app.js", async (_request, reply) => {
-    return reply.type("text/javascript; charset=utf-8").send(assets.javascript);
+    const currentAssets = await readDashboardAssets();
+    if (options.reloadDashboardAssets === true) {
+      reply.header("Cache-Control", "no-store");
+    }
+    return reply
+      .type("text/javascript; charset=utf-8")
+      .send(currentAssets.javascript);
   });
   server.get("/styles.css", async (_request, reply) => {
-    return reply.type("text/css; charset=utf-8").send(assets.css);
+    const currentAssets = await readDashboardAssets();
+    if (options.reloadDashboardAssets === true) {
+      reply.header("Cache-Control", "no-store");
+    }
+    return reply.type("text/css; charset=utf-8").send(currentAssets.css);
   });
   server.get("/api/quota", async (request, reply) => {
     const query = refreshQuerySchema.parse(request.query);
@@ -374,6 +402,7 @@ async function main(): Promise<void> {
   const configuration = readServerConfiguration(settings);
   const server = await buildServer({
     ...configuration,
+    reloadDashboardAssets: import.meta.url.endsWith("/server.ts"),
     history: createDefaultHistoryService(
       process.env,
       () => new Date(),

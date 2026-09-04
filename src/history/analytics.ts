@@ -542,7 +542,7 @@ export function buildHistoryAnalytics(options: {
   fromMilliseconds: number;
   toMilliseconds: number;
   requestedResolution: HistoryResolution;
-  periodMultiplier?: 1 | 2 | 5 | 10;
+  periodMultiplier?: NonNullable<HistoryAnalytics["periodMultiplier"]>;
   lastScanAt?: string;
   scanIntervalSeconds?: number;
   showSpark?: boolean;

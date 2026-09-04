@@ -19,6 +19,7 @@ describe("dashboard assets", () => {
   it("uses account cards and local SVG charts instead of the quota table", () => {
     expect(html).toContain('id="account-cards"');
     expect(html).toContain('id="range-controls"');
+    expect(html).toContain('data-periods="0.5"');
     expect(html).toContain('data-periods="10"');
     expect(html).not.toContain("data-range-hours");
     expect(html).not.toContain("Capacity now");
@@ -86,9 +87,11 @@ describe("dashboard assets", () => {
     expect(css).toContain("background: #181c19");
     expect(css).toContain("stroke: #3b463e");
     expect(css).toContain(".account-card.claude-history");
-    expect(css).toContain("--history-card-background: #181214");
+    expect(css).toContain("--history-card-background: #2b171e");
     expect(css).toContain(".account-card.codex-history");
-    expect(css).toContain("--history-card-background: #111722");
+    expect(css).toContain("--history-card-background: #152039");
+    expect(css).not.toContain("--history-panel-background");
+    expect(css).not.toContain("--history-chart-background");
     expect(css).toContain("table-layout: fixed");
     expect(css).toContain("align-items: stretch");
     expect(css).toContain(".usage-series-label");

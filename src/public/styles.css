@@ -480,29 +480,21 @@ button:focus-visible {
 
 .account-card {
   --history-card-background: #121513;
-  --history-panel-background: #101311;
-  --history-panel-border: #2c342f;
-  --history-chart-background: #181c19;
-  --history-metric-background: #191d1a;
+  --history-card-border: #303732;
 
   min-width: 0;
+  border-color: var(--history-card-border);
   background: var(--history-card-background);
 }
 
 .account-card.claude-history {
-  --history-card-background: #181214;
-  --history-panel-background: #161113;
-  --history-panel-border: #3a2a2f;
-  --history-chart-background: #1d1719;
-  --history-metric-background: #1d1618;
+  --history-card-background: #2b171e;
+  --history-card-border: #603443;
 }
 
 .account-card.codex-history {
-  --history-card-background: #111722;
-  --history-panel-background: #0f1620;
-  --history-panel-border: #29384a;
-  --history-chart-background: #151b24;
-  --history-metric-background: #151b24;
+  --history-card-background: #152039;
+  --history-card-border: #36517d;
 }
 
 .empty-card {
@@ -585,9 +577,9 @@ button:focus-visible {
 .window-panel {
   display: flex;
   min-width: 0;
-  border: 1px solid var(--history-panel-border);
+  border: 1px solid #2c342f;
   border-radius: 14px;
-  background: var(--history-panel-background);
+  background: #101311;
   overflow: hidden;
 }
 
@@ -737,7 +729,7 @@ button:focus-visible {
   align-items: center;
   border: 1px solid #252d27;
   border-radius: 9px;
-  background: var(--history-chart-background);
+  background: #181c19;
 }
 
 .chart-wrap svg {
@@ -835,7 +827,7 @@ button:focus-visible {
   border: 1px solid #2a322d;
   border-spacing: 0;
   border-radius: 9px;
-  background: var(--history-metric-background);
+  background: #191d1a;
   overflow: hidden;
   table-layout: fixed;
 }

@@ -51,6 +51,36 @@ function history(now: string): HistoryService {
 }
 
 describe("HTTP server", () => {
+  it("reloads dashboard assets per request in source development", async () => {
+    let javascript = "window.version = 1;";
+    const dashboardAssetLoader = vi.fn(() =>
+      Promise.resolve({ ...assets, javascript }),
+    );
+    const server = await buildServer({
+      dashboardAssetLoader,
+      reloadDashboardAssets: true,
+      scan: () => Promise.resolve([]),
+    });
+
+    const first = await server.inject({
+      method: "GET",
+      url: "/app.js",
+      headers: allowedHeaders,
+    });
+    javascript = "window.version = 2;";
+    const second = await server.inject({
+      method: "GET",
+      url: "/app.js",
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect(first.body).toBe("window.version = 1;");
+    expect(second.body).toBe("window.version = 2;");
+    expect(second.headers["cache-control"]).toBe("no-store");
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(2);
+  });
+
   it("serves the shared public DTO with fresh countdowns and no-store", async () => {
     const server = await buildServer({
       assets,
@@ -197,6 +227,11 @@ describe("HTTP server", () => {
       url: "/api/history/analytics",
       headers: allowedHeaders,
     });
+    const halfPeriodAnalytics = await server.inject({
+      method: "GET",
+      url: "/api/history/analytics?periods=0.5",
+      headers: allowedHeaders,
+    });
 
     expect(quota.statusCode).toBe(200);
     expect(cachedQuota.statusCode).toBe(200);
@@ -204,7 +239,11 @@ describe("HTTP server", () => {
     expect(scans.headers["cache-control"]).toBe("no-store");
     expect(historyScansSchema.parse(scans.json()).runs).toHaveLength(1);
     const analyticsPayload = historyAnalyticsSchema.parse(analytics.json());
+    const halfPeriodPayload = historyAnalyticsSchema.parse(
+      halfPeriodAnalytics.json(),
+    );
     expect(analyticsPayload.periodMultiplier).toBeNull();
+    expect(halfPeriodPayload.periodMultiplier).toBe(0.5);
     expect(analyticsPayload.lastScanAt).toBe(now);
     expect(analyticsPayload.scanIntervalSeconds).toBe(60);
     expect(analyticsPayload.accounts[0]).toEqual(
