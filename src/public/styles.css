@@ -475,12 +475,38 @@ button:focus-visible {
 .empty-card {
   border: 1px solid #303732;
   border-radius: 16px;
-  background: #121513;
   overflow: hidden;
 }
 
 .account-card {
+  --history-card-background: #121513;
+  --history-panel-background: #101311;
+  --history-panel-border: #2c342f;
+  --history-chart-background: #181c19;
+  --history-metric-background: #191d1a;
+
   min-width: 0;
+  background: var(--history-card-background);
+}
+
+.account-card.claude-history {
+  --history-card-background: #181214;
+  --history-panel-background: #161113;
+  --history-panel-border: #3a2a2f;
+  --history-chart-background: #1d1719;
+  --history-metric-background: #1d1618;
+}
+
+.account-card.codex-history {
+  --history-card-background: #111722;
+  --history-panel-background: #0f1620;
+  --history-panel-border: #29384a;
+  --history-chart-background: #151b24;
+  --history-metric-background: #151b24;
+}
+
+.empty-card {
+  background: #121513;
 }
 
 .account-header {
@@ -559,9 +585,9 @@ button:focus-visible {
 .window-panel {
   display: flex;
   min-width: 0;
-  border: 1px solid #2c342f;
+  border: 1px solid var(--history-panel-border);
   border-radius: 14px;
-  background: #101311;
+  background: var(--history-panel-background);
   overflow: hidden;
 }
 
@@ -642,6 +668,16 @@ button:focus-visible {
   font-size: 1.22rem;
 }
 
+.usage-divider {
+  color: #6f7771;
+}
+
+.usage-series-label {
+  font-size: 0.58em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .usage-caption {
   margin-top: 2px;
   color: #7f8781;
@@ -684,10 +720,7 @@ button:focus-visible {
 }
 
 .legend-swatch.nested {
-  height: 0;
-  border-top: 2px dashed #d8ac76;
-  border-radius: 0;
-  background: transparent;
+  background: #d8ac76;
 }
 
 .legend-value {
@@ -704,7 +737,7 @@ button:focus-visible {
   align-items: center;
   border: 1px solid #252d27;
   border-radius: 9px;
-  background: #181c19;
+  background: var(--history-chart-background);
 }
 
 .chart-wrap svg {
@@ -736,7 +769,6 @@ button:focus-visible {
 
 .usage-line.nested {
   stroke: #d8ac76;
-  stroke-dasharray: 5 4;
 }
 
 .usage-point {
@@ -803,7 +835,7 @@ button:focus-visible {
   border: 1px solid #2a322d;
   border-spacing: 0;
   border-radius: 9px;
-  background: #191d1a;
+  background: var(--history-metric-background);
   overflow: hidden;
   table-layout: fixed;
 }

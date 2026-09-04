@@ -65,6 +65,19 @@ describe("dashboard assets", () => {
     expect(javascript).toContain(
       'limit.projection.status === "exhausts_before_reset"',
     );
+    expect(javascript).toContain(
+      'limit.projection.status !== "reset_before_exhaustion"',
+    );
+    expect(javascript).toContain("projectionLineEndAt");
+    expect(javascript).toContain("formatAxisDateTime(chartEnd)");
+    expect(javascript).toContain('entry.limit.key === "base.session"');
+    expect(javascript).toContain("!stackedHistoryMedia.matches");
+    expect(javascript).toContain(
+      'stackedHistoryMedia.addEventListener("change"',
+    );
+    expect(javascript).toContain("usage-overlay-value");
+    expect(javascript).toContain('"usage-series-label", " all"');
+    expect(javascript).toContain('"usage-series-label", " fable"');
     expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(css).toContain(".window-grid.single-panel .window-panel");
@@ -72,8 +85,15 @@ describe("dashboard assets", () => {
     expect(css).toContain("grid-column: span 2");
     expect(css).toContain("background: #181c19");
     expect(css).toContain("stroke: #3b463e");
+    expect(css).toContain(".account-card.claude-history");
+    expect(css).toContain("--history-card-background: #181214");
+    expect(css).toContain(".account-card.codex-history");
+    expect(css).toContain("--history-card-background: #111722");
     expect(css).toContain("table-layout: fixed");
     expect(css).toContain("align-items: stretch");
+    expect(css).toContain(".usage-series-label");
+    expect(css).not.toContain("stroke-dasharray: 5 4");
+    expect(css).not.toContain("border-top: 2px dashed #d8ac76");
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 
