@@ -32,6 +32,7 @@ describe("server settings", () => {
       scanIntervalSeconds: 60,
       scanOnStartup: true,
       port: 3_000,
+      useDefaultPortFallback: true,
       history: { rawRetentionDays: 30, retentionDays: 365 },
       dashboard: { showSpark: true },
     });
@@ -65,9 +66,17 @@ describe("server settings", () => {
       scanIntervalSeconds: 120,
       scanOnStartup: true,
       port: 4_000,
+      useDefaultPortFallback: false,
       history: { rawRetentionDays: 7, retentionDays: 180 },
       dashboard: { showSpark: true },
     });
+  });
+
+  it("does not enable fallback for an explicitly configured default port", () => {
+    const filePath = join(directory(), "settings.json");
+    writeFileSync(filePath, JSON.stringify({ port: 3_000 }));
+
+    expect(readServerSettings({}, filePath).useDefaultPortFallback).toBe(false);
   });
 
   it("resolves the XDG path and requires absolute overrides", () => {

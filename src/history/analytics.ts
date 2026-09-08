@@ -5,13 +5,20 @@ import {
   type Projection,
 } from "../domain/history.js";
 import type { QuotaSnapshot } from "../domain/quota.js";
-import { MINIMUM_USABLE_HEADROOM_PERCENT } from "../presentation/quota-constants.js";
+import {
+  MINIMUM_USABLE_HEADROOM_PERCENT,
+  QUOTA_LOCAL_CONSTANTS,
+} from "../presentation/quota-constants.js";
 import { buildQuotaReport } from "../presentation/quota-report.js";
 import { toPublicSnapshots } from "../presentation/public-dto.js";
-import { minutesUntilReset } from "../services/time.js";
+import {
+  addCalendarDaysInTimeZone,
+  minutesUntilReset,
+} from "../services/time.js";
 import type { HistoryHealth } from "./service.js";
 import type {
   HistoryLimitSeries,
+  HistoryResetEvent,
   HistoryResolution,
   HistorySeriesPoint,
 } from "./types.js";
@@ -23,10 +30,14 @@ const MATERIAL_DROP_PERCENT = 5;
 const MAXIMUM_CHART_POINTS = 500;
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const RESET_JITTER_MILLISECONDS = 120_000;
+const THROUGHPUT_RATE_WINDOW_MINUTES = 30;
+const THROUGHPUT_MINIMUM_SPAN_MINUTES = 15;
+const DEFAULT_SESSION_WINDOW_MINUTES = 300;
 
 type MeasuredPoint = HistorySeriesPoint & { usedPercent: number };
 type RateBasis = "epoch" | "recent_30m" | "recent_1h" | "recent_3h";
 type RateCandidate = { basis: RateBasis; rate: number };
+type ResolvedReset = Pick<AnalyticsLimit, "resetAt" | "resetSource">;
 
 function isSparkLimit(key: string): boolean {
   return key.startsWith("codex_bengalfox.");
@@ -38,6 +49,64 @@ function seriesKey(
   limitKey: string,
 ): string {
   return `${platform}\0${accountAlias.toLocaleLowerCase("en-US")}\0${limitKey}`;
+}
+
+function resetEventsByLimit(
+  events: readonly HistoryResetEvent[],
+): Map<string, HistoryResetEvent> {
+  const latest = new Map<string, HistoryResetEvent>();
+  for (const event of events) {
+    const key = seriesKey(event.accountAlias, event.platform, event.limitKey);
+    const previous = latest.get(key);
+    if (
+      previous === undefined ||
+      Date.parse(event.lastSeenAt) > Date.parse(previous.lastSeenAt) ||
+      (event.lastSeenAt === previous.lastSeenAt &&
+        Date.parse(event.resetAt) > Date.parse(previous.resetAt))
+    ) {
+      latest.set(key, event);
+    }
+  }
+  return latest;
+}
+
+function resolveReset(options: {
+  currentResetAt: string | null;
+  lastKnown: HistoryResetEvent | undefined;
+  platform: string;
+  limitKey: string;
+  nowMilliseconds: number;
+  timeZone: string;
+}): ResolvedReset {
+  if (options.currentResetAt !== null) {
+    return { resetAt: options.currentResetAt, resetSource: "provider" };
+  }
+  if (options.lastKnown === undefined) {
+    return { resetAt: null, resetSource: null };
+  }
+  const lastKnownMilliseconds = Date.parse(options.lastKnown.resetAt);
+  if (lastKnownMilliseconds > options.nowMilliseconds) {
+    return { resetAt: options.lastKnown.resetAt, resetSource: "expected" };
+  }
+  if (options.platform !== "Claude" || options.limitKey !== "base.weekly") {
+    return { resetAt: null, resetSource: null };
+  }
+  let expectedMilliseconds: number;
+  try {
+    expectedMilliseconds = addCalendarDaysInTimeZone(
+      lastKnownMilliseconds,
+      QUOTA_LOCAL_CONSTANTS.windowMinutes.claudeWeekly.value / (24 * 60),
+      options.timeZone,
+    );
+  } catch {
+    return { resetAt: null, resetSource: null };
+  }
+  return expectedMilliseconds > options.nowMilliseconds
+    ? {
+        resetAt: new Date(expectedMilliseconds).toISOString(),
+        resetSource: "expected",
+      }
+    : { resetAt: null, resetSource: null };
 }
 
 function latestActivityAt(
@@ -434,13 +503,11 @@ export function providerResetMarkers(
   return markers;
 }
 
-function downsample(
-  points: readonly HistorySeriesPoint[],
-): HistorySeriesPoint[] {
+function downsample<T>(points: readonly T[]): T[] {
   if (points.length <= MAXIMUM_CHART_POINTS) {
     return [...points];
   }
-  const selected: HistorySeriesPoint[] = [];
+  const selected: T[] = [];
   for (let index = 0; index < MAXIMUM_CHART_POINTS; index += 1) {
     const sourceIndex = Math.round(
       (index / (MAXIMUM_CHART_POINTS - 1)) * (points.length - 1),
@@ -451,6 +518,259 @@ function downsample(
     }
   }
   return selected;
+}
+
+function canonicalSessionLimit(
+  account: HistoryAnalytics["accounts"][number],
+): AnalyticsLimit | undefined {
+  // Codex currently exposes `codex.primary` as its closest account-wide
+  // consumption window even when the provider reports a weekly duration.
+  const key = account.platform === "Claude" ? "base.session" : "codex.primary";
+  return account.limits.find((limit) => limit.key === key);
+}
+
+function sessionRatePoints(
+  points: readonly (HistorySeriesPoint & { usedPercent: number })[],
+): { observedAt: string; ratePercentPerHour: number }[] {
+  const sorted = [...points].sort(
+    (left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt),
+  );
+  const rates: { observedAt: string; ratePercentPerHour: number }[] = [];
+  let segmentStart = 0;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const current = sorted[index];
+    const previous = sorted[index - 1];
+    if (current === undefined || previous === undefined) {
+      continue;
+    }
+    if (current.usedPercent < previous.usedPercent) {
+      segmentStart = index;
+      continue;
+    }
+    const currentMilliseconds = Date.parse(current.observedAt);
+    let baseline: { observedAt: string; usedPercent: number } | undefined;
+    for (
+      let candidateIndex = index - 1;
+      candidateIndex >= segmentStart;
+      candidateIndex -= 1
+    ) {
+      const candidate = sorted[candidateIndex];
+      if (candidate === undefined) {
+        continue;
+      }
+      const spanMinutes =
+        (currentMilliseconds - Date.parse(candidate.observedAt)) / 60_000;
+      const maximumWindowMinutes =
+        current.resolution === "hour" ? 90 : THROUGHPUT_RATE_WINDOW_MINUTES;
+      if (spanMinutes > maximumWindowMinutes) {
+        break;
+      }
+      baseline = candidate;
+    }
+    if (baseline === undefined) {
+      continue;
+    }
+    const spanMinutes =
+      (currentMilliseconds - Date.parse(baseline.observedAt)) / 60_000;
+    if (spanMinutes < THROUGHPUT_MINIMUM_SPAN_MINUTES) {
+      continue;
+    }
+    rates.push({
+      observedAt: current.observedAt,
+      ratePercentPerHour: Number(
+        (
+          ((current.usedPercent - baseline.usedPercent) / spanMinutes) *
+          60
+        ).toFixed(3),
+      ),
+    });
+  }
+  return rates;
+}
+
+function smoothingWindowMinutes(rangeMilliseconds: number): number {
+  const rangeDays = rangeMilliseconds / 86_400_000;
+  if (rangeDays <= 1.5) {
+    return 60;
+  }
+  if (rangeDays <= 8) {
+    return 6 * 60;
+  }
+  if (rangeDays <= 32) {
+    return 24 * 60;
+  }
+  return 7 * 24 * 60;
+}
+
+function movingAverageRates(
+  points: readonly {
+    observedAt: string;
+    ratePercentPerHour: number;
+    accountCount: number;
+  }[],
+  windowMinutes: number,
+): {
+  observedAt: string;
+  ratePercentPerHour: number;
+  accountCount: number;
+}[] {
+  const smoothed: {
+    observedAt: string;
+    ratePercentPerHour: number;
+    accountCount: number;
+  }[] = [];
+  let start = 0;
+  let total = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    if (current === undefined) {
+      continue;
+    }
+    total += current.ratePercentPerHour;
+    const windowStart = Date.parse(current.observedAt) - windowMinutes * 60_000;
+    while (
+      start < index &&
+      Date.parse(points[start]?.observedAt ?? current.observedAt) < windowStart
+    ) {
+      total -= points[start]?.ratePercentPerHour ?? 0;
+      start += 1;
+    }
+    smoothed.push({
+      ...current,
+      ratePercentPerHour: Number((total / (index - start + 1)).toFixed(3)),
+    });
+  }
+  return smoothed;
+}
+
+function buildFleetThroughput(
+  accounts: HistoryAnalytics["accounts"],
+  series: readonly HistoryLimitSeries[],
+  options: {
+    fromMilliseconds: number;
+    toMilliseconds: number;
+    periodMultiplier?: NonNullable<HistoryAnalytics["periodMultiplier"]>;
+    scanIntervalSeconds?: number;
+  },
+): HistoryAnalytics["fleetThroughput"] {
+  const selected = accounts.flatMap((account) => {
+    const limit = canonicalSessionLimit(account);
+    if (limit === undefined) {
+      return [];
+    }
+    const history = series.find(
+      (candidate) =>
+        candidate.platform === account.platform &&
+        candidate.accountAlias.toLocaleLowerCase("en-US") ===
+          account.accountAlias.toLocaleLowerCase("en-US") &&
+        candidate.limit.key === limit.key,
+    );
+    return [{ account, limit, points: history?.points ?? limit.points }];
+  });
+  const fromMilliseconds =
+    options.periodMultiplier === undefined
+      ? options.fromMilliseconds
+      : Math.max(
+          options.fromMilliseconds,
+          options.toMilliseconds -
+            DEFAULT_SESSION_WINDOW_MINUTES *
+              options.periodMultiplier *
+              PERIOD_CONTEXT_MULTIPLIER *
+              60_000,
+        );
+  const sessionSources = selected
+    .map(({ account, limit, points }) => ({
+      accountAlias: account.accountAlias,
+      platform: account.platform,
+      limitKey: limit.key,
+      limitLabel: limit.label,
+      windowDurationMinutes: limit.windowDurationMinutes,
+      points: points.filter(
+        (
+          point,
+        ): point is HistorySeriesPoint & {
+          usedPercent: number;
+        } =>
+          point.usedPercent !== null &&
+          Date.parse(point.observedAt) >= fromMilliseconds &&
+          Date.parse(point.observedAt) <= options.toMilliseconds,
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        left.platform.localeCompare(right.platform) ||
+        left.accountAlias.localeCompare(right.accountAlias),
+    );
+  const sessions = sessionSources.map((session) => ({
+    accountAlias: session.accountAlias,
+    platform: session.platform,
+    limitKey: session.limitKey,
+    limitLabel: session.limitLabel,
+    windowDurationMinutes: session.windowDurationMinutes,
+    points: downsample(session.points).map((point) => ({
+      observedAt: point.observedAt,
+      usedPercent: point.usedPercent,
+    })),
+  }));
+  const bucketMilliseconds = Math.max(
+    60_000,
+    (options.scanIntervalSeconds ?? 60) * 1_000,
+  );
+  const rateBuckets = new Map<string, Map<number, Map<string, number>>>();
+  for (const session of sessionSources) {
+    let platformBuckets = rateBuckets.get(session.platform);
+    if (platformBuckets === undefined) {
+      platformBuckets = new Map();
+      rateBuckets.set(session.platform, platformBuckets);
+    }
+    for (const point of sessionRatePoints(session.points)) {
+      const bucket =
+        Math.floor(Date.parse(point.observedAt) / bucketMilliseconds) *
+        bucketMilliseconds;
+      let accountRates = platformBuckets.get(bucket);
+      if (accountRates === undefined) {
+        accountRates = new Map();
+        platformBuckets.set(bucket, accountRates);
+      }
+      accountRates.set(
+        session.accountAlias.toLocaleLowerCase("en-US"),
+        point.ratePercentPerHour,
+      );
+    }
+  }
+  const smoothingMinutes = smoothingWindowMinutes(
+    options.toMilliseconds - fromMilliseconds,
+  );
+  const vendors = (["Claude", "Codex"] as const).map((platform) => {
+    const platformBuckets =
+      rateBuckets.get(platform) ?? new Map<number, Map<string, number>>();
+    const points = [...platformBuckets.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([observedAt, accountRates]) => ({
+        observedAt: new Date(observedAt).toISOString(),
+        ratePercentPerHour: Number(
+          (
+            [...accountRates.values()].reduce(
+              (total, rate) => total + rate,
+              0,
+            ) / accountRates.size
+          ).toFixed(3),
+        ),
+        accountCount: accountRates.size,
+      }));
+    return {
+      platform,
+      points: downsample(movingAverageRates(points, smoothingMinutes)),
+    };
+  });
+  return {
+    from: new Date(fromMilliseconds).toISOString(),
+    to: new Date(options.toMilliseconds).toISOString(),
+    rateWindowMinutes: THROUGHPUT_RATE_WINDOW_MINUTES,
+    smoothingWindowMinutes: smoothingMinutes,
+    sessions,
+    vendors,
+  };
 }
 
 function fableRecommendation(
@@ -493,9 +813,9 @@ function fableRecommendation(
         resetMilliseconds: Math.min(
           ...constraints
             .map((limit) =>
-              limit.resetAt === null
+              limit.resetSource !== "provider"
                 ? Number.POSITIVE_INFINITY
-                : Date.parse(limit.resetAt),
+                : Date.parse(limit.resetAt ?? ""),
             )
             .filter(Number.isFinite),
         ),
@@ -537,6 +857,7 @@ function fableRecommendation(
 export function buildHistoryAnalytics(options: {
   snapshots: readonly QuotaSnapshot[];
   series: readonly HistoryLimitSeries[];
+  resetEvents?: readonly HistoryResetEvent[];
   historyHealth: HistoryHealth;
   nowMilliseconds: number;
   fromMilliseconds: number;
@@ -566,6 +887,7 @@ export function buildHistoryAnalytics(options: {
       series,
     ]),
   );
+  const latestResetEvents = resetEventsByLimit(options.resetEvents ?? []);
 
   const accounts: HistoryAnalytics["accounts"] = options.snapshots.map(
     (snapshot) => {
@@ -600,9 +922,23 @@ export function buildHistoryAnalytics(options: {
         const parent = reportRows.find(
           (candidate) => candidate.key === "base.weekly",
         );
-        const resetAt = isFable
+        const points = history?.points ?? [];
+        const resetLimitKey = isFable ? "base.weekly" : key;
+        const projectionResetAt = isFable
           ? (parent?.resetAt ?? null)
-          : (row?.resetAt ?? history?.points.at(-1)?.resetAt ?? null);
+          : (row?.resetAt ?? points.at(-1)?.resetAt ?? null);
+        const reset = resolveReset({
+          currentResetAt: isFable
+            ? (parent?.resetAt ?? null)
+            : (row?.resetAt ?? null),
+          lastKnown: latestResetEvents.get(
+            seriesKey(snapshot.accountAlias, snapshot.platform, resetLimitKey),
+          ),
+          platform: snapshot.platform,
+          limitKey: resetLimitKey,
+          nowMilliseconds: options.nowMilliseconds,
+          timeZone: options.timeZone,
+        });
         const windowDurationMinutes = isFable
           ? (parent?.windowDurationMinutes ??
             history?.points.at(-1)?.windowDurationMinutes ??
@@ -610,7 +946,6 @@ export function buildHistoryAnalytics(options: {
           : (row?.windowDurationMinutes ??
             history?.points.at(-1)?.windowDurationMinutes ??
             null);
-        const points = history?.points ?? [];
         const periodStartMilliseconds =
           options.periodMultiplier === undefined ||
           windowDurationMinutes === null
@@ -626,6 +961,27 @@ export function buildHistoryAnalytics(options: {
         const chartPoints = points.filter(
           (point) => Date.parse(point.observedAt) >= periodStartMilliseconds,
         );
+        const projectionPoints =
+          row?.consumedPercent === 100 &&
+          !points.some(
+            (point) =>
+              point.observedAt === snapshot.observedAt &&
+              point.usedPercent === 100,
+          )
+            ? [
+                ...points,
+                {
+                  observedAt: snapshot.observedAt,
+                  usedPercent: 100,
+                  minimumUsedPercent: 100,
+                  maximumUsedPercent: 100,
+                  resetAt: projectionResetAt,
+                  windowDurationMinutes,
+                  sampleCount: 1,
+                  resolution: "raw" as const,
+                },
+              ]
+            : points;
         const providerMarkers = isFable ? [] : providerResetMarkers(points);
         return [
           {
@@ -644,9 +1000,10 @@ export function buildHistoryAnalytics(options: {
                 ? null
                 : 100 - (points.at(-1)?.usedPercent ?? 100)),
             windowDurationMinutes,
-            resetAt,
+            resetAt: reset.resetAt,
+            resetSource: reset.resetSource,
             minutesUntilReset: minutesUntilReset(
-              resetAt,
+              reset.resetAt,
               options.nowMilliseconds,
             ),
             points: downsample(chartPoints),
@@ -655,7 +1012,7 @@ export function buildHistoryAnalytics(options: {
               : [...providerMarkers, ...inferredMarkers(points)].sort(
                   (left, right) => Date.parse(left.at) - Date.parse(right.at),
                 ),
-            projection: projectExhaustion(points, resetAt),
+            projection: projectExhaustion(projectionPoints, projectionResetAt),
           },
         ];
       });
@@ -686,6 +1043,16 @@ export function buildHistoryAnalytics(options: {
       Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
       left.accountAlias.localeCompare(right.accountAlias),
   );
+  const fleetThroughput = buildFleetThroughput(accounts, visibleSeries, {
+    fromMilliseconds: options.fromMilliseconds,
+    toMilliseconds: options.toMilliseconds,
+    ...(options.periodMultiplier === undefined
+      ? {}
+      : { periodMultiplier: options.periodMultiplier }),
+    ...(options.scanIntervalSeconds === undefined
+      ? {}
+      : { scanIntervalSeconds: options.scanIntervalSeconds }),
+  });
   const watch = report.watch;
 
   return historyAnalyticsSchema.parse({
@@ -699,6 +1066,7 @@ export function buildHistoryAnalytics(options: {
     scanIntervalSeconds: options.scanIntervalSeconds ?? null,
     historyHealth: options.historyHealth,
     accounts,
+    fleetThroughput,
     recommendations: {
       general:
         report.use === null

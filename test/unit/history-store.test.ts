@@ -151,6 +151,7 @@ describe("SQLite history store", () => {
       expect.objectContaining({
         limitKey: "base.weekly",
         resetAt,
+        lastSeenAt: secondOldAt,
         kind: "provider",
       }),
     ]);
@@ -184,7 +185,7 @@ describe("SQLite history store", () => {
 
   it("refuses to downgrade a newer database schema", () => {
     const database = new DatabaseSync(":memory:");
-    database.exec("PRAGMA user_version = 2");
+    database.exec("PRAGMA user_version = 3");
 
     expect(
       () =>
@@ -195,5 +196,45 @@ describe("SQLite history store", () => {
         }),
     ).toThrow("newer than this version");
     database.close();
+  });
+
+  it("migrates reset events to retain their last observation", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(`
+      CREATE TABLE reset_events (
+        account_key TEXT NOT NULL,
+        account_alias TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        limit_key TEXT NOT NULL,
+        reset_at_ms INTEGER NOT NULL,
+        first_seen_at_ms INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        PRIMARY KEY(account_key, limit_key, reset_at_ms, kind)
+      ) STRICT;
+      INSERT INTO reset_events VALUES (
+        'account', 'claude-history@example.com', 'Claude', 'base.weekly',
+        1788969600000, 1788364800000, 'provider'
+      );
+      PRAGMA user_version = 1;
+    `);
+
+    const store = new SqliteHistoryStore(database, {
+      filePath: ":memory:",
+      rawRetentionDays: 30,
+      retentionDays: 365,
+    });
+    const version = database.prepare("PRAGMA user_version").get() as {
+      user_version: number;
+    };
+    const event = database
+      .prepare("SELECT first_seen_at_ms, last_seen_at_ms FROM reset_events")
+      .get();
+
+    expect(version.user_version).toBe(2);
+    expect(event).toEqual({
+      first_seen_at_ms: 1_788_364_800_000,
+      last_seen_at_ms: 1_788_364_800_000,
+    });
+    store.close();
   });
 });

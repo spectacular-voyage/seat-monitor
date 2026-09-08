@@ -9,26 +9,34 @@ import {
   defaultAccountsConfigPath,
 } from "./config/accounts.js";
 import { isMainModule } from "./entry-point.js";
+import { buildHistoryAnalytics } from "./history/analytics.js";
+import { buildCliForecast } from "./history/cli-forecast.js";
 import { createRecordingScanner } from "./history/recording-scanner.js";
 import {
   createDefaultHistoryService,
   type HistoryService,
 } from "./history/service.js";
+import type { HistoryLimitSeries, HistoryResetEvent } from "./history/types.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
 import { buildQuotaReport } from "./presentation/quota-report.js";
 import { renderMarkdownReport } from "./presentation/table.js";
 import { renderTextReport } from "./presentation/text-report.js";
 import {
+  renderMarkdownForecast,
+  renderTextForecast,
+} from "./presentation/cli-forecast.js";
+import {
   createDefaultScanner,
   type Scanner,
 } from "./services/scan-accounts.js";
 
-const usage = `Usage: seat-monitor [--format text|md|json] [--json]
+const usage = `Usage: seat-monitor [--forecast] [--format text|md|json] [--json]
        seat-monitor --init-config
 
 Options:
   --format text|md|json  Select output format (default: text)
   --json                 Alias for --format json
+  --forecast             Include usage rates and exhaustion projections
   --init-config          Create a private example accounts.json
   --help                 Show this help
 `;
@@ -41,21 +49,26 @@ export type CliDependencies = {
   stderr?: { write: (value: string) => unknown };
   initializeConfig?: () => Promise<string>;
   history?: HistoryService;
+  createHistory?: () => HistoryService;
 };
 
 type OutputFormat = "text" | "md" | "json";
 
-function parseFormat(
-  arguments_: readonly string[],
-):
+function parseFormat(arguments_: readonly string[]):
   | { help: true }
-  | { help: false; format: OutputFormat; initializeConfig: boolean } {
+  | {
+      help: false;
+      format: OutputFormat;
+      initializeConfig: boolean;
+      forecast: boolean;
+    } {
   const parsed = parseArgs({
     args: [...arguments_],
     allowPositionals: false,
     strict: true,
     options: {
       format: { type: "string" },
+      forecast: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       "init-config": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -70,7 +83,9 @@ function parseFormat(
   }
   if (
     parsed.values["init-config"] &&
-    (parsed.values.json || parsed.values.format !== undefined)
+    (parsed.values.json ||
+      parsed.values.format !== undefined ||
+      parsed.values.forecast)
   ) {
     throw new TypeError("--init-config cannot be combined with output flags.");
   }
@@ -81,6 +96,7 @@ function parseFormat(
       help: false,
       format: "md",
       initializeConfig: parsed.values["init-config"],
+      forecast: parsed.values.forecast,
     };
   }
   if (format !== "text" && format !== "md" && format !== "json") {
@@ -90,6 +106,7 @@ function parseFormat(
     help: false,
     format,
     initializeConfig: parsed.values["init-config"],
+    forecast: parsed.values.forecast,
   };
 }
 
@@ -139,16 +156,17 @@ export async function runCli(
   }
 
   let scan: Scanner;
+  let history: HistoryService | null;
   let ownedHistory: HistoryService | null = null;
   try {
     const baseScan = dependencies.scan ?? createDefaultScanner();
-    const history =
+    history =
       dependencies.history ??
-      (dependencies.scan === undefined
-        ? (ownedHistory = createDefaultHistoryService(
-            process.env,
-            dependencies.now,
-          ))
+      (dependencies.scan === undefined ||
+      dependencies.createHistory !== undefined
+        ? (ownedHistory =
+            dependencies.createHistory?.() ??
+            createDefaultHistoryService(process.env, dependencies.now))
         : null);
     scan =
       history === null
@@ -178,15 +196,71 @@ export async function runCli(
     ownedHistory?.close();
     return 2;
   }
-  ownedHistory?.close();
-
   const now = (dependencies.now ?? (() => new Date()))();
-  const output = toPublicSnapshots(snapshots, now.getTime());
-  if (selection.format === "json") {
-    stdout.write(`${JSON.stringify(output)}\n`);
+  const nowMilliseconds = now.getTime();
+  if (selection.forecast) {
+    const historyToMilliseconds = nowMilliseconds + 1;
+    let series: HistoryLimitSeries[] = [];
+    let resetEvents: HistoryResetEvent[] = [];
+    let forecast: ReturnType<typeof buildCliForecast>;
+    try {
+      if (history !== null) {
+        try {
+          series = history.readSeries({
+            fromMilliseconds: nowMilliseconds - 7 * 86_400_000,
+            toMilliseconds: historyToMilliseconds,
+            resolution: "auto",
+          });
+        } catch {
+          // The current scan remains useful with explicit insufficient-history states.
+        }
+        try {
+          resetEvents = history.listResetEvents({
+            fromMilliseconds: nowMilliseconds - 8 * 86_400_000,
+            toMilliseconds: nowMilliseconds + 8 * 86_400_000,
+            resolution: "auto",
+          });
+        } catch {
+          // Reset provenance is optional when retained history cannot be read.
+        }
+      }
+      forecast = buildCliForecast(
+        buildHistoryAnalytics({
+          snapshots,
+          series,
+          resetEvents,
+          historyHealth: history?.health ?? "unavailable",
+          nowMilliseconds,
+          fromMilliseconds: nowMilliseconds - 7 * 86_400_000,
+          toMilliseconds: nowMilliseconds,
+          requestedResolution: "auto",
+          lastScanAt: now.toISOString(),
+          timeZone:
+            dependencies.timeZone ??
+            Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      );
+    } finally {
+      ownedHistory?.close();
+    }
+    if (selection.format === "json") {
+      stdout.write(`${JSON.stringify(forecast)}\n`);
+    } else {
+      stdout.write(
+        selection.format === "md"
+          ? renderMarkdownForecast(forecast)
+          : renderTextForecast(forecast),
+      );
+    }
   } else {
+    ownedHistory?.close();
+    const output = toPublicSnapshots(snapshots, nowMilliseconds);
+    if (selection.format === "json") {
+      stdout.write(`${JSON.stringify(output)}\n`);
+      return snapshots.some((snapshot) => snapshot.status === "error") ? 1 : 0;
+    }
     const report = buildQuotaReport(output, {
-      nowMilliseconds: now.getTime(),
+      nowMilliseconds,
       timeZone:
         dependencies.timeZone ??
         Intl.DateTimeFormat().resolvedOptions().timeZone,

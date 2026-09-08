@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addCalendarDaysInTimeZone,
   minutesUntilReset,
   unixSecondsToIso,
 } from "../../src/services/time.js";
@@ -31,5 +32,21 @@ describe("unixSecondsToIso", () => {
 
   it("rejects unsafe timestamps", () => {
     expect(() => unixSecondsToIso(Number.MAX_SAFE_INTEGER)).toThrow(TypeError);
+  });
+});
+
+describe("addCalendarDaysInTimeZone", () => {
+  it("preserves local wall-clock time across daylight saving changes", () => {
+    const beforeSpringForward = Date.parse("2026-03-08T01:00:00.000Z");
+
+    expect(
+      new Date(
+        addCalendarDaysInTimeZone(
+          beforeSpringForward,
+          7,
+          "America/Los_Angeles",
+        ),
+      ).toISOString(),
+    ).toBe("2026-03-15T00:00:00.000Z");
   });
 });

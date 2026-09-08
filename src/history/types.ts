@@ -35,6 +35,7 @@ export type HistoryResetEvent = {
   platform: Platform;
   limitKey: string;
   resetAt: string;
+  lastSeenAt: string;
   kind: "provider";
 };
 

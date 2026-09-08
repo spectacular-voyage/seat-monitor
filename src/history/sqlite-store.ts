@@ -82,6 +82,7 @@ type ResetRow = {
   platform: string;
   limit_key: string;
   reset_at_ms: number;
+  last_seen_at_ms: number;
 };
 
 type SeriesRecord = {
@@ -165,10 +166,31 @@ function createSchema(database: DatabaseSync): void {
   const versionRow = database.prepare("PRAGMA user_version").get() as
     { user_version?: number } | undefined;
   const version = versionRow?.user_version ?? 0;
-  if (version > 1) {
+  if (version > 2) {
     throw new TypeError("History database schema is newer than this version.");
   }
   if (version === 1) {
+    const resetEventColumns = database
+      .prepare("PRAGMA table_info(reset_events)")
+      .all() as { name: string }[];
+    if (
+      !resetEventColumns.some((column) => column.name === "last_seen_at_ms")
+    ) {
+      database.exec(
+        "ALTER TABLE reset_events ADD COLUMN last_seen_at_ms INTEGER NOT NULL DEFAULT 0",
+      );
+    }
+    database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+      UPDATE reset_events
+      SET last_seen_at_ms = first_seen_at_ms
+      WHERE last_seen_at_ms IS NULL OR last_seen_at_ms = 0;
+      PRAGMA user_version = 2;
+    `);
+    return;
+  }
+  if (version === 2) {
     database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
     return;
   }
@@ -229,6 +251,7 @@ function createSchema(database: DatabaseSync): void {
       limit_key TEXT NOT NULL,
       reset_at_ms INTEGER NOT NULL,
       first_seen_at_ms INTEGER NOT NULL,
+      last_seen_at_ms INTEGER NOT NULL,
       kind TEXT NOT NULL CHECK (kind = 'provider'),
       PRIMARY KEY(account_key, limit_key, reset_at_ms, kind)
     ) STRICT;
@@ -256,7 +279,7 @@ function createSchema(database: DatabaseSync): void {
     ) STRICT;
     CREATE INDEX IF NOT EXISTS hourly_rollups_time_idx
       ON hourly_limit_rollups(bucket_start_ms);
-    PRAGMA user_version = 1;
+    PRAGMA user_version = 2;
   `);
 }
 
@@ -378,10 +401,13 @@ export class SqliteHistoryStore implements HistoryStore {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertReset = this.#database.prepare(`
-      INSERT OR IGNORE INTO reset_events(
+      INSERT INTO reset_events(
         account_key, account_alias, platform, limit_key, reset_at_ms,
-        first_seen_at_ms, kind
-      ) VALUES (?, ?, ?, ?, ?, ?, 'provider')
+        first_seen_at_ms, last_seen_at_ms, kind
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'provider')
+      ON CONFLICT(account_key, limit_key, reset_at_ms, kind) DO UPDATE SET
+        account_alias = excluded.account_alias,
+        last_seen_at_ms = MAX(reset_events.last_seen_at_ms, excluded.last_seen_at_ms)
     `);
 
     this.#database.exec("BEGIN IMMEDIATE");
@@ -426,6 +452,7 @@ export class SqliteHistoryStore implements HistoryStore {
                 snapshot.platform,
                 limit.key,
                 Date.parse(limit.resetAt),
+                Date.parse(snapshot.observedAt),
                 Date.parse(snapshot.observedAt),
               );
             }
@@ -600,9 +627,10 @@ export class SqliteHistoryStore implements HistoryStore {
     }
     const rows = this.#database
       .prepare(
-        `SELECT account_alias, platform, limit_key, reset_at_ms
+        `SELECT account_alias, platform, limit_key, reset_at_ms,
+                last_seen_at_ms
          FROM reset_events WHERE ${conditions.join(" AND ")}
-         ORDER BY reset_at_ms`,
+         ORDER BY last_seen_at_ms, reset_at_ms`,
       )
       .all(...parameters) as unknown as ResetRow[];
     return rows.map((row) => ({
@@ -610,6 +638,7 @@ export class SqliteHistoryStore implements HistoryStore {
       platform: platform(row.platform),
       limitKey: row.limit_key,
       resetAt: new Date(row.reset_at_ms).toISOString(),
+      lastSeenAt: new Date(row.last_seen_at_ms).toISOString(),
       kind: "provider",
     }));
   }

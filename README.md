@@ -166,6 +166,18 @@ seat-monitor --json
 seat-monitor --format json
 ```
 
+Current quota output remains the compatibility default, including the top-level JSON array. Add `--forecast` when you need retained-history usage rates and exhaustion outlooks:
+
+```sh
+seat-monitor --forecast
+seat-monitor --forecast --format md
+seat-monitor --forecast --json
+```
+
+Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports lead with a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `riskRanking`, and `accounts`; each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
+
+Forecast mode does not change exit-code policy. A launcher-oriented gate with distinct policy and unable-to-answer exit codes is planned separately.
+
 Exit codes:
 
 - `0`: every enabled account succeeded
@@ -178,18 +190,30 @@ Elapsed percentages marked `*` use the dated local constants in `src/presentatio
 
 ## Dashboard and API
 
-Start the local server:
+Run the local server in the foreground:
 
 ```sh
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. History controls show ½, 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days. Recommendation cards and diagnostic counts are kept below history.
+Or manage it as a detached background process:
+
+```sh
+seat-monitor-server start
+seat-monitor-server restart
+seat-monitor-server stop
+```
+
+`start` waits for an identity-matched loopback acknowledgement before reporting success and is idempotent when the managed server is already running. `stop` signals only the process whose PID and random instance identity match the private runtime state; it refuses to kill an unverifiable live PID. Runtime state and append-only stdout/stderr logs live under `$XDG_STATE_HOME/seat-monitor/server/`, falling back to `~/.local/state/seat-monitor/server/`.
+
+When no port is configured, the server prefers `3000` and walks upward (`3001`, `3002`, …) until it finds an available loopback port. A port set in the settings file or `SEAT_MONITOR_PORT` remains exact and fails if occupied.
+
+Open the loopback URL printed at startup. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Per-account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. A separate Fleet throughput section uses distinct multi-account graphs for Claude Session and Codex primary consumption, followed by one mean-rate graph per vendor. Its independent controls select one day, week, 30-day month, or year; the rate line applies scale-aware moving averages of one hour, six hours, one day, or one week respectively to suppress quantization spikes. Per-account controls continue to show ½, 1, 2, 5, or 10 quota periods, with each graph using its own window duration plus 5% context. Recommendation cards and diagnostic counts follow the history sections, and reported limits appear as a current/expected ratio.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
-- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
+- `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 
@@ -240,6 +264,8 @@ Environment variables override the settings file:
 - `SEAT_MONITOR_SHOW_SPARK`, as `true` or `false`
 
 Set `dashboard.showSpark` to `false` when Spark limits are not relevant. This hides Spark from dashboard analytics and activity ordering while preserving raw `/api/quota` output and CLI compatibility. A lone Codex primary graph expands across the complete three-column history row.
+
+Omit `port` to enable automatic fallback above port 3000. Supplying `port`, even as `3000`, requests that exact port.
 
 The settings file cannot enable remote listening. `SEAT_MONITOR_HOST` remains compatibility-only and still accepts only `127.0.0.1` or `localhost`.
 

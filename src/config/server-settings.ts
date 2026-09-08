@@ -41,6 +41,7 @@ export type ServerSettings = {
   scanIntervalSeconds: number;
   scanOnStartup: boolean;
   port: number;
+  useDefaultPortFallback: boolean;
   history: {
     rawRetentionDays: number;
     retentionDays: number;
@@ -199,6 +200,8 @@ export function readServerSettings(
       file.port ?? DEFAULT_SERVER_PORT,
       { name: "SEAT_MONITOR_PORT", minimum: 1, maximum: 65_535 },
     ),
+    useDefaultPortFallback:
+      environment.SEAT_MONITOR_PORT === undefined && file.port === undefined,
     history: { rawRetentionDays, retentionDays },
     dashboard: {
       showSpark: booleanEnvironment(
