@@ -58,11 +58,12 @@ function snapshot(
 function open(
   filePath: string,
   now: string,
-  rawRetentionDays = 30,
+  rawRetentionHours = 6,
+  hourlyRetentionDays = 30,
   retentionDays = 365,
 ): HistoryStore {
   return openSqliteHistoryStore(
-    { filePath, rawRetentionDays, retentionDays },
+    { filePath, rawRetentionHours, hourlyRetentionDays, retentionDays },
     { now: () => new Date(now) },
   );
 }
@@ -108,7 +109,7 @@ describe("SQLite history store", () => {
 
   it("rolls expired raw points into hours before pruning scans", () => {
     const now = "2026-09-10T12:00:00.000Z";
-    const store = open(":memory:", now, 1, 10);
+    const store = open(":memory:", now, 24, 5, 10);
     const oldAt = "2026-09-08T10:05:00.000Z";
     const secondOldAt = "2026-09-08T10:35:00.000Z";
     const resetAt = "2026-09-09T10:00:00.000Z";
@@ -191,7 +192,8 @@ describe("SQLite history store", () => {
       () =>
         new SqliteHistoryStore(database, {
           filePath: ":memory:",
-          rawRetentionDays: 30,
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
           retentionDays: 365,
         }),
     ).toThrow("newer than this version");
@@ -220,7 +222,8 @@ describe("SQLite history store", () => {
 
     const store = new SqliteHistoryStore(database, {
       filePath: ":memory:",
-      rawRetentionDays: 30,
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
       retentionDays: 365,
     });
     const version = database.prepare("PRAGMA user_version").get() as {
@@ -229,12 +232,129 @@ describe("SQLite history store", () => {
     const event = database
       .prepare("SELECT first_seen_at_ms, last_seen_at_ms FROM reset_events")
       .get();
+    const dailyTable = database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_limit_rollups'",
+      )
+      .get();
 
     expect(version.user_version).toBe(2);
+    expect(dailyTable).toEqual({ name: "daily_limit_rollups" });
     expect(event).toEqual({
       first_seen_at_ms: 1_788_364_800_000,
       last_seen_at_ms: 1_788_364_800_000,
     });
+    store.close();
+  });
+
+  it("adds the daily tier to a version 2 database", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec("PRAGMA user_version = 2");
+
+    const store = new SqliteHistoryStore(database, {
+      filePath: ":memory:",
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    });
+    const version = database.prepare("PRAGMA user_version").get() as {
+      user_version: number;
+    };
+    const dailyTable = database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_limit_rollups'",
+      )
+      .get();
+
+    expect(version.user_version).toBe(2);
+    expect(dailyTable).toEqual({ name: "daily_limit_rollups" });
+    store.close();
+  });
+
+  it("continuously compacts raw scans into hourly and daily tiers", () => {
+    const now = "2026-09-10T12:07:00.000Z";
+    const store = open(":memory:", now, 6, 2, 10);
+    const resetAt = "2026-09-12T12:00:00.000Z";
+    const observations = [
+      ["2026-09-06T10:05:00.000Z", 10],
+      ["2026-09-06T11:05:00.000Z", 20],
+      ["2026-09-09T10:05:00.000Z", 30],
+      ["2026-09-09T10:35:00.000Z", 40],
+      ["2026-09-10T10:30:00.000Z", 50],
+    ] as const;
+    for (const [observedAt, usedPercent] of observations) {
+      store.recordScan(
+        "server",
+        [snapshot(observedAt, usedPercent, resetAt)],
+        new Date(observedAt),
+      );
+    }
+
+    store.maintain(new Date(now));
+
+    const points = store.readSeries({
+      fromMilliseconds: Date.parse("2026-09-01T00:00:00.000Z"),
+      toMilliseconds: Date.parse("2026-09-11T00:00:00.000Z"),
+      resolution: "auto",
+    })[0]?.points;
+    expect(points).toEqual([
+      expect.objectContaining({
+        resolution: "day",
+        usedPercent: 20,
+        sampleCount: 2,
+      }),
+      expect.objectContaining({
+        resolution: "hour",
+        usedPercent: 40,
+        sampleCount: 2,
+      }),
+      expect.objectContaining({
+        resolution: "raw",
+        usedPercent: 50,
+        sampleCount: 1,
+      }),
+    ]);
+    expect(
+      store.listScans({
+        fromMilliseconds: Date.parse("2026-09-01T00:00:00.000Z"),
+        toMilliseconds: Date.parse("2026-09-11T00:00:00.000Z"),
+        limit: 10,
+      }),
+    ).toHaveLength(1);
+    store.close();
+  });
+
+  it("bounds auto-resolution points while preserving sample counts", () => {
+    const now = Date.parse("2026-09-10T12:07:00.000Z");
+    const store = open(":memory:", new Date(now).toISOString(), 6, 1, 10);
+    const resetAt = new Date(now + 24 * 60 * 60_000).toISOString();
+    const sampleCount = 3 * 24 * 60;
+    for (let index = sampleCount; index > 0; index -= 1) {
+      const observedAt = new Date(now - index * 60_000).toISOString();
+      store.recordScan(
+        "server",
+        [snapshot(observedAt, index % 100, resetAt)],
+        new Date(observedAt),
+      );
+    }
+
+    store.maintain(new Date(now));
+    const fromMilliseconds =
+      Math.floor((now - 3 * 24 * 60 * 60_000) / (24 * 60 * 60_000)) *
+      (24 * 60 * 60_000);
+    const points = store.readSeries({
+      fromMilliseconds,
+      toMilliseconds: now,
+      resolution: "auto",
+    })[0]?.points;
+
+    expect(points?.length).toBeLessThan(450);
+    expect(points?.reduce((total, point) => total + point.sampleCount, 0)).toBe(
+      sampleCount,
+    );
+    expect(new Set(points?.map((point) => point.resolution))).toEqual(
+      new Set(["raw", "hour", "day"]),
+    );
     store.close();
   });
 });

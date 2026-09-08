@@ -77,6 +77,7 @@ try {
   const executableSuffix = process.platform === "win32" ? ".cmd" : "";
   for (const executable of [
     "seat-monitor",
+    "seat-monitor-server",
     "seat-monitor-claude-login",
     "seat-monitor-codex-login",
   ]) {
@@ -91,6 +92,21 @@ try {
     );
     if (!output.includes("Usage:")) {
       throw new Error(`${executable} did not produce help output.`);
+    }
+  }
+
+  for (const executable of ["seat-monitor", "seat-monitor-server"]) {
+    const output = run(
+      join(
+        temporaryDirectory,
+        "node_modules",
+        ".bin",
+        `${executable}${executableSuffix}`,
+      ),
+      ["--version"],
+    );
+    if (output.trim() !== packageResult.version) {
+      throw new Error(`${executable} did not report the package version.`);
     }
   }
 

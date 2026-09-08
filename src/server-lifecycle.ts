@@ -6,7 +6,7 @@ import { isAbsolute, join } from "node:path";
 
 import { z } from "zod";
 
-const STARTUP_TIMEOUT_MILLISECONDS = 10_000;
+const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 const STOP_TIMEOUT_MILLISECONDS = 5_000;
 const KILL_TIMEOUT_MILLISECONDS = 1_000;
 const POLL_INTERVAL_MILLISECONDS = 100;
@@ -270,6 +270,12 @@ export async function startDetachedServer(
   }
 
   const instanceId = randomUUID();
+  runtime.stdout.write(
+    `Starting Seat Monitor in background; waiting up to ${String(
+      (dependencies.startupTimeoutMilliseconds ??
+        STARTUP_TIMEOUT_MILLISECONDS) / 1_000,
+    )}s for readiness.\n`,
+  );
   const launchedAt = runtime.now().getTime();
   const launchedPid = await (
     dependencies.launchDetached ??
@@ -305,6 +311,33 @@ export async function startDetachedServer(
     `Seat Monitor did not acknowledge background startup. See ${runtime.paths.stderrLog}.\n`,
   );
   return 1;
+}
+
+export async function statusDetachedServer(
+  dependencies: LifecycleDependencies = {},
+): Promise<number> {
+  const runtime = lifecycleDefaults(dependencies);
+  const state = await readServerRuntimeState(runtime.paths);
+  if (state === null) {
+    runtime.stdout.write("Seat Monitor is not running in background.\n");
+    return 1;
+  }
+  if (!runtime.isProcessAlive(state.pid)) {
+    runtime.stderr.write(
+      `Seat Monitor has stale background state for dead pid ${String(state.pid)}.\n`,
+    );
+    return 1;
+  }
+  if (!(await runtime.fetchIdentity(state))) {
+    runtime.stderr.write(
+      `Seat Monitor background identity could not be verified for pid ${String(state.pid)}.\n`,
+    );
+    return 1;
+  }
+  runtime.stdout.write(
+    `Seat Monitor is running in background (pid: ${String(state.pid)}) at ${state.url}.\n`,
+  );
+  return 0;
 }
 
 export async function stopDetachedServer(

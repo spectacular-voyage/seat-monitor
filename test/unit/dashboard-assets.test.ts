@@ -39,6 +39,7 @@ describe("dashboard assets", () => {
     expect(html).not.toContain("Each graph uses its own quota period");
     expect(html).toContain('id="fleet-capacity"');
     expect(html).toContain('id="top-warnings"');
+    expect(html).toContain('id="app-version"');
     expect(html).not.toContain('id="refresh"');
     expect(html.indexOf('id="fleet-capacity"')).toBeLessThan(
       html.indexOf('class="summary"'),
@@ -52,6 +53,10 @@ describe("dashboard assets", () => {
     expect(html).not.toContain("<table");
     expect(javascript).toContain("createElementNS(SVG_NAMESPACE, name)");
     expect(javascript).toContain("/api/history/analytics");
+    expect(javascript).toContain('requestJson("/api/server/status")');
+    expect(javascript).toContain(
+      "appVersion.textContent = `v${status.version}`",
+    );
     expect(javascript).toContain('return "session-panel"');
     expect(javascript).toContain('return "weekly-panel"');
     expect(javascript).toContain("file:// preview");

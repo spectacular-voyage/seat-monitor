@@ -91,7 +91,8 @@ export function createDefaultHistoryService(
   environment: NodeJS.ProcessEnv = process.env,
   now: () => Date = () => new Date(),
   defaults: {
-    rawRetentionDays?: number;
+    rawRetentionHours?: number;
+    hourlyRetentionDays?: number;
     retentionDays?: number;
   } = {},
 ): HistoryService {

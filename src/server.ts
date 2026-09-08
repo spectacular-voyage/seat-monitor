@@ -38,21 +38,25 @@ import {
   resolveServerRuntimePaths,
   restartDetachedServer,
   startDetachedServer,
+  statusDetachedServer,
   stopDetachedServer,
   writeServerRuntimeState,
   type LifecycleDependencies,
 } from "./server-lifecycle.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
-const serverUsage = `Usage: seat-monitor-server [start|stop|restart]
+const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
 
 With no command, Seat Monitor runs in the foreground.
   start    Start the server in the background
   stop     Stop the verified background server
   restart  Stop and start the background server
+  status   Report verified background server status
+  --version  Show the Seat Monitor version
   --help   Show this help
 `;
 
@@ -312,6 +316,7 @@ export async function buildServer(
       startedAt: options.lifecycle?.startedAt ?? null,
       host,
       port,
+      version: PACKAGE_VERSION,
     };
   });
   server.get("/api/quota", async (request, reply) => {
@@ -589,6 +594,10 @@ export async function runServerCli(
     stdout.write(serverUsage);
     return 0;
   }
+  if (arguments_.length === 1 && arguments_[0] === "--version") {
+    stdout.write(`${PACKAGE_VERSION}\n`);
+    return 0;
+  }
   if (arguments_[0] === "__run" && arguments_.length === 2) {
     const instanceId = z.uuid().parse(arguments_[1]);
     await runForeground(instanceId);
@@ -598,7 +607,8 @@ export async function runServerCli(
     arguments_.length !== 1 ||
     (arguments_[0] !== "start" &&
       arguments_[0] !== "stop" &&
-      arguments_[0] !== "restart")
+      arguments_[0] !== "restart" &&
+      arguments_[0] !== "status")
   ) {
     stderr.write(serverUsage);
     return 2;
@@ -617,6 +627,9 @@ export async function runServerCli(
   }
   if (arguments_[0] === "stop") {
     return stopDetachedServer(lifecycle);
+  }
+  if (arguments_[0] === "status") {
+    return statusDetachedServer(lifecycle);
   }
   return restartDetachedServer(lifecycle);
 }

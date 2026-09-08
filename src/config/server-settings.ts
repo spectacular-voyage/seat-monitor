@@ -10,6 +10,7 @@ export const MAXIMUM_SCAN_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_SERVER_PORT = 3_000;
 
 const retentionDaysSchema = z.number().int().min(1).max(3_650);
+const retentionHoursSchema = z.number().int().min(1).max(87_600);
 
 const settingsFileSchema = z
   .object({
@@ -23,6 +24,9 @@ const settingsFileSchema = z
     port: z.number().int().min(1).max(65_535).optional(),
     history: z
       .object({
+        rawRetentionHours: retentionHoursSchema.optional(),
+        hourlyRetentionDays: retentionDaysSchema.optional(),
+        // Retained as a compatibility alias for pre-tier settings files.
         rawRetentionDays: retentionDaysSchema.optional(),
         retentionDays: retentionDaysSchema.optional(),
       })
@@ -43,7 +47,8 @@ export type ServerSettings = {
   port: number;
   useDefaultPortFallback: boolean;
   history: {
-    rawRetentionDays: number;
+    rawRetentionHours: number;
+    hourlyRetentionDays: number;
     retentionDays: number;
   };
   dashboard: {
@@ -156,11 +161,30 @@ export function readServerSettings(
     throw new ServerSettingsError("The server settings path must be absolute.");
   }
   const file = readSettingsFile(filePath);
-  const rawRetentionDays = integerEnvironment(
-    environment.SEAT_MONITOR_HISTORY_RAW_DAYS,
-    file.history?.rawRetentionDays ?? 30,
+  const legacyRawDays = environment.SEAT_MONITOR_HISTORY_RAW_DAYS;
+  const configuredRawHours = environment.SEAT_MONITOR_HISTORY_RAW_HOURS;
+  const rawRetentionHours =
+    configuredRawHours !== undefined
+      ? integerEnvironment(configuredRawHours, 6, {
+          name: "SEAT_MONITOR_HISTORY_RAW_HOURS",
+          minimum: 1,
+          maximum: 87_600,
+        })
+      : legacyRawDays !== undefined
+        ? integerEnvironment(legacyRawDays, 1, {
+            name: "SEAT_MONITOR_HISTORY_RAW_DAYS",
+            minimum: 1,
+            maximum: 3_650,
+          }) * 24
+        : (file.history?.rawRetentionHours ??
+          (file.history?.rawRetentionDays === undefined
+            ? 6
+            : file.history.rawRetentionDays * 24));
+  const hourlyRetentionDays = integerEnvironment(
+    environment.SEAT_MONITOR_HISTORY_HOURLY_DAYS,
+    file.history?.hourlyRetentionDays ?? 30,
     {
-      name: "SEAT_MONITOR_HISTORY_RAW_DAYS",
+      name: "SEAT_MONITOR_HISTORY_HOURLY_DAYS",
       minimum: 1,
       maximum: 3_650,
     },
@@ -174,9 +198,14 @@ export function readServerSettings(
       maximum: 3_650,
     },
   );
-  if (rawRetentionDays > retentionDays) {
+  if (rawRetentionHours > hourlyRetentionDays * 24) {
     throw new ServerSettingsError(
-      "Raw history retention cannot exceed total history retention.",
+      "Raw history retention cannot exceed hourly history retention.",
+    );
+  }
+  if (hourlyRetentionDays > retentionDays) {
+    throw new ServerSettingsError(
+      "Hourly history retention cannot exceed total history retention.",
     );
   }
 
@@ -202,7 +231,7 @@ export function readServerSettings(
     ),
     useDefaultPortFallback:
       environment.SEAT_MONITOR_PORT === undefined && file.port === undefined,
-    history: { rawRetentionDays, retentionDays },
+    history: { rawRetentionHours, hourlyRetentionDays, retentionDays },
     dashboard: {
       showSpark: booleanEnvironment(
         environment.SEAT_MONITOR_SHOW_SPARK,

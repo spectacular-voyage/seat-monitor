@@ -19,7 +19,7 @@ export const historySeriesPointSchema = z
     resetAt: isoInstantSchema.nullable(),
     windowDurationMinutes: z.number().positive().nullable(),
     sampleCount: z.number().int().positive(),
-    resolution: z.enum(["raw", "hour"]),
+    resolution: z.enum(["raw", "hour", "day"]),
   })
   .strict();
 

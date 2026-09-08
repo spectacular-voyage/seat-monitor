@@ -19,6 +19,8 @@ This release makes the local dashboard useful as an always-on quota monitor, imp
 - A Fleet throughput section charts Claude Session and Codex primary account lines in separate vendor graphs, followed by the mean active-window slope for each vendor. Independent 1d, 1w, 1m, and 1yr controls apply scale-aware moving averages to suppress quantization spikes.
 - `seat-monitor-server start`, `stop`, and `restart` manage an identity-verified detached server with private runtime state, startup acknowledgement, and persistent stdout/stderr logs. Bare invocation remains foreground-compatible.
 - `seat-monitor --forecast` brings dashboard usage-rate and exhaustion analytics to text, Markdown, and a lean versioned JSON contract, including soonest-first risk ranking, uncertainty, reset provenance, and evidence counts.
+- History now compacts continuously through six-hour raw, 30-day hourly, and long-term daily tiers, bounding analytics work while preserving sample counts and extrema before source deletion.
+- `seat-monitor-server status` reports identity-verified managed state, both executables support `--version`, and the dashboard displays its serving package version. Background startup now prints progress and allows bounded time for first-start compaction.
 
 ## Changed
 

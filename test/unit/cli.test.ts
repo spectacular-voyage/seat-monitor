@@ -9,6 +9,7 @@ import {
 } from "../../src/domain/quota.js";
 import { HistoryService } from "../../src/history/service.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
+import { PACKAGE_VERSION } from "../../src/version.js";
 
 function fixture(
   usedPercent = 42,
@@ -64,6 +65,24 @@ describe("CLI", () => {
     expect(exitCode).toBe(0);
     expect(scanned).toBe(false);
     expect(stdout.read()).toContain("--forecast");
+  });
+
+  it("reports its package version without scanning", async () => {
+    const stdout = writer();
+    let scanned = false;
+
+    const exitCode = await runCli(["--version"], {
+      scan: () => {
+        scanned = true;
+        return Promise.resolve([]);
+      },
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(scanned).toBe(false);
+    expect(stdout.read()).toBe(`${PACKAGE_VERSION}\n`);
   });
 
   it("emits only minified parseable JSON", async () => {
@@ -185,11 +204,15 @@ describe("CLI", () => {
 
   it("records an injected scan when an explicit history service is supplied", async () => {
     const history = new HistoryService(
-      openSqliteHistoryStore({
-        filePath: ":memory:",
-        rawRetentionDays: 30,
-        retentionDays: 365,
-      }),
+      openSqliteHistoryStore(
+        {
+          filePath: ":memory:",
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
+          retentionDays: 365,
+        },
+        { now: () => new Date("2026-08-26T18:00:00.000Z") },
+      ),
     );
     const stdout = writer();
     const observedAt = "2026-08-26T18:00:00.000Z";
@@ -215,11 +238,15 @@ describe("CLI", () => {
 
   it("emits a lean versioned forecast while preserving explicit states", async () => {
     const history = new HistoryService(
-      openSqliteHistoryStore({
-        filePath: ":memory:",
-        rawRetentionDays: 30,
-        retentionDays: 365,
-      }),
+      openSqliteHistoryStore(
+        {
+          filePath: ":memory:",
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
+          retentionDays: 365,
+        },
+        { now: () => new Date("2026-08-26T18:00:00.000Z") },
+      ),
     );
     const resetAt = "2026-08-26T22:00:00.000Z";
     for (const [usedPercent, observedAt] of [
@@ -333,7 +360,8 @@ describe("CLI", () => {
     const history = new HistoryService(
       openSqliteHistoryStore({
         filePath: ":memory:",
-        rawRetentionDays: 30,
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
         retentionDays: 365,
       }),
     );
@@ -410,7 +438,8 @@ describe("CLI", () => {
     const history = new HistoryService(
       openSqliteHistoryStore({
         filePath: ":memory:",
-        rawRetentionDays: 30,
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
         retentionDays: 365,
       }),
     );

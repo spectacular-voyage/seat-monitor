@@ -174,6 +174,12 @@ seat-monitor --forecast --format md
 seat-monitor --forecast --json
 ```
 
+Report the installed package version without scanning:
+
+```sh
+seat-monitor --version
+```
+
 Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports lead with a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `riskRanking`, and `accounts`; each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
 
 Forecast mode does not change exit-code policy. A launcher-oriented gate with distinct policy and unable-to-answer exit codes is planned separately.
@@ -200,11 +206,14 @@ Or manage it as a detached background process:
 
 ```sh
 seat-monitor-server start
+seat-monitor-server status
 seat-monitor-server restart
 seat-monitor-server stop
 ```
 
-`start` waits for an identity-matched loopback acknowledgement before reporting success and is idempotent when the managed server is already running. `stop` signals only the process whose PID and random instance identity match the private runtime state; it refuses to kill an unverifiable live PID. Runtime state and append-only stdout/stderr logs live under `$XDG_STATE_HOME/seat-monitor/server/`, falling back to `~/.local/state/seat-monitor/server/`.
+`start` immediately reports that startup is in progress, then waits up to 60 seconds for an identity-matched loopback acknowledgement. It is idempotent when the managed server is already running. `status` returns 0 only for an identity-verified managed process and returns 1 for stopped, dead-stale, or unverified state. `stop` signals only the process whose PID and random instance identity match the private runtime state; it refuses to kill an unverifiable live PID. Runtime state and append-only stdout/stderr logs live under `$XDG_STATE_HOME/seat-monitor/server/`, falling back to `~/.local/state/seat-monitor/server/`.
+
+Use `seat-monitor-server --version` to confirm which globally installed package owns the command. The dashboard shows the same package version in its footer.
 
 When no port is configured, the server prefers `3000` and walks upward (`3001`, `3002`, …) until it finds an available loopback port. A port set in the settings file or `SEAT_MONITOR_PORT` remains exact and fails if occupied.
 
@@ -221,13 +230,14 @@ Both historical routes accept validated time ranges and return `Cache-Control: n
 
 Successful and failed normalized account snapshots are recorded by both the installed CLI and server. The default SQLite database is `$XDG_STATE_HOME/seat-monitor/history.sqlite3`, falling back to `~/.local/state/seat-monitor/history.sqlite3`. It is created outside the repository with private directory/file modes where supported.
 
-Defaults retain raw scans for 30 days and hourly rollups plus reset events for 365 days. Maintenance runs at startup and at most daily. Configure history with:
+History is continuously compacted into bounded storage tiers. Defaults retain exact raw scans for six hours, hourly rollups for 30 days, and daily rollups plus reset events for 365 days. Maintenance runs at startup and is checked every five minutes after recorded scans; completed aggregates are committed before their source rows are deleted. Configure history with:
 
 - `SEAT_MONITOR_HISTORY_PATH`: absolute SQLite database path;
-- `SEAT_MONITOR_HISTORY_RAW_DAYS`: raw scan retention, from 1 to 3650 days; and
+- `SEAT_MONITOR_HISTORY_RAW_HOURS`: raw scan retention in hours;
+- `SEAT_MONITOR_HISTORY_HOURLY_DAYS`: hourly rollup retention in days; and
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`: total rollup/reset retention, from 1 to 3650 days.
 
-Raw retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
+The legacy `SEAT_MONITOR_HISTORY_RAW_DAYS` override remains accepted and converts days to hours. Raw retention cannot exceed hourly retention, and hourly retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
 
 Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Projection uses a nondecreasing usage envelope so small provider regressions cannot move exhaustion later, then compares supported 30-minute, one-hour, three-hour, and full-epoch rates. Warnings use the fastest supported pace and show an early-to-baseline range when it is meaningful. Exhaustion times remain estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
 
@@ -243,7 +253,8 @@ Copy the packaged `settings.example.json` or create a private file with this sha
   "scanOnStartup": true,
   "port": 3000,
   "history": {
-    "rawRetentionDays": 30,
+    "rawRetentionHours": 6,
+    "hourlyRetentionDays": 30,
     "retentionDays": 365
   },
   "dashboard": {
@@ -259,7 +270,8 @@ Environment variables override the settings file:
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
 - `SEAT_MONITOR_PORT`
-- `SEAT_MONITOR_HISTORY_RAW_DAYS`
+- `SEAT_MONITOR_HISTORY_RAW_HOURS`
+- `SEAT_MONITOR_HISTORY_HOURLY_DAYS`
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`
 - `SEAT_MONITOR_SHOW_SPARK`, as `true` or `false`
 

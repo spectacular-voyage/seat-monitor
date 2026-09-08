@@ -13,6 +13,8 @@ created: 1788377021465
 
 Implemented on 2026-09-02. The repository review, architecture gate, storage and analytics work, additive APIs, dashboard redesign, and automated verification are complete.
 
+The original 30-day raw/daily-maintenance retention policy documented below was superseded on 2026-09-08 by [[sm.task.2026-09-08-tiered-history-compaction]] after dense retained history exposed quadratic analytics cost. Current defaults are six hours raw, 30 days hourly, and 365 days daily.
+
 ## Objective
 
 Persist normalized Claude and Codex scan snapshots locally, expose bounded historical and analytics APIs, and replace the quota table with account cards containing usage graphs. Add reset markers, usage-rate and exhaustion projections, tiered retention, and Fable-aware strategy without changing existing CLI output or the `GET /api/quota` contract.

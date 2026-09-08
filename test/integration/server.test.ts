@@ -14,6 +14,7 @@ import {
 } from "../../src/history/service.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
 import { buildServer, findServerPort } from "../../src/server.js";
+import { PACKAGE_VERSION } from "../../src/version.js";
 
 const assets = {
   html: "<!doctype html><title>Test</title>",
@@ -47,7 +48,12 @@ const allowedHeaders = { host: "127.0.0.1:3000" };
 function history(now: string): HistoryService {
   return new HistoryService(
     openSqliteHistoryStore(
-      { filePath: ":memory:", rawRetentionDays: 30, retentionDays: 365 },
+      {
+        filePath: ":memory:",
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      },
       { now: () => new Date(now) },
     ),
   );
@@ -109,6 +115,7 @@ describe("HTTP server", () => {
         pid: process.pid,
         host: "127.0.0.1",
         port: 3_000,
+        version: PACKAGE_VERSION,
       }),
     );
   });

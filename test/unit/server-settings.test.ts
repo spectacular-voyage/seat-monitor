@@ -33,7 +33,11 @@ describe("server settings", () => {
       scanOnStartup: true,
       port: 3_000,
       useDefaultPortFallback: true,
-      history: { rawRetentionDays: 30, retentionDays: 365 },
+      history: {
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      },
       dashboard: { showSpark: true },
     });
   });
@@ -46,7 +50,11 @@ describe("server settings", () => {
         scanIntervalSeconds: 300,
         scanOnStartup: false,
         port: 3_001,
-        history: { rawRetentionDays: 14, retentionDays: 180 },
+        history: {
+          rawRetentionHours: 12,
+          hourlyRetentionDays: 14,
+          retentionDays: 180,
+        },
         dashboard: { showSpark: false },
       }),
     );
@@ -57,7 +65,8 @@ describe("server settings", () => {
           SEAT_MONITOR_SCAN_INTERVAL_SECONDS: "120",
           SEAT_MONITOR_SCAN_ON_STARTUP: "true",
           SEAT_MONITOR_PORT: "4000",
-          SEAT_MONITOR_HISTORY_RAW_DAYS: "7",
+          SEAT_MONITOR_HISTORY_RAW_HOURS: "8",
+          SEAT_MONITOR_HISTORY_HOURLY_DAYS: "7",
           SEAT_MONITOR_SHOW_SPARK: "true",
         },
         filePath,
@@ -67,7 +76,11 @@ describe("server settings", () => {
       scanOnStartup: true,
       port: 4_000,
       useDefaultPortFallback: false,
-      history: { rawRetentionDays: 7, retentionDays: 180 },
+      history: {
+        rawRetentionHours: 8,
+        hourlyRetentionDays: 7,
+        retentionDays: 180,
+      },
       dashboard: { showSpark: true },
     });
   });
@@ -116,7 +129,7 @@ describe("server settings", () => {
     writeFileSync(
       filePath,
       JSON.stringify({
-        history: { rawRetentionDays: 90, retentionDays: 180 },
+        history: { hourlyRetentionDays: 90, retentionDays: 180 },
       }),
     );
 
@@ -126,5 +139,29 @@ describe("server settings", () => {
         filePath,
       ),
     ).toThrow("cannot exceed");
+  });
+
+  it("maps legacy raw-retention days to hours", () => {
+    const filePath = join(directory(), "settings.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({ history: { rawRetentionDays: 1 } }),
+    );
+
+    expect(readServerSettings({}, filePath).history.rawRetentionHours).toBe(24);
+  });
+
+  it("gives the preferred hours override precedence over legacy days", () => {
+    const filePath = join(directory(), "missing.json");
+
+    expect(
+      readServerSettings(
+        {
+          SEAT_MONITOR_HISTORY_RAW_HOURS: "8",
+          SEAT_MONITOR_HISTORY_RAW_DAYS: "invalid",
+        },
+        filePath,
+      ).history.rawRetentionHours,
+    ).toBe(8);
   });
 });

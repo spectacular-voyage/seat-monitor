@@ -13,6 +13,7 @@ const limitCount = document.querySelector("#limit-count");
 const errorCount = document.querySelector("#error-count");
 const historyStatus = document.querySelector("#history-status");
 const lastChecked = document.querySelector("#last-checked");
+const appVersion = document.querySelector("#app-version");
 const connectionStatus = document.querySelector("#connection-status");
 const generalStrategy = document.querySelector("#general-strategy");
 const fableStrategy = document.querySelector("#fable-strategy");
@@ -1519,6 +1520,17 @@ async function requestJson(url) {
   return response.json();
 }
 
+async function loadServerVersion() {
+  try {
+    const status = await requestJson("/api/server/status");
+    if (typeof status.version === "string") {
+      appVersion.textContent = `v${status.version}`;
+    }
+  } catch {
+    appVersion.textContent = "version unavailable";
+  }
+}
+
 async function fetchDashboard(forceRefresh = false) {
   if (loading) {
     return;
@@ -1626,3 +1638,4 @@ setInterval(() => {
   void fetchDashboard(false);
 }, 60_000);
 void fetchDashboard(false);
+void loadServerVersion();

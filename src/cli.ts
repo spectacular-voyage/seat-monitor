@@ -29,6 +29,7 @@ import {
   createDefaultScanner,
   type Scanner,
 } from "./services/scan-accounts.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 const usage = `Usage: seat-monitor [--forecast] [--format text|md|json] [--json]
        seat-monitor --init-config
@@ -38,6 +39,7 @@ Options:
   --json                 Alias for --format json
   --forecast             Include usage rates and exhaustion projections
   --init-config          Create a private example accounts.json
+  --version              Show the Seat Monitor version
   --help                 Show this help
 `;
 
@@ -55,9 +57,11 @@ export type CliDependencies = {
 type OutputFormat = "text" | "md" | "json";
 
 function parseFormat(arguments_: readonly string[]):
-  | { help: true }
+  | { help: true; version: false }
+  | { help: false; version: true }
   | {
       help: false;
+      version: false;
       format: OutputFormat;
       initializeConfig: boolean;
       forecast: boolean;
@@ -72,11 +76,23 @@ function parseFormat(arguments_: readonly string[]):
       help: { type: "boolean", short: "h", default: false },
       "init-config": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
+      version: { type: "boolean", short: "V", default: false },
     },
   });
 
   if (parsed.values.help) {
-    return { help: true };
+    return { help: true, version: false };
+  }
+  if (parsed.values.version) {
+    if (
+      parsed.values.json ||
+      parsed.values.format !== undefined ||
+      parsed.values.forecast ||
+      parsed.values["init-config"]
+    ) {
+      throw new TypeError("--version cannot be combined with other flags.");
+    }
+    return { help: false, version: true };
   }
   if (parsed.values.json && parsed.values.format !== undefined) {
     throw new TypeError("--json cannot be combined with --format.");
@@ -94,6 +110,7 @@ function parseFormat(arguments_: readonly string[]):
   if (format === "table") {
     return {
       help: false,
+      version: false,
       format: "md",
       initializeConfig: parsed.values["init-config"],
       forecast: parsed.values.forecast,
@@ -104,6 +121,7 @@ function parseFormat(arguments_: readonly string[]):
   }
   return {
     help: false,
+    version: false,
     format,
     initializeConfig: parsed.values["init-config"],
     forecast: parsed.values.forecast,
@@ -137,6 +155,10 @@ export async function runCli(
 
   if (selection.help) {
     stdout.write(usage);
+    return 0;
+  }
+  if (selection.version) {
+    stdout.write(`${PACKAGE_VERSION}\n`);
     return 0;
   }
 

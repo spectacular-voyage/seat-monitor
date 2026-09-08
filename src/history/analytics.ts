@@ -561,7 +561,11 @@ function sessionRatePoints(
       const spanMinutes =
         (currentMilliseconds - Date.parse(candidate.observedAt)) / 60_000;
       const maximumWindowMinutes =
-        current.resolution === "hour" ? 90 : THROUGHPUT_RATE_WINDOW_MINUTES;
+        current.resolution === "day"
+          ? 36 * 60
+          : current.resolution === "hour"
+            ? 90
+            : THROUGHPUT_RATE_WINDOW_MINUTES;
       if (spanMinutes > maximumWindowMinutes) {
         break;
       }

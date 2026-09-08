@@ -9,11 +9,13 @@ import {
   resolveServerRuntimePaths,
   restartDetachedServer,
   startDetachedServer,
+  statusDetachedServer,
   stopDetachedServer,
   writeServerRuntimeState,
   type ServerRuntimeState,
 } from "../../src/server-lifecycle.js";
 import { runServerCli } from "../../src/server.js";
+import { PACKAGE_VERSION } from "../../src/version.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -118,6 +120,51 @@ describe("detached server lifecycle", () => {
     await expect(readServerRuntimeState(paths)).resolves.toBeNull();
   });
 
+  it("reports verified running, stopped, stale, and unverified status", async () => {
+    const paths = resolveServerRuntimePaths({
+      XDG_STATE_HOME: directory(),
+    });
+    const stopped = writer();
+    await expect(
+      statusDetachedServer({ paths, stdout: stopped.sink }),
+    ).resolves.toBe(1);
+    expect(stopped.read()).toContain("not running");
+
+    const state = runtimeState();
+    await writeServerRuntimeState(paths, state);
+    const running = writer();
+    await expect(
+      statusDetachedServer({
+        paths,
+        stdout: running.sink,
+        isProcessAlive: () => true,
+        fetchIdentity: () => Promise.resolve(true),
+      }),
+    ).resolves.toBe(0);
+    expect(running.read()).toContain("running in background (pid: 42424)");
+
+    const stale = writer();
+    await expect(
+      statusDetachedServer({
+        paths,
+        stderr: stale.sink,
+        isProcessAlive: () => false,
+      }),
+    ).resolves.toBe(1);
+    expect(stale.read()).toContain("stale background state");
+
+    const unverified = writer();
+    await expect(
+      statusDetachedServer({
+        paths,
+        stderr: unverified.sink,
+        isProcessAlive: () => true,
+        fetchIdentity: () => Promise.resolve(false),
+      }),
+    ).resolves.toBe(1);
+    expect(unverified.read()).toContain("identity could not be verified");
+  });
+
   it("refuses to signal an unverified live PID", async () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),
@@ -204,11 +251,13 @@ describe("detached server lifecycle", () => {
       XDG_STATE_HOME: directory(),
     });
     const signals: NodeJS.Signals[] = [];
+    const stdout = writer();
     const stderr = writer();
 
     await expect(
       startDetachedServer({
         paths,
+        stdout: stdout.sink,
         stderr: stderr.sink,
         launchDetached: () => Promise.resolve(42_424),
         isProcessAlive: () => true,
@@ -272,6 +321,33 @@ describe("detached server lifecycle", () => {
     ).resolves.toBe(2);
 
     expect(runForeground).toHaveBeenCalledOnce();
-    expect(stderr.read()).toContain("seat-monitor-server [start|stop|restart]");
+    expect(stderr.read()).toContain(
+      "seat-monitor-server [start|stop|restart|status]",
+    );
+  });
+
+  it("routes status and version without starting foreground mode", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    const statusOutput = writer();
+    const versionOutput = writer();
+    const runForeground = vi.fn(() => Promise.resolve());
+
+    await expect(
+      runServerCli(["status"], {
+        runForeground,
+        stdout: statusOutput.sink,
+        lifecycle: { paths },
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      runServerCli(["--version"], {
+        runForeground,
+        stdout: versionOutput.sink,
+      }),
+    ).resolves.toBe(0);
+
+    expect(statusOutput.read()).toContain("not running");
+    expect(versionOutput.read()).toBe(`${PACKAGE_VERSION}\n`);
+    expect(runForeground).not.toHaveBeenCalled();
   });
 });

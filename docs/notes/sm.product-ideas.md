@@ -2,7 +2,7 @@
 id: 5r5poivv87zkiq8ivsv5vs9
 title: Product Ideas
 desc: ""
-updated: 1788884643000
+updated: 1788907591000
 created: 1788377843962
 ---
 
@@ -12,6 +12,8 @@ created: 1788377843962
   - Configure the server-owned scan interval
   - Add a settings page that validates and atomically updates the file
 - Optional OS service definitions to keep `seat-monitor-server` running across reboots
+- **Completed 2026-09-08:** managed server `status` plus CLI/dashboard package-version visibility.
+- Preserve the last successful dashboard analytics payload when a refresh fails instead of replacing graphs with a synthetic empty-history fallback.
 - Stagecraft launcher consumer contract, ranked by measured incident cost
   - **Completed 2026-09-08 — Who exhausts next, and when:** `seat-monitor --forecast` brings the existing history analytics to the CLI with recent burn rate, minutes to projected exhaustion, and soonest-first account ranking. It preserves explicit insufficient-history and reset-before-exhaustion states instead of fabricating a time.
   - **Machine gate:** provide a launcher-oriented verdict for a selected account and floor, with distinct exit codes for safe, under-floor, and unable-to-answer outcomes. JSON should carry the same verdict and reason rather than requiring callers to recreate policy from display fields.
