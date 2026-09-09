@@ -7,6 +7,10 @@ import {
 import { buildHistoryAnalytics } from "../../src/history/analytics.js";
 import { buildCliForecast } from "../../src/history/cli-forecast.js";
 import type { HistoryLimitSeries } from "../../src/history/types.js";
+import {
+  renderMarkdownForecast,
+  renderTextForecast,
+} from "../../src/presentation/cli-forecast.js";
 
 const nowMilliseconds = Date.parse("2026-09-08T18:00:00.000Z");
 
@@ -155,5 +159,16 @@ describe("CLI forecast contract", () => {
       expect(limit?.minutesToExhaustion).toBeNull();
       expect(limit?.projectedExhaustionAt).toBeNull();
     }
+
+    const text = renderTextForecast(forecast);
+    const markdown = renderMarkdownForecast(forecast);
+    expect(text).toContain("already exhausted at");
+    expect(text).toContain("exhausts before reset at");
+    expect(text).toContain("reset before projected exhaustion at");
+    expect(text).toContain("exhaustion projected at");
+    expect(text).toContain("not consuming");
+    expect(text).toContain("insufficient history");
+    expect(markdown).toContain("## Who exhausts next");
+    expect(markdown).toContain("| Limit | Consumed | Rate | Basis |");
   });
 });

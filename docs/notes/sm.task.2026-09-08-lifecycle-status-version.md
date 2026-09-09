@@ -44,6 +44,8 @@ The globally installed package was `0.1.1`, not the repository's `0.1.5` package
 
 The installed-path diagnosis was reproduced rather than inferred: global Seat Monitor `0.1.1` ran `seat-monitor-server start` as a foreground process, exposed no status route, wrote no managed runtime state, and held the invoking terminal. Packed-install coverage now exercises the server help surface that the prior smoke test omitted.
 
+CodeQL's security-extended query reported same-user path-injection candidates at the configurable private runtime directory and its injected temporary-test equivalent. They were reviewed under the repository's established local-only threat model and dismissed: the process is unprivileged, the directory must be absolute, state is runtime-schema validated, files are private, and tests use `mkdtemp` paths.
+
 The Stagecraft read path was then driven against fresh post-migration scans. SQLite remained at consumer version 2, cadence evidence was present, and `claude-ops` progressed from four to the required eight Session samples under the normal scheduler. No Stagecraft change is needed for Seat Monitor version or tiered compaction compatibility.
 
 The final Stagecraft `show jimbo` probe still refused on a separate existing policy inconsistency: `claude-drichardson-kthunk` has usable zero-consumption Session evidence but no provider Session reset. Stagecraft's evidence builder labels that account usable, while its replay completeness predicate requires every limit reset timestamp to be a safe integer. Seat Monitor must not fabricate that provider reset; disposition belongs to Stagecraft's policy owner.
