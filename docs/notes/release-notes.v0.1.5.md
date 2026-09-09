@@ -21,6 +21,7 @@ This release makes the local dashboard useful as an always-on quota monitor, imp
 - `seat-monitor --forecast` brings dashboard usage-rate and exhaustion analytics to text, Markdown, and a lean versioned JSON contract, including soonest-first risk ranking, uncertainty, reset provenance, and evidence counts.
 - History now compacts continuously through six-hour raw, 30-day hourly, and long-term daily tiers, bounding analytics work while preserving sample counts and extrema before source deletion.
 - `seat-monitor-server status` reports identity-verified managed state, both executables support `--version`, and the dashboard displays its serving package version. Background startup now prints progress and allows bounded time for first-start compaction.
+- Graphs now anchor their right edge to the upcoming dashed reset marker, expose local day/time on pointer hover, explain inactive Claude Sessions as starting with the next message, and keep already-exhausted quotas out of persistent masthead warnings.
 
 ## Changed
 

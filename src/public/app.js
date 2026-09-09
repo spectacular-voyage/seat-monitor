@@ -227,11 +227,7 @@ function renderTopWarnings(payload) {
     .filter((account) => account.status === "ok")
     .flatMap((account) =>
       account.limits
-        .filter(
-          (limit) =>
-            limit.projection.status === "already_exhausted" ||
-            limit.projection.status === "exhausts_before_reset",
-        )
+        .filter((limit) => limit.projection.status === "exhausts_before_reset")
         .map((limit) => ({ account, limit })),
     )
     .sort((left, right) => {
@@ -243,16 +239,13 @@ function renderTopWarnings(payload) {
       );
     });
   for (const { account, limit } of exhaustions) {
-    const exhausted = limit.projection.status === "already_exhausted";
     warnings.push(
       createWarning(
-        exhausted ? "danger" : "warning",
+        "warning",
         `${account.accountAlias} · ${limit.label}`,
-        exhausted
-          ? "Quota is exhausted."
-          : limit.projection.projectedExhaustionAt === null
-            ? "Projected to exhaust before reset."
-            : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
+        limit.projection.projectedExhaustionAt === null
+          ? "Projected to exhaust before reset."
+          : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
       ),
     );
   }
@@ -305,6 +298,70 @@ function chartRangeStart(limit, queryStart, rangeEnd) {
   return Math.max(queryStart, rangeEnd - durationMilliseconds);
 }
 
+function addTimeAxisHover(
+  svg,
+  { rangeStart, rangeEnd, width, height, left, right, top, bottom },
+) {
+  const guide = svgElement("line", {
+    y1: top,
+    y2: height - bottom,
+    class: "chart-hover-guide",
+    visibility: "hidden",
+  });
+  const labelBackground = svgElement("rect", {
+    y: height - bottom + 4,
+    width: 108,
+    height: bottom - 5,
+    rx: 3,
+    class: "chart-hover-label-background",
+    visibility: "hidden",
+  });
+  const label = svgElement("text", {
+    y: height - 5,
+    class: "chart-hover-label",
+    "text-anchor": "middle",
+    visibility: "hidden",
+  });
+  const target = svgElement("rect", {
+    x: left,
+    y: top,
+    width: width - left - right,
+    height: height - top - bottom,
+    class: "chart-hover-target",
+  });
+  const setVisible = (visible) => {
+    const visibility = visible ? "visible" : "hidden";
+    guide.setAttribute("visibility", visibility);
+    labelBackground.setAttribute("visibility", visibility);
+    label.setAttribute("visibility", visibility);
+  };
+  target.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    if (bounds.width <= 0) {
+      return;
+    }
+    const svgX = Math.max(
+      left,
+      Math.min(
+        width - right,
+        ((event.clientX - bounds.left) / bounds.width) * width,
+      ),
+    );
+    const milliseconds =
+      rangeStart +
+      ((svgX - left) / (width - left - right)) * (rangeEnd - rangeStart);
+    const labelX = Math.max(left + 54, Math.min(width - right - 54, svgX));
+    guide.setAttribute("x1", String(svgX));
+    guide.setAttribute("x2", String(svgX));
+    labelBackground.setAttribute("x", String(labelX - 54));
+    label.setAttribute("x", String(labelX));
+    label.textContent = formatAxisDateTime(milliseconds);
+    setVisible(true);
+  });
+  target.addEventListener("pointerleave", () => setVisible(false));
+  svg.append(guide, labelBackground, label, target);
+}
+
 function projectionLineEnd(limit, projectionAt) {
   if (projectionAt === null || !Number.isFinite(projectionAt)) {
     return null;
@@ -332,7 +389,23 @@ function createUsageGraph(
 ) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
-  const rangeStart = chartRangeStart(limit, queryStart, rangeEnd);
+  const resetAtMilliseconds =
+    limit.depth === 0 && limit.resetAt !== null
+      ? Date.parse(limit.resetAt)
+      : Number.NaN;
+  const futureResetAt =
+    Number.isFinite(resetAtMilliseconds) && resetAtMilliseconds > rangeEnd
+      ? resetAtMilliseconds
+      : null;
+  const durationMilliseconds =
+    inferredWindowDurationMinutes(limit) *
+    periodMultiplier *
+    PERIOD_CONTEXT_MULTIPLIER *
+    60_000;
+  const rangeStart =
+    futureResetAt === null
+      ? chartRangeStart(limit, queryStart, rangeEnd)
+      : Math.max(queryStart, futureResetAt - durationMilliseconds);
   const series = chartLimits.map((chartLimit) => {
     const projectionAt =
       chartLimit.projection.projectedExhaustionAt === null
@@ -355,7 +428,7 @@ function createUsageGraph(
   });
   if (series.every((entry) => entry.measured.length === 0)) {
     wrapper.append(
-      element("p", "chart-empty", "History begins after the next scan."),
+      element("p", "chart-empty", "No measured history in this time range."),
     );
     return wrapper;
   }
@@ -371,7 +444,7 @@ function createUsageGraph(
         Date.parse(entry.measured.at(-1)?.observedAt ?? ""),
   );
   const maximumExtension = rangeEnd + (rangeEnd - rangeStart) * 0.25;
-  const chartEnd = forecasts.reduce(
+  const forecastEnd = forecasts.reduce(
     (end, entry) =>
       Math.max(
         end,
@@ -379,6 +452,7 @@ function createUsageGraph(
       ),
     rangeEnd,
   );
+  const chartEnd = futureResetAt ?? forecastEnd;
   const chartStart = rangeStart;
   const width = chartWidth;
   const height = 176;
@@ -431,10 +505,13 @@ function createUsageGraph(
   if (
     limit.depth === 0 &&
     limit.resetAt !== null &&
-    limit.resetSource !== "expected" &&
     !markerValues.some((marker) => marker.at === limit.resetAt)
   ) {
-    markerValues.push({ at: limit.resetAt, kind: "provider" });
+    markerValues.push({
+      at: limit.resetAt,
+      kind: futureResetAt === null ? "provider" : "projected",
+      source: limit.resetSource,
+    });
   }
   for (const marker of markerValues) {
     const milliseconds = Date.parse(marker.at);
@@ -452,9 +529,13 @@ function createUsageGraph(
     const markerLabel =
       marker.kind === "provider"
         ? "Provider reset"
-        : marker.kind === "adjustment"
-          ? "Provider reset adjustment"
-          : "Inferred reset";
+        : marker.kind === "projected"
+          ? marker.source === "expected"
+            ? "Expected reset"
+            : "Projected reset"
+          : marker.kind === "adjustment"
+            ? "Provider reset adjustment"
+            : "Inferred reset";
     markerTitle.textContent = `${markerLabel} ${formatDateTime(marker.at)}`;
     line.append(markerTitle);
     svg.append(line);
@@ -527,10 +608,22 @@ function createUsageGraph(
     "text-anchor": "end",
   });
   endLabel.textContent =
-    forecasts.length > 0 && chartEnd > rangeEnd
-      ? `forecast · ${formatAxisDateTime(chartEnd)}`
-      : "now";
+    futureResetAt !== null
+      ? `projected reset · ${formatAxisDateTime(futureResetAt)}`
+      : forecasts.length > 0 && chartEnd > rangeEnd
+        ? `forecast · ${formatAxisDateTime(chartEnd)}`
+        : "now";
   svg.append(startLabel, endLabel);
+  addTimeAxisHover(svg, {
+    rangeStart: chartStart,
+    rangeEnd: chartEnd,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+  });
   wrapper.append(svg);
   return wrapper;
 }
@@ -684,6 +777,16 @@ function createThroughputLineGraph(
   });
   endLabel.textContent = "now";
   svg.append(startLabel, endLabel);
+  addTimeAxisHover(svg, {
+    rangeStart,
+    rangeEnd,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+  });
   wrapper.append(svg);
   return wrapper;
 }
@@ -896,7 +999,9 @@ function createLimit(
     "p",
     "limit-reset",
     limit.resetAt === null
-      ? "Reset unknown"
+      ? limit.key === "base.session"
+        ? "Starts when a message is sent"
+        : "Reset unknown"
       : limit.depth === 1
         ? limit.resetSource === "expected"
           ? "Expected shared weekly reset · "
@@ -1059,7 +1164,9 @@ function createCapacityLimit(
   const isWeekly = limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES;
   const resetPrefix =
     limit.resetAt === null
-      ? "reset unknown"
+      ? limit.key === "base.session"
+        ? "starts when a message is sent"
+        : "reset unknown"
       : isWeekly
         ? `${limit.resetSource === "expected" ? "expected reset" : "resets"} ${formatWeeklyResetMoment(limit.resetAt)} (`
         : limit.resetSource === "expected"

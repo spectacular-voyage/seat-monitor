@@ -1001,6 +1001,36 @@ button:focus-visible {
   stroke-dasharray: 2 3;
 }
 
+.reset-marker.projected {
+  stroke: #9aa89f;
+  stroke-dasharray: 6 4;
+}
+
+.chart-hover-target {
+  cursor: crosshair;
+  fill: transparent;
+  pointer-events: all;
+}
+
+.chart-hover-guide {
+  stroke: #d2dad4;
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-hover-label-background {
+  fill: #252c27;
+  stroke: #59635c;
+  stroke-width: 0.75;
+}
+
+.chart-hover-label {
+  fill: #eef3ef;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 .forecast-line {
   stroke: #c9b9ef;
   stroke-dasharray: 3 4;

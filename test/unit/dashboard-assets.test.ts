@@ -77,7 +77,20 @@ describe("dashboard assets", () => {
       "limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES",
     );
     expect(javascript).toContain('reset.append(")")');
-    expect(javascript).toContain('limit.resetSource !== "expected"');
+    expect(javascript).toContain(
+      'kind: futureResetAt === null ? "provider" : "projected"',
+    );
+    expect(javascript).toContain('class: "chart-hover-target"');
+    expect(javascript).toContain('target.addEventListener("pointermove"');
+    expect(javascript).toContain("futureResetAt - durationMilliseconds");
+    expect(javascript).toContain(
+      "const chartEnd = futureResetAt ?? forecastEnd",
+    );
+    expect(javascript).toContain("projected reset ·");
+    expect(javascript).toContain("Starts when a message is sent");
+    expect(javascript).toContain("starts when a message is sent");
+    expect(javascript).not.toContain('"Quota is exhausted."');
+    expect(javascript).not.toContain("History begins after the next scan.");
     expect(javascript).toContain("createChartLegend");
     expect(javascript).toContain("createLimitMetrics");
     expect(javascript).toContain('element("table", "limit-metrics")');
@@ -123,6 +136,8 @@ describe("dashboard assets", () => {
     expect(css).toContain("grid-column: span 2");
     expect(css).toContain("background: #181c19");
     expect(css).toContain("stroke: #3b463e");
+    expect(css).toContain(".reset-marker.projected");
+    expect(css).toContain(".chart-hover-guide");
     expect(css).toContain(".account-card.claude-history");
     expect(css).toContain("--history-card-background: #2b171e");
     expect(css).toContain(".account-card.codex-history");
