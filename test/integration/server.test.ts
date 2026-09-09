@@ -8,9 +8,13 @@ import {
   historyAnalyticsSchema,
   historyScansSchema,
 } from "../../src/domain/history.js";
-import { HistoryService } from "../../src/history/service.js";
+import {
+  HistoryService,
+  HistoryUnavailableError,
+} from "../../src/history/service.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
-import { buildServer } from "../../src/server.js";
+import { buildServer, findServerPort } from "../../src/server.js";
+import { PACKAGE_VERSION } from "../../src/version.js";
 
 const assets = {
   html: "<!doctype html><title>Test</title>",
@@ -44,13 +48,78 @@ const allowedHeaders = { host: "127.0.0.1:3000" };
 function history(now: string): HistoryService {
   return new HistoryService(
     openSqliteHistoryStore(
-      { filePath: ":memory:", rawRetentionDays: 30, retentionDays: 365 },
+      {
+        filePath: ":memory:",
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      },
       { now: () => new Date(now) },
     ),
   );
 }
 
 describe("HTTP server", () => {
+  it("walks upward from the implicit default port", async () => {
+    const probe = vi.fn((_host: string, port: number) =>
+      Promise.resolve(port === 3_002),
+    );
+
+    await expect(
+      findServerPort(
+        { host: "127.0.0.1", port: 3_000, useDefaultFallback: true },
+        probe,
+      ),
+    ).resolves.toBe(3_002);
+    expect(probe.mock.calls.map((call) => call[1])).toEqual([
+      3_000, 3_001, 3_002,
+    ]);
+  });
+
+  it("does not probe or move an explicitly configured port", async () => {
+    const probe = vi.fn(() => Promise.resolve(false));
+
+    await expect(
+      findServerPort(
+        { host: "127.0.0.1", port: 3_000, useDefaultFallback: false },
+        probe,
+      ),
+    ).resolves.toBe(3_000);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("exposes identity for detached lifecycle acknowledgement", async () => {
+    const instanceId = "1298b3d9-e131-4b4c-a1c6-54124064fd82";
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      lifecycle: {
+        instanceId,
+        startedAt: "2026-09-07T18:00:00.000Z",
+      },
+    });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/server/status",
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual(
+      expect.objectContaining({
+        mode: "background",
+        instanceId,
+        pid: process.pid,
+        host: "127.0.0.1",
+        port: 3_000,
+        version: PACKAGE_VERSION,
+      }),
+    );
+  });
+
   it("reloads dashboard assets per request in source development", async () => {
     let currentAssets = {
       html: "<!doctype html><title>Version 1</title>",
@@ -298,7 +367,94 @@ describe("HTTP server", () => {
     expect(analyticsPayload.accounts[0]?.limits[0]?.projection.status).toBe(
       "insufficient_history",
     );
+    expect(analyticsPayload.fleetThroughput.vendors).toEqual([
+      expect.objectContaining({ platform: "Claude" }),
+      expect.objectContaining({ platform: "Codex" }),
+    ]);
     await server.close();
+  });
+
+  it("uses retained reset events outside the selected chart range", async () => {
+    const now = "2026-09-10T18:00:00.000Z";
+    const historyService = history(now);
+    const historical = quotaSuccessSchema.parse({
+      ...snapshot(),
+      observedAt: "2026-09-01T18:00:00.000Z",
+      limits: [
+        {
+          ...snapshot().limits[0],
+          resetAt: "2026-09-11T18:00:00.000Z",
+        },
+      ],
+    });
+    const current = quotaSuccessSchema.parse({
+      ...historical,
+      observedAt: now,
+      limits: historical.limits.map((limit) => ({
+        ...limit,
+        resetAt: null,
+      })),
+    });
+    historyService.recordScan(
+      "server",
+      [historical],
+      new Date(historical.observedAt),
+    );
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([current]),
+      history: historyService,
+      now: () => new Date(now),
+    });
+
+    await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    const analytics = await server.inject({
+      method: "GET",
+      url: `/api/history/analytics?from=${encodeURIComponent("2026-09-10T00:00:00.000Z")}`,
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect(analytics.statusCode).toBe(200);
+    expect(
+      historyAnalyticsSchema.parse(analytics.json()).accounts[0]?.limits[0],
+    ).toEqual(
+      expect.objectContaining({
+        resetAt: "2026-09-11T18:00:00.000Z",
+        resetSource: "expected",
+      }),
+    );
+  });
+
+  it("keeps analytics available when reset-event history cannot be read", async () => {
+    const now = "2026-08-26T18:00:01.000Z";
+    const historyService = history(now);
+    historyService.recordScan("server", [snapshot()], new Date(now));
+    vi.spyOn(historyService, "listResetEvents").mockImplementation(() => {
+      throw new HistoryUnavailableError();
+    });
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([snapshot()]),
+      history: historyService,
+      now: () => new Date(now),
+    });
+
+    const analytics = await server.inject({
+      method: "GET",
+      url: "/api/history/analytics",
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect(analytics.statusCode).toBe(200);
+    expect(
+      historyAnalyticsSchema.parse(analytics.json()).accounts,
+    ).toHaveLength(1);
   });
 
   it("bounds historical queries and redacts unavailable history", async () => {

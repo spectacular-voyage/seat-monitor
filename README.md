@@ -166,6 +166,24 @@ seat-monitor --json
 seat-monitor --format json
 ```
 
+Current quota output remains the compatibility default, including the top-level JSON array. Add `--forecast` when you need retained-history usage rates and exhaustion outlooks:
+
+```sh
+seat-monitor --forecast
+seat-monitor --forecast --format md
+seat-monitor --forecast --json
+```
+
+Report the installed package version without scanning:
+
+```sh
+seat-monitor --version
+```
+
+Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports lead with a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `riskRanking`, and `accounts`; each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
+
+Forecast mode does not change exit-code policy. A launcher-oriented gate with distinct policy and unable-to-answer exit codes is planned separately.
+
 Exit codes:
 
 - `0`: every enabled account succeeded
@@ -178,18 +196,33 @@ Elapsed percentages marked `*` use the dated local constants in `src/presentatio
 
 ## Dashboard and API
 
-Start the local server:
+Run the local server in the foreground:
 
 ```sh
 seat-monitor-server
 ```
 
-Open <http://127.0.0.1:3000>. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. History controls show ½, 1, 2, 5, or 10 quota periods; each graph uses its own window duration plus 5% context, so a Session period is five hours while a weekly period is seven days. Recommendation cards and diagnostic counts are kept below history.
+Or manage it as a detached background process:
+
+```sh
+seat-monitor-server start
+seat-monitor-server status
+seat-monitor-server restart
+seat-monitor-server stop
+```
+
+`start` immediately reports that startup is in progress, then waits up to 60 seconds for an identity-matched loopback acknowledgement. It is idempotent when the managed server is already running. `status` returns 0 only for an identity-verified managed process and returns 1 for stopped, dead-stale, or unverified state. `stop` signals only the process whose PID and random instance identity match the private runtime state; it refuses to kill an unverifiable live PID. Runtime state and append-only stdout/stderr logs live under `$XDG_STATE_HOME/seat-monitor/server/`, falling back to `~/.local/state/seat-monitor/server/`.
+
+Use `seat-monitor-server --version` to confirm which globally installed package owns the command. The dashboard shows the same package version in its footer.
+
+When no port is configured, the server prefers `3000` and walks upward (`3001`, `3002`, …) until it finds an available loopback port. A port set in the settings file or `SEAT_MONITOR_PORT` remains exact and fails if occupied.
+
+Open the loopback URL printed at startup. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; already-exhausted quotas remain visible in account detail without a persistent masthead duplicate. Only the stale-scan warning exposes a contextual **Refresh now** action. Fleet rows and history cards are ordered by the most recent observed usage increase. Per-account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Historical provider resets are solid; a future reset is dashed and anchors the graph's right edge, with the selected period worked backward from that boundary. Hovering over usage or throughput lines shows the corresponding local day and time on the x-axis. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. A separate Fleet throughput section uses distinct multi-account graphs for Claude Session and Codex primary consumption, followed by one mean-rate graph per vendor. Its independent controls select one day, week, 30-day month, or year; the rate line applies scale-aware moving averages of one hour, six hours, one day, or one week respectively to suppress quantization spikes. Per-account controls continue to show ½, 1, 2, 5, or 10 quota periods. Recommendation cards and diagnostic counts follow the history sections, and reported limits appear as a current/expected ratio.
 
 `GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
-- `GET /api/history/analytics` returns bounded chart series, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
+- `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 
@@ -197,13 +230,14 @@ Both historical routes accept validated time ranges and return `Cache-Control: n
 
 Successful and failed normalized account snapshots are recorded by both the installed CLI and server. The default SQLite database is `$XDG_STATE_HOME/seat-monitor/history.sqlite3`, falling back to `~/.local/state/seat-monitor/history.sqlite3`. It is created outside the repository with private directory/file modes where supported.
 
-Defaults retain raw scans for 30 days and hourly rollups plus reset events for 365 days. Maintenance runs at startup and at most daily. Configure history with:
+History is continuously compacted into bounded storage tiers. Defaults retain exact raw scans for six hours, hourly rollups for 30 days, and daily rollups plus reset events for 365 days. Maintenance runs at startup and is checked every five minutes after recorded scans; completed aggregates are committed before their source rows are deleted. Configure history with:
 
 - `SEAT_MONITOR_HISTORY_PATH`: absolute SQLite database path;
-- `SEAT_MONITOR_HISTORY_RAW_DAYS`: raw scan retention, from 1 to 3650 days; and
+- `SEAT_MONITOR_HISTORY_RAW_HOURS`: raw scan retention in hours;
+- `SEAT_MONITOR_HISTORY_HOURLY_DAYS`: hourly rollup retention in days; and
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`: total rollup/reset retention, from 1 to 3650 days.
 
-Raw retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
+The legacy `SEAT_MONITOR_HISTORY_RAW_DAYS` override remains accepted and converts days to hours. Raw retention cannot exceed hourly retention, and hourly retention cannot exceed total retention. A history database failure does not change valid current quota output; historical routes return a redacted unavailable response instead.
 
 Rates require at least three measured observations over 15 minutes and never cross a reset epoch. Projection uses a nondecreasing usage envelope so small provider regressions cannot move exhaustion later, then compares supported 30-minute, one-hour, three-hour, and full-epoch rates. Warnings use the fastest supported pace and show an early-to-baseline range when it is meaningful. Exhaustion times remain estimates, not provider facts. Fable strategy jointly considers Claude session, shared weekly, and Fable sub-cap headroom. It does not convert the provider-reported Fable percentage using the contextual Max-plan 50% ceiling.
 
@@ -219,7 +253,8 @@ Copy the packaged `settings.example.json` or create a private file with this sha
   "scanOnStartup": true,
   "port": 3000,
   "history": {
-    "rawRetentionDays": 30,
+    "rawRetentionHours": 6,
+    "hourlyRetentionDays": 30,
     "retentionDays": 365
   },
   "dashboard": {
@@ -235,11 +270,14 @@ Environment variables override the settings file:
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
 - `SEAT_MONITOR_PORT`
-- `SEAT_MONITOR_HISTORY_RAW_DAYS`
+- `SEAT_MONITOR_HISTORY_RAW_HOURS`
+- `SEAT_MONITOR_HISTORY_HOURLY_DAYS`
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`
 - `SEAT_MONITOR_SHOW_SPARK`, as `true` or `false`
 
 Set `dashboard.showSpark` to `false` when Spark limits are not relevant. This hides Spark from dashboard analytics and activity ordering while preserving raw `/api/quota` output and CLI compatibility. A lone Codex primary graph expands across the complete three-column history row.
+
+Omit `port` to enable automatic fallback above port 3000. Supplying `port`, even as `3000`, requests that exact port.
 
 The settings file cannot enable remote listening. `SEAT_MONITOR_HOST` remains compatibility-only and still accepts only `127.0.0.1` or `localhost`.
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
+import { createServer as createNetServer } from "node:net";
+import { fileURLToPath } from "node:url";
 
 import Fastify, {
   type FastifyInstance,
@@ -22,6 +24,7 @@ import {
   HistoryUnavailableError,
   type HistoryService,
 } from "./history/service.js";
+import type { HistoryResetEvent } from "./history/types.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
 import {
   createDefaultScanner,
@@ -30,10 +33,32 @@ import {
 import { SnapshotCache } from "./services/snapshot-cache.js";
 import { ScanScheduler } from "./services/scan-scheduler.js";
 import { isMainModule } from "./entry-point.js";
+import {
+  clearServerRuntimeState,
+  resolveServerRuntimePaths,
+  restartDetachedServer,
+  startDetachedServer,
+  statusDetachedServer,
+  stopDetachedServer,
+  writeServerRuntimeState,
+  type LifecycleDependencies,
+} from "./server-lifecycle.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
+const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
+const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
+
+With no command, Seat Monitor runs in the foreground.
+  start    Start the server in the background
+  stop     Stop the verified background server
+  restart  Stop and start the background server
+  status   Report verified background server status
+  --version  Show the Seat Monitor version
+  --help   Show this help
+`;
 
 const refreshQuerySchema = z
   .object({
@@ -89,6 +114,10 @@ export type ServerOptions = {
   };
   analytics?: {
     showSpark: boolean;
+  };
+  lifecycle?: {
+    instanceId: string;
+    startedAt: string;
   };
 };
 
@@ -278,6 +307,18 @@ export async function buildServer(
     }
     return reply.type("text/css; charset=utf-8").send(currentAssets.css);
   });
+  server.get("/api/server/status", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return {
+      mode: options.lifecycle === undefined ? "foreground" : "background",
+      instanceId: options.lifecycle?.instanceId ?? null,
+      pid: process.pid,
+      startedAt: options.lifecycle?.startedAt ?? null,
+      host,
+      port,
+      version: PACKAGE_VERSION,
+    };
+  });
   server.get("/api/quota", async (request, reply) => {
     const query = refreshQuerySchema.parse(request.query);
     const forceRefresh = query.refresh === "true";
@@ -356,9 +397,23 @@ export async function buildServer(
             sensitivity: "accent",
           }) === 0,
       ) ?? [];
+    let resetEvents: HistoryResetEvent[] = [];
+    try {
+      resetEvents = options.history.listResetEvents({
+        fromMilliseconds: nowMilliseconds - RESET_EVENT_LOOKAROUND_MILLISECONDS,
+        toMilliseconds: nowMilliseconds + RESET_EVENT_LOOKAROUND_MILLISECONDS,
+        resolution: "auto",
+        ...(query.account === undefined ? {} : { accountAlias: query.account }),
+      });
+    } catch (error) {
+      if (!(error instanceof HistoryUnavailableError)) {
+        throw error;
+      }
+    }
     return buildHistoryAnalytics({
       snapshots,
       series: options.history.readSeries(historyQuery),
+      resetEvents,
       historyHealth: options.history.health,
       nowMilliseconds,
       ...range,
@@ -390,18 +445,72 @@ export async function buildServer(
 }
 
 function readServerConfiguration(settings: ServerSettings): {
-  host: string;
+  host: "127.0.0.1" | "localhost";
   port: number;
 } {
-  const host = process.env.SEAT_MONITOR_HOST ?? DEFAULT_HOST;
+  const configuredHost = process.env.SEAT_MONITOR_HOST ?? DEFAULT_HOST;
+  if (configuredHost !== "127.0.0.1" && configuredHost !== "localhost") {
+    throw new TypeError("Version 1 only supports a loopback listener.");
+  }
+  const host = configuredHost;
   return { host, port: settings.port };
 }
 
-async function main(): Promise<void> {
+type PortAvailabilityProbe = (host: string, port: number) => Promise<boolean>;
+
+const portIsAvailable: PortAvailabilityProbe = (host, port) =>
+  new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        resolve(false);
+      } else {
+        reject(error);
+      }
+    });
+    probe.listen({ host, port, exclusive: true }, () => {
+      probe.close((error) => {
+        if (error === undefined) {
+          resolve(true);
+        } else {
+          reject(error);
+        }
+      });
+    });
+  });
+
+export async function findServerPort(
+  options: { host: string; port: number; useDefaultFallback: boolean },
+  probe: PortAvailabilityProbe = portIsAvailable,
+): Promise<number> {
+  if (!options.useDefaultFallback) {
+    return options.port;
+  }
+  for (let port = options.port; port <= 65_535; port += 1) {
+    if (await probe(options.host, port)) {
+      return port;
+    }
+  }
+  throw new Error("No available server port remains above the default.");
+}
+
+async function runForegroundServer(instanceId?: string): Promise<void> {
   const settings = readServerSettings();
   const configuration = readServerConfiguration(settings);
-  const server = await buildServer({
+  const port = await findServerPort({
     ...configuration,
+    useDefaultFallback: settings.useDefaultPortFallback,
+  });
+  const selectedConfiguration = { ...configuration, port };
+  if (port !== configuration.port) {
+    process.stderr.write(
+      `Seat Monitor default port ${String(configuration.port)} is busy; using ${String(port)}.\n`,
+    );
+  }
+  const startedAt = new Date().toISOString();
+  const server = await buildServer({
+    ...selectedConfiguration,
     reloadDashboardAssets: import.meta.url.endsWith("/server.ts"),
     history: createDefaultHistoryService(
       process.env,
@@ -413,10 +522,25 @@ async function main(): Promise<void> {
       scanOnStartup: settings.scanOnStartup,
     },
     analytics: settings.dashboard,
+    ...(instanceId === undefined
+      ? {}
+      : { lifecycle: { instanceId, startedAt } }),
   });
 
+  const runtimePaths =
+    instanceId === undefined ? null : resolveServerRuntimePaths(process.env);
+  let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {
-    await server.close();
+    shutdownPromise ??= (async () => {
+      try {
+        await server.close();
+      } finally {
+        if (instanceId !== undefined && runtimePaths !== null) {
+          await clearServerRuntimeState(runtimePaths, instanceId);
+        }
+      }
+    })();
+    await shutdownPromise;
   };
   process.once("SIGINT", () => {
     void shutdown();
@@ -426,21 +550,97 @@ async function main(): Promise<void> {
   });
 
   try {
-    await server.listen(configuration);
+    await server.listen(selectedConfiguration);
+    if (instanceId !== undefined && runtimePaths !== null) {
+      await writeServerRuntimeState(runtimePaths, {
+        schemaVersion: 1,
+        instanceId,
+        pid: process.pid,
+        startedAt,
+        host: selectedConfiguration.host,
+        port: selectedConfiguration.port,
+        url: `http://${selectedConfiguration.host}:${String(selectedConfiguration.port)}/`,
+      });
+    }
   } catch (error) {
-    await server.close();
+    await shutdown();
     throw error;
   }
   process.stderr.write(
-    `Seat Monitor listening on http://${configuration.host}:${String(configuration.port)}\n`,
+    `Seat Monitor listening on http://${selectedConfiguration.host}:${String(selectedConfiguration.port)}\n`,
   );
+}
+
+export type ServerCliDependencies = {
+  lifecycle?: LifecycleDependencies;
+  entryPath?: string;
+  stdout?: { write: (value: string) => unknown };
+  stderr?: { write: (value: string) => unknown };
+  runForeground?: (instanceId?: string) => Promise<void>;
+};
+
+export async function runServerCli(
+  arguments_: readonly string[],
+  dependencies: ServerCliDependencies = {},
+): Promise<number> {
+  const stdout = dependencies.stdout ?? process.stdout;
+  const stderr = dependencies.stderr ?? process.stderr;
+  const runForeground = dependencies.runForeground ?? runForegroundServer;
+  if (arguments_.length === 0) {
+    await runForeground();
+    return 0;
+  }
+  if (arguments_.length === 1 && arguments_[0] === "--help") {
+    stdout.write(serverUsage);
+    return 0;
+  }
+  if (arguments_.length === 1 && arguments_[0] === "--version") {
+    stdout.write(`${PACKAGE_VERSION}\n`);
+    return 0;
+  }
+  if (arguments_[0] === "__run" && arguments_.length === 2) {
+    const instanceId = z.uuid().parse(arguments_[1]);
+    await runForeground(instanceId);
+    return 0;
+  }
+  if (
+    arguments_.length !== 1 ||
+    (arguments_[0] !== "start" &&
+      arguments_[0] !== "stop" &&
+      arguments_[0] !== "restart" &&
+      arguments_[0] !== "status")
+  ) {
+    stderr.write(serverUsage);
+    return 2;
+  }
+  const lifecycle: LifecycleDependencies = {
+    ...dependencies.lifecycle,
+    entryPath:
+      dependencies.entryPath ??
+      dependencies.lifecycle?.entryPath ??
+      fileURLToPath(import.meta.url),
+    stdout,
+    stderr,
+  };
+  if (arguments_[0] === "start") {
+    return startDetachedServer(lifecycle);
+  }
+  if (arguments_[0] === "stop") {
+    return stopDetachedServer(lifecycle);
+  }
+  if (arguments_[0] === "status") {
+    return statusDetachedServer(lifecycle);
+  }
+  return restartDetachedServer(lifecycle);
 }
 
 if (isMainModule(import.meta.url)) {
   try {
-    await main();
-  } catch {
-    process.stderr.write("Seat Monitor server failed to start.\n");
+    process.exitCode = await runServerCli(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(
+      `Seat Monitor server command failed: ${error instanceof Error ? error.message : "unknown error"}.\n`,
+    );
     process.exitCode = 2;
   }
 }

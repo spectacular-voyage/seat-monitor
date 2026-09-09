@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../src/cli.js";
+import { cliForecastSchema } from "../../src/domain/cli-forecast.js";
 import {
   publicQuotaArraySchema,
   quotaSuccessSchema,
@@ -8,8 +9,13 @@ import {
 } from "../../src/domain/quota.js";
 import { HistoryService } from "../../src/history/service.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
+import { PACKAGE_VERSION } from "../../src/version.js";
 
-function fixture(): QuotaSnapshot {
+function fixture(
+  usedPercent = 42,
+  observedAt = "2026-08-26T18:00:00.000Z",
+  resetAt = "2026-08-26T18:45:00.000Z",
+): QuotaSnapshot {
   return quotaSuccessSchema.parse({
     accountAlias: "Codex_Work",
     platform: "Codex",
@@ -21,12 +27,12 @@ function fixture(): QuotaSnapshot {
         label: "Codex | Primary",
         scope: "window",
         availability: "available",
-        usedPercent: 42,
+        usedPercent,
         windowDurationMinutes: 300,
-        resetAt: "2026-08-26T18:45:00.000Z",
+        resetAt,
       },
     ],
-    observedAt: "2026-08-26T18:00:00.000Z",
+    observedAt,
   });
 }
 
@@ -43,6 +49,42 @@ function writer() {
 }
 
 describe("CLI", () => {
+  it("advertises forecast mode without scanning", async () => {
+    const stdout = writer();
+    let scanned = false;
+
+    const exitCode = await runCli(["--help"], {
+      scan: () => {
+        scanned = true;
+        return Promise.resolve([]);
+      },
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(scanned).toBe(false);
+    expect(stdout.read()).toContain("--forecast");
+  });
+
+  it("reports its package version without scanning", async () => {
+    const stdout = writer();
+    let scanned = false;
+
+    const exitCode = await runCli(["--version"], {
+      scan: () => {
+        scanned = true;
+        return Promise.resolve([]);
+      },
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(scanned).toBe(false);
+    expect(stdout.read()).toBe(`${PACKAGE_VERSION}\n`);
+  });
+
   it("emits only minified parseable JSON", async () => {
     const stdout = writer();
     const stderr = writer();
@@ -162,11 +204,15 @@ describe("CLI", () => {
 
   it("records an injected scan when an explicit history service is supplied", async () => {
     const history = new HistoryService(
-      openSqliteHistoryStore({
-        filePath: ":memory:",
-        rawRetentionDays: 30,
-        retentionDays: 365,
-      }),
+      openSqliteHistoryStore(
+        {
+          filePath: ":memory:",
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
+          retentionDays: 365,
+        },
+        { now: () => new Date("2026-08-26T18:00:00.000Z") },
+      ),
     );
     const stdout = writer();
     const observedAt = "2026-08-26T18:00:00.000Z";
@@ -188,5 +234,235 @@ describe("CLI", () => {
       }),
     ).toHaveLength(1);
     history.close();
+  });
+
+  it("emits a lean versioned forecast while preserving explicit states", async () => {
+    const history = new HistoryService(
+      openSqliteHistoryStore(
+        {
+          filePath: ":memory:",
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
+          retentionDays: 365,
+        },
+        { now: () => new Date("2026-08-26T18:00:00.000Z") },
+      ),
+    );
+    const resetAt = "2026-08-26T22:00:00.000Z";
+    for (const [usedPercent, observedAt] of [
+      [40, "2026-08-26T17:30:00.000Z"],
+      [50, "2026-08-26T17:45:00.000Z"],
+    ] as const) {
+      history.recordScan(
+        "server",
+        [fixture(usedPercent, observedAt, resetAt)],
+        new Date(observedAt),
+      );
+    }
+    const stdout = writer();
+    const exitCode = await runCli(["--forecast", "--json"], {
+      scan: () =>
+        Promise.resolve([fixture(60, "2026-08-26T18:00:00.000Z", resetAt)]),
+      history,
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+    const payload = cliForecastSchema.parse(JSON.parse(stdout.read()));
+
+    expect(exitCode).toBe(0);
+    expect(payload.apiVersion).toBe(1);
+    expect(Array.isArray(payload)).toBe(false);
+    expect(stdout.read()).not.toContain('"points"');
+    expect(payload.riskRanking).toEqual([
+      expect.objectContaining({
+        rank: 1,
+        accountAlias: "Codex_Work",
+        limitKey: "codex.primary",
+        projectionStatus: "exhausts_before_reset",
+        minutesToExhaustion: 60,
+      }),
+    ]);
+    expect(payload.accounts).toEqual([
+      expect.objectContaining({
+        limits: [
+          expect.objectContaining({
+            currentConsumedPercent: 60,
+            ratePercentPerHour: 40,
+            rateBasis: "epoch",
+            sampleCount: 3,
+            observationSpanMinutes: 30,
+            resetAt,
+            resetSource: "provider",
+          }),
+        ],
+      }),
+    ]);
+    history.close();
+  });
+
+  it("reports insufficient history without fabricating an exhaustion time", async () => {
+    const stdout = writer();
+    await runCli(["--forecast", "--json"], {
+      scan: () => Promise.resolve([fixture()]),
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+    const payload = cliForecastSchema.parse(JSON.parse(stdout.read()));
+
+    expect(payload.historyHealth).toBe("unavailable");
+    expect(payload.riskRanking).toEqual([]);
+    expect(payload.accounts[0]?.limits[0]).toEqual(
+      expect.objectContaining({
+        projectionStatus: "insufficient_history",
+        projectedExhaustionAt: null,
+        projectedExhaustionRangeEndAt: null,
+        minutesToExhaustion: null,
+        sampleCount: 0,
+        observationSpanMinutes: 0,
+      }),
+    );
+  });
+
+  it("preserves a fresh already-exhausted state without retained history", async () => {
+    const stdout = writer();
+
+    await runCli(["--forecast", "--json"], {
+      scan: () => Promise.resolve([fixture(100)]),
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+    const payload = cliForecastSchema.parse(JSON.parse(stdout.read()));
+
+    expect(payload.historyHealth).toBe("unavailable");
+    expect(payload.accounts[0]?.limits[0]).toEqual(
+      expect.objectContaining({
+        currentConsumedPercent: 100,
+        projectionStatus: "already_exhausted",
+        projectedExhaustionAt: "2026-08-26T18:00:00.000Z",
+        minutesToExhaustion: 0,
+        sampleCount: 1,
+      }),
+    );
+    expect(payload.riskRanking).toEqual([
+      expect.objectContaining({
+        accountAlias: "Codex_Work",
+        projectionStatus: "already_exhausted",
+        minutesToExhaustion: 0,
+      }),
+    ]);
+  });
+
+  it("reads forecast history before closing an owned service", async () => {
+    const history = new HistoryService(
+      openSqliteHistoryStore({
+        filePath: ":memory:",
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      }),
+    );
+    const events: string[] = [];
+    const readSeries = vi.spyOn(history, "readSeries");
+    readSeries.mockImplementation(() => {
+      events.push("read");
+      return [];
+    });
+    vi.spyOn(history, "close").mockImplementation(() => {
+      events.push("close");
+    });
+
+    await runCli(["--forecast"], {
+      scan: () => Promise.resolve([fixture()]),
+      createHistory: () => history,
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stdout: writer().sink,
+      stderr: writer().sink,
+    });
+
+    expect(events).toEqual(["read", "close"]);
+  });
+
+  it("renders forecast text and Markdown only in explicit forecast mode", async () => {
+    const text = writer();
+    const markdown = writer();
+    const dependencies = {
+      scan: () => Promise.resolve([fixture()]),
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stderr: writer().sink,
+    };
+
+    await runCli(["--forecast"], { ...dependencies, stdout: text.sink });
+    await runCli(["--forecast", "--format=md"], {
+      ...dependencies,
+      stdout: markdown.sink,
+    });
+
+    expect(text.read()).toContain("WHO EXHAUSTS NEXT");
+    expect(text.read()).toContain("insufficient history");
+    expect(markdown.read()).toContain("## Who exhausts next");
+    expect(markdown.read()).toContain("| Limit | Consumed | Rate |");
+  });
+
+  it("keeps account-error exit codes unchanged in forecast mode", async () => {
+    const stdout = writer();
+    const failed: QuotaSnapshot = {
+      accountAlias: "Claude_Personal",
+      platform: "Claude",
+      status: "error",
+      plan: null,
+      limits: [],
+      observedAt: "2026-08-26T18:00:00.000Z",
+      error: { code: "timeout", message: "Usage check timed out." },
+    };
+
+    const exitCode = await runCli(["--forecast", "--json"], {
+      scan: () => Promise.resolve([failed]),
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+
+    expect(exitCode).toBe(1);
+    const account = cliForecastSchema.parse(JSON.parse(stdout.read()))
+      .accounts[0];
+    expect(account?.accountAlias).toBe("Claude_Personal");
+    expect(account?.status).toBe("error");
+    expect(account?.error?.code).toBe("timeout");
+  });
+
+  it("keeps the current snapshot when retained history becomes unreadable", async () => {
+    const history = new HistoryService(
+      openSqliteHistoryStore({
+        filePath: ":memory:",
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      }),
+    );
+    history.close();
+    const stdout = writer();
+
+    const exitCode = await runCli(["--forecast", "--json"], {
+      scan: () => Promise.resolve([fixture(100)]),
+      history,
+      now: () => new Date("2026-08-26T18:00:00.000Z"),
+      stdout: stdout.sink,
+      stderr: writer().sink,
+    });
+    const payload = cliForecastSchema.parse(JSON.parse(stdout.read()));
+
+    expect(exitCode).toBe(0);
+    expect(payload.historyHealth).toBe("degraded");
+    expect(payload.accounts[0]?.limits[0]).toEqual(
+      expect.objectContaining({
+        currentConsumedPercent: 100,
+        projectionStatus: "already_exhausted",
+        projectedExhaustionAt: "2026-08-26T18:00:00.000Z",
+      }),
+    );
   });
 });

@@ -42,7 +42,9 @@
 
       <section class="accounts" aria-labelledby="accounts-heading">
         <div class="section-heading accounts-heading">
-          <h2 id="accounts-heading" class="eyebrow">Usage history</h2>
+          <h2 id="accounts-heading" class="eyebrow">
+            Per-account usage history
+          </h2>
           <div
             id="range-controls"
             class="range-controls"
@@ -62,6 +64,37 @@
             <strong>Loading account history…</strong>
             <span>Weekly and Fable history share a single graph.</span>
           </article>
+        </div>
+      </section>
+
+      <section class="throughput" aria-labelledby="throughput-heading">
+        <div class="section-heading throughput-heading">
+          <div>
+            <h2 id="throughput-heading" class="eyebrow">Fleet throughput</h2>
+            <p class="throughput-description">
+              Provider-separated account consumption and mean burn rate—a proxy
+              for delivered throughput.
+            </p>
+          </div>
+          <div
+            id="throughput-range-controls"
+            class="range-controls throughput-range-controls"
+            aria-label="Fleet throughput time range"
+          >
+            <button type="button" data-throughput-days="1" aria-pressed="true">
+              1d
+            </button>
+            <button type="button" data-throughput-days="7">1w</button>
+            <button type="button" data-throughput-days="30">1m</button>
+            <button type="button" data-throughput-days="365">1yr</button>
+          </div>
+        </div>
+        <div
+          id="fleet-throughput-charts"
+          class="throughput-grid"
+          aria-live="polite"
+        >
+          <article class="throughput-empty">Loading fleet history…</article>
         </div>
       </section>
 
@@ -118,7 +151,8 @@
         Claude's shared weekly pool.
       </p>
       <p class="last-checked">
-        Last checked: <time id="last-checked">Waiting…</time>
+        Seat Monitor <span id="app-version">version unavailable</span> · Last
+        checked: <time id="last-checked">Waiting…</time>
       </p>
       <noscript
         >This dashboard requires JavaScript to retrieve quota data.</noscript

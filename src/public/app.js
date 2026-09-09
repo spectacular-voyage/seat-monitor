@@ -1,6 +1,11 @@
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
+const ACCOUNT_SERIES_COLOR_COUNT = 8;
+const VENDOR_RATE_COLOR_CLASSES = {
+  Claude: "throughput-color-claude",
+  Codex: "throughput-color-codex",
+};
 
 const accountCards = document.querySelector("#account-cards");
 const accountCount = document.querySelector("#account-count");
@@ -8,17 +13,23 @@ const limitCount = document.querySelector("#limit-count");
 const errorCount = document.querySelector("#error-count");
 const historyStatus = document.querySelector("#history-status");
 const lastChecked = document.querySelector("#last-checked");
+const appVersion = document.querySelector("#app-version");
 const connectionStatus = document.querySelector("#connection-status");
 const generalStrategy = document.querySelector("#general-strategy");
 const fableStrategy = document.querySelector("#fable-strategy");
 const watchStrategy = document.querySelector("#watch-strategy");
 const fleetCapacity = document.querySelector("#fleet-capacity");
+const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
+const throughputRangeControls = document.querySelector(
+  "#throughput-range-controls",
+);
 const stackedHistoryMedia = window.matchMedia("(max-width: 780px)");
 
 let loading = false;
 let periodMultiplier = 1;
+let throughputRangeDays = 1;
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -104,6 +115,17 @@ function formatCountdown(resetAt) {
     return `${hours}h ${minutes}m`;
   }
   return `${minutes}m`;
+}
+
+function formatWeeklyResetMoment(resetAt) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(new Date(resetAt));
+  const value = (type) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("weekday")}, ${value("hour")}:${value("minute")}${value("dayPeriod").toLocaleLowerCase("en-US")}`;
 }
 
 function projectionText(projection) {
@@ -205,11 +227,7 @@ function renderTopWarnings(payload) {
     .filter((account) => account.status === "ok")
     .flatMap((account) =>
       account.limits
-        .filter(
-          (limit) =>
-            limit.projection.status === "already_exhausted" ||
-            limit.projection.status === "exhausts_before_reset",
-        )
+        .filter((limit) => limit.projection.status === "exhausts_before_reset")
         .map((limit) => ({ account, limit })),
     )
     .sort((left, right) => {
@@ -221,16 +239,13 @@ function renderTopWarnings(payload) {
       );
     });
   for (const { account, limit } of exhaustions) {
-    const exhausted = limit.projection.status === "already_exhausted";
     warnings.push(
       createWarning(
-        exhausted ? "danger" : "warning",
+        "warning",
         `${account.accountAlias} · ${limit.label}`,
-        exhausted
-          ? "Quota is exhausted."
-          : limit.projection.projectedExhaustionAt === null
-            ? "Projected to exhaust before reset."
-            : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
+        limit.projection.projectedExhaustionAt === null
+          ? "Projected to exhaust before reset."
+          : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
       ),
     );
   }
@@ -283,6 +298,70 @@ function chartRangeStart(limit, queryStart, rangeEnd) {
   return Math.max(queryStart, rangeEnd - durationMilliseconds);
 }
 
+function addTimeAxisHover(
+  svg,
+  { rangeStart, rangeEnd, width, height, left, right, top, bottom },
+) {
+  const guide = svgElement("line", {
+    y1: top,
+    y2: height - bottom,
+    class: "chart-hover-guide",
+    visibility: "hidden",
+  });
+  const labelBackground = svgElement("rect", {
+    y: height - bottom + 4,
+    width: 108,
+    height: bottom - 5,
+    rx: 3,
+    class: "chart-hover-label-background",
+    visibility: "hidden",
+  });
+  const label = svgElement("text", {
+    y: height - 5,
+    class: "chart-hover-label",
+    "text-anchor": "middle",
+    visibility: "hidden",
+  });
+  const target = svgElement("rect", {
+    x: left,
+    y: top,
+    width: width - left - right,
+    height: height - top - bottom,
+    class: "chart-hover-target",
+  });
+  const setVisible = (visible) => {
+    const visibility = visible ? "visible" : "hidden";
+    guide.setAttribute("visibility", visibility);
+    labelBackground.setAttribute("visibility", visibility);
+    label.setAttribute("visibility", visibility);
+  };
+  target.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    if (bounds.width <= 0) {
+      return;
+    }
+    const svgX = Math.max(
+      left,
+      Math.min(
+        width - right,
+        ((event.clientX - bounds.left) / bounds.width) * width,
+      ),
+    );
+    const milliseconds =
+      rangeStart +
+      ((svgX - left) / (width - left - right)) * (rangeEnd - rangeStart);
+    const labelX = Math.max(left + 54, Math.min(width - right - 54, svgX));
+    guide.setAttribute("x1", String(svgX));
+    guide.setAttribute("x2", String(svgX));
+    labelBackground.setAttribute("x", String(labelX - 54));
+    label.setAttribute("x", String(labelX));
+    label.textContent = formatAxisDateTime(milliseconds);
+    setVisible(true);
+  });
+  target.addEventListener("pointerleave", () => setVisible(false));
+  svg.append(guide, labelBackground, label, target);
+}
+
 function projectionLineEnd(limit, projectionAt) {
   if (projectionAt === null || !Number.isFinite(projectionAt)) {
     return null;
@@ -310,7 +389,23 @@ function createUsageGraph(
 ) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
-  const rangeStart = chartRangeStart(limit, queryStart, rangeEnd);
+  const resetAtMilliseconds =
+    limit.depth === 0 && limit.resetAt !== null
+      ? Date.parse(limit.resetAt)
+      : Number.NaN;
+  const futureResetAt =
+    Number.isFinite(resetAtMilliseconds) && resetAtMilliseconds > rangeEnd
+      ? resetAtMilliseconds
+      : null;
+  const durationMilliseconds =
+    inferredWindowDurationMinutes(limit) *
+    periodMultiplier *
+    PERIOD_CONTEXT_MULTIPLIER *
+    60_000;
+  const rangeStart =
+    futureResetAt === null
+      ? chartRangeStart(limit, queryStart, rangeEnd)
+      : Math.max(queryStart, futureResetAt - durationMilliseconds);
   const series = chartLimits.map((chartLimit) => {
     const projectionAt =
       chartLimit.projection.projectedExhaustionAt === null
@@ -333,7 +428,7 @@ function createUsageGraph(
   });
   if (series.every((entry) => entry.measured.length === 0)) {
     wrapper.append(
-      element("p", "chart-empty", "History begins after the next scan."),
+      element("p", "chart-empty", "No measured history in this time range."),
     );
     return wrapper;
   }
@@ -349,7 +444,7 @@ function createUsageGraph(
         Date.parse(entry.measured.at(-1)?.observedAt ?? ""),
   );
   const maximumExtension = rangeEnd + (rangeEnd - rangeStart) * 0.25;
-  const chartEnd = forecasts.reduce(
+  const forecastEnd = forecasts.reduce(
     (end, entry) =>
       Math.max(
         end,
@@ -357,6 +452,7 @@ function createUsageGraph(
       ),
     rangeEnd,
   );
+  const chartEnd = futureResetAt ?? forecastEnd;
   const chartStart = rangeStart;
   const width = chartWidth;
   const height = 176;
@@ -411,7 +507,11 @@ function createUsageGraph(
     limit.resetAt !== null &&
     !markerValues.some((marker) => marker.at === limit.resetAt)
   ) {
-    markerValues.push({ at: limit.resetAt, kind: "provider" });
+    markerValues.push({
+      at: limit.resetAt,
+      kind: futureResetAt === null ? "provider" : "projected",
+      source: limit.resetSource,
+    });
   }
   for (const marker of markerValues) {
     const milliseconds = Date.parse(marker.at);
@@ -429,9 +529,13 @@ function createUsageGraph(
     const markerLabel =
       marker.kind === "provider"
         ? "Provider reset"
-        : marker.kind === "adjustment"
-          ? "Provider reset adjustment"
-          : "Inferred reset";
+        : marker.kind === "projected"
+          ? marker.source === "expected"
+            ? "Expected reset"
+            : "Projected reset"
+          : marker.kind === "adjustment"
+            ? "Provider reset adjustment"
+            : "Inferred reset";
     markerTitle.textContent = `${markerLabel} ${formatDateTime(marker.at)}`;
     line.append(markerTitle);
     svg.append(line);
@@ -504,12 +608,314 @@ function createUsageGraph(
     "text-anchor": "end",
   });
   endLabel.textContent =
-    forecasts.length > 0 && chartEnd > rangeEnd
-      ? `forecast · ${formatAxisDateTime(chartEnd)}`
-      : "now";
+    futureResetAt !== null
+      ? `projected reset · ${formatAxisDateTime(futureResetAt)}`
+      : forecasts.length > 0 && chartEnd > rangeEnd
+        ? `forecast · ${formatAxisDateTime(chartEnd)}`
+        : "now";
   svg.append(startLabel, endLabel);
+  addTimeAxisHover(svg, {
+    rangeStart: chartStart,
+    rangeEnd: chartEnd,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+  });
   wrapper.append(svg);
   return wrapper;
+}
+
+function niceRateCeiling(value) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 1;
+  }
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const step = [1, 2, 5, 10].find((candidate) => normalized <= candidate) ?? 10;
+  return step * magnitude;
+}
+
+function formatWindowMinutes(minutes) {
+  if (minutes % (7 * 24 * 60) === 0) {
+    return `${minutes / (7 * 24 * 60)}w`;
+  }
+  if (minutes % (24 * 60) === 0) {
+    return `${minutes / (24 * 60)}d`;
+  }
+  if (minutes % 60 === 0) {
+    return `${minutes / 60}h`;
+  }
+  return `${minutes}m`;
+}
+
+function createThroughputLineGraph(
+  series,
+  rangeStart,
+  rangeEnd,
+  { ariaLabel, maximum, formatAxisValue, breakOnDecrease = false },
+) {
+  const wrapper = element("div", "throughput-plot");
+  const visibleSeries = series
+    .map((entry) => ({
+      ...entry,
+      points: entry.points
+        .filter(
+          (point) =>
+            Number.isFinite(point.value) &&
+            Date.parse(point.observedAt) >= rangeStart &&
+            Date.parse(point.observedAt) <= rangeEnd,
+        )
+        .sort(
+          (left, right) =>
+            Date.parse(left.observedAt) - Date.parse(right.observedAt),
+        ),
+    }))
+    .filter((entry) => entry.points.length > 0);
+  if (visibleSeries.length === 0) {
+    wrapper.append(
+      element(
+        "p",
+        "throughput-chart-empty",
+        "More session history is needed for this chart.",
+      ),
+    );
+    return wrapper;
+  }
+
+  const width = 760;
+  const height = 196;
+  const left = 48;
+  const right = 12;
+  const top = 12;
+  const bottom = 26;
+  const innerWidth = width - left - right;
+  const innerHeight = height - top - bottom;
+  const x = (milliseconds) =>
+    left +
+    ((milliseconds - rangeStart) / (rangeEnd - rangeStart || 1)) * innerWidth;
+  const y = (value) =>
+    top + ((maximum - Math.min(maximum, value)) / maximum) * innerHeight;
+  const svg = svgElement("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": ariaLabel,
+  });
+  const title = svgElement("title");
+  title.textContent = ariaLabel;
+  svg.append(title);
+
+  for (const value of [0, maximum / 2, maximum]) {
+    svg.append(
+      svgElement("line", {
+        x1: left,
+        x2: width - right,
+        y1: y(value),
+        y2: y(value),
+        class: "throughput-grid-line",
+      }),
+    );
+    const label = svgElement("text", {
+      x: left - 7,
+      y: y(value) + 4,
+      class: "throughput-axis-label",
+      "text-anchor": "end",
+    });
+    label.textContent = formatAxisValue(value);
+    svg.append(label);
+  }
+
+  for (const entry of visibleSeries) {
+    const path = svgElement("path", {
+      d: entry.points
+        .map((point, index) => {
+          const previous = entry.points[index - 1];
+          const command =
+            index === 0 ||
+            (breakOnDecrease &&
+              previous !== undefined &&
+              point.value < previous.value)
+              ? "M"
+              : "L";
+          return `${command}${x(Date.parse(point.observedAt)).toFixed(2)},${y(point.value).toFixed(2)}`;
+        })
+        .join(" "),
+      class: `throughput-line ${entry.colorClass}`,
+    });
+    const lineTitle = svgElement("title");
+    lineTitle.textContent = entry.label;
+    path.append(lineTitle);
+    svg.append(path);
+    const latest = entry.points.at(-1);
+    if (latest !== undefined) {
+      const point = svgElement("circle", {
+        cx: x(Date.parse(latest.observedAt)),
+        cy: y(latest.value),
+        r: 3.5,
+        class: `throughput-point ${entry.colorClass}`,
+      });
+      const pointTitle = svgElement("title");
+      pointTitle.textContent = `${entry.label}: ${formatAxisValue(latest.value)}`;
+      point.append(pointTitle);
+      svg.append(point);
+    }
+  }
+
+  const startLabel = svgElement("text", {
+    x: left,
+    y: height - 6,
+    class: "throughput-time-label",
+  });
+  startLabel.textContent = formatAxisDateTime(rangeStart);
+  const endLabel = svgElement("text", {
+    x: width - right,
+    y: height - 6,
+    class: "throughput-time-label",
+    "text-anchor": "end",
+  });
+  endLabel.textContent = "now";
+  svg.append(startLabel, endLabel);
+  addTimeAxisHover(svg, {
+    rangeStart,
+    rangeEnd,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+  });
+  wrapper.append(svg);
+  return wrapper;
+}
+
+function createThroughputCard(className, title, description) {
+  const card = element("article", `throughput-chart ${className}`);
+  const heading = element("header", "throughput-chart-heading");
+  heading.append(
+    element("h3", "throughput-chart-title", title),
+    element("p", "throughput-chart-description", description),
+  );
+  card.append(heading);
+  return card;
+}
+
+function createSessionLegend(series) {
+  const legend = element("div", "throughput-legend");
+  for (const entry of series) {
+    const item = element("span", "throughput-legend-item");
+    const swatch = element(
+      "span",
+      `throughput-legend-swatch ${entry.colorClass}`,
+    );
+    item.append(
+      swatch,
+      element("span", "throughput-legend-platform", entry.platform),
+      element("span", "throughput-legend-label", entry.label),
+    );
+    legend.append(item);
+  }
+  return legend;
+}
+
+function emptyFleetThroughput(from, to) {
+  return {
+    from,
+    to,
+    rateWindowMinutes: 30,
+    smoothingWindowMinutes: 60,
+    sessions: [],
+    vendors: [
+      { platform: "Claude", points: [] },
+      { platform: "Codex", points: [] },
+    ],
+  };
+}
+
+function renderFleetThroughput(throughput) {
+  throughputCharts.replaceChildren();
+  const rangeStart = Date.parse(throughput.from);
+  const rangeEnd = Date.parse(throughput.to);
+  const sessions = throughput.sessions.map((session, index) => ({
+    label: session.accountAlias,
+    platform: session.platform,
+    colorClass: `throughput-color-${index % ACCOUNT_SERIES_COLOR_COUNT}`,
+    points: session.points.map((point) => ({
+      observedAt: point.observedAt,
+      value: point.usedPercent,
+    })),
+  }));
+  for (const platform of ["Claude", "Codex"]) {
+    const platformSessions = sessions.filter(
+      (session) => session.platform === platform,
+    );
+    const usageTitle =
+      platform === "Claude"
+        ? "Claude account sessions"
+        : "Codex account primaries";
+    const usage = createThroughputCard(
+      `throughput-usage throughput-${platform.toLocaleLowerCase("en-US")}`,
+      usageTitle,
+      `${platform === "Claude" ? "Session" : "Primary"} quota consumed; each line is one account.`,
+    );
+    if (platformSessions.length > 0) {
+      usage.append(createSessionLegend(platformSessions));
+    }
+    usage.append(
+      createThroughputLineGraph(platformSessions, rangeStart, rangeEnd, {
+        ariaLabel: `${platform} account quota consumption`,
+        maximum: 100,
+        formatAxisValue: (value) => `${Math.round(value)}%`,
+        breakOnDecrease: true,
+      }),
+    );
+    throughputCharts.append(usage);
+  }
+
+  for (const platform of ["Claude", "Codex"]) {
+    const vendor = throughput.vendors.find(
+      (candidate) => candidate.platform === platform,
+    );
+    const points = (vendor?.points ?? []).map((point) => ({
+      observedAt: point.observedAt,
+      value: point.ratePercentPerHour,
+    }));
+    const maximum = niceRateCeiling(
+      Math.max(0, ...points.map((point) => point.value)),
+    );
+    const latestAccountCount = vendor?.points.at(-1)?.accountCount ?? 0;
+    const rateTitle =
+      platform === "Claude"
+        ? "Claude average session rate"
+        : "Codex average primary rate";
+    const card = createThroughputCard(
+      `throughput-rate throughput-${platform.toLocaleLowerCase("en-US")}`,
+      rateTitle,
+      `${formatWindowMinutes(throughput.smoothingWindowMinutes)} moving average of the trailing-${throughput.rateWindowMinutes}m slope across measurable accounts${latestAccountCount === 0 ? "." : ` · ${latestAccountCount} in the latest sample.`}`,
+    );
+    card.append(
+      createThroughputLineGraph(
+        [
+          {
+            label: `${platform} mean rate`,
+            colorClass: VENDOR_RATE_COLOR_CLASSES[platform],
+            points,
+          },
+        ],
+        rangeStart,
+        rangeEnd,
+        {
+          ariaLabel: `${platform} average account consumption rate`,
+          maximum,
+          formatAxisValue: (value) =>
+            `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)}%/h`,
+        },
+      ),
+    );
+    throughputCharts.append(card);
+  }
 }
 
 function createChartLegend(limits) {
@@ -593,10 +999,16 @@ function createLimit(
     "p",
     "limit-reset",
     limit.resetAt === null
-      ? "Reset unknown"
+      ? limit.key === "base.session"
+        ? "Starts when a message is sent"
+        : "Reset unknown"
       : limit.depth === 1
-        ? "Shares weekly reset · "
-        : "Resets ",
+        ? limit.resetSource === "expected"
+          ? "Expected shared weekly reset · "
+          : "Shares weekly reset · "
+        : limit.resetSource === "expected"
+          ? "Expected reset · "
+          : "Resets ",
   );
   if (limit.resetAt !== null) {
     const time = element("time", "countdown");
@@ -725,7 +1137,10 @@ function createCapacityMeter(limit) {
   return svg;
 }
 
-function createCapacityLimit(limit) {
+function createCapacityLimit(
+  limit,
+  { showReset = true, sharedReset = false } = {},
+) {
   const row = element(
     "div",
     `capacity-limit ${limit.depth === 1 ? "subcap" : ""}`,
@@ -743,14 +1158,24 @@ function createCapacityLimit(limit) {
     ),
     createCapacityMeter(limit),
   );
+  if (!showReset) {
+    return row;
+  }
+  const isWeekly = limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES;
+  const resetPrefix =
+    limit.resetAt === null
+      ? limit.key === "base.session"
+        ? "starts when a message is sent"
+        : "reset unknown"
+      : isWeekly
+        ? `${limit.resetSource === "expected" ? "expected reset" : "resets"} ${formatWeeklyResetMoment(limit.resetAt)} (`
+        : limit.resetSource === "expected"
+          ? "expected reset in "
+          : "resets in ";
   const reset = element(
     "span",
-    "capacity-reset",
-    limit.resetAt === null
-      ? "reset unknown"
-      : limit.depth === 1
-        ? "weekly reset · "
-        : "resets in ",
+    `capacity-reset ${sharedReset ? "shared-reset" : ""} ${isWeekly ? "weekly-reset" : ""}`,
+    resetPrefix,
   );
   if (limit.resetAt !== null) {
     const time = element("time", "countdown");
@@ -758,9 +1183,25 @@ function createCapacityLimit(limit) {
     time.dateTime = limit.resetAt;
     time.textContent = formatCountdown(limit.resetAt);
     reset.append(time);
+    if (isWeekly) {
+      reset.append(")");
+    }
   }
   row.append(reset);
   return row;
+}
+
+function createCapacityLimitGroup(parent, children) {
+  const sharesReset = children.length > 0;
+  const group = element(
+    "div",
+    `capacity-limit-group ${sharesReset ? "shared-reset-group" : ""}`,
+  );
+  group.append(createCapacityLimit(parent, { sharedReset: sharesReset }));
+  for (const child of children) {
+    group.append(createCapacityLimit(child, { showReset: false }));
+  }
+  return group;
 }
 
 function createFleetAccount(account) {
@@ -791,8 +1232,21 @@ function createFleetAccount(account) {
     );
   } else {
     const limits = element("div", "capacity-limits");
+    const renderedKeys = new Set();
+    for (const limit of account.limits.filter((entry) => entry.depth === 0)) {
+      const children = account.limits.filter(
+        (candidate) => candidate.parentKey === limit.key,
+      );
+      limits.append(createCapacityLimitGroup(limit, children));
+      renderedKeys.add(limit.key);
+      for (const child of children) {
+        renderedKeys.add(child.key);
+      }
+    }
     for (const limit of account.limits) {
-      limits.append(createCapacityLimit(limit));
+      if (!renderedKeys.has(limit.key)) {
+        limits.append(createCapacityLimitGroup(limit, []));
+      }
     }
     item.append(limits);
   }
@@ -863,6 +1317,24 @@ function createAccountCard(account, rangeStart, rangeEnd) {
     card.append(createWindowPanels(account, rangeStart, rangeEnd));
   }
   return card;
+}
+
+function expectedLimitCount(account) {
+  if (account.limits.length > 0) {
+    return account.limits.length;
+  }
+  return account.platform === "Claude" ? 3 : 1;
+}
+
+function limitReportingCounts(accounts) {
+  return accounts.reduce(
+    (counts, account) => ({
+      reported:
+        counts.reported + (account.status === "ok" ? account.limits.length : 0),
+      expected: counts.expected + expectedLimitCount(account),
+    }),
+    { reported: 0, expected: 0 },
+  );
 }
 
 function strategyContent(target, label, value, detail, tone = "neutral") {
@@ -970,15 +1442,16 @@ function renderAnalytics(payload) {
       accountCards.append(createAccountCard(account, rangeStart, rangeEnd));
     }
   }
-  const limits = accounts.reduce(
-    (total, account) => total + account.limits.length,
-    0,
-  );
+  const limitReporting = limitReportingCounts(accounts);
   const errors = accounts.filter(
     (account) => account.status === "error",
   ).length;
   accountCount.textContent = String(accounts.length);
-  limitCount.textContent = String(limits);
+  limitCount.textContent = `${limitReporting.reported} / ${limitReporting.expected}`;
+  limitCount.setAttribute(
+    "aria-label",
+    `${limitReporting.reported} reported limits out of ${limitReporting.expected} expected`,
+  );
   errorCount.textContent = String(errors);
   historyStatus.textContent =
     payload.historyHealth === "ready" ? "Local · ready" : "Local · degraded";
@@ -986,23 +1459,33 @@ function renderAnalytics(payload) {
     payload.historyHealth === "ready" ? "healthy-text" : "warning-text";
   renderTopWarnings({ ...payload, accounts });
   renderFleetCapacity(accounts);
+  renderFleetThroughput(
+    payload.fleetThroughput ?? emptyFleetThroughput(payload.from, payload.to),
+  );
   renderRecommendations(payload.recommendations);
   updateCountdowns();
 }
 
-function fallbackLimit(limit) {
+function fallbackLimit(limit, weeklyLimit) {
+  const isFable = limit.key.startsWith("fable");
+  const effectiveResetAt = isFable
+    ? (weeklyLimit?.resetAt ?? null)
+    : limit.resetAt;
   return {
     key: limit.key,
     label: limit.label,
-    depth: limit.key.startsWith("fable") ? 1 : 0,
-    parentKey: limit.key.startsWith("fable") ? "base.weekly" : null,
+    depth: isFable ? 1 : 0,
+    parentKey: isFable ? "base.weekly" : null,
     availability: limit.availability,
     currentUsedPercent: limit.usedPercent,
     headroomPercent:
       limit.usedPercent === null ? null : 100 - limit.usedPercent,
     windowDurationMinutes: limit.windowDurationMinutes,
-    resetAt: limit.key.startsWith("fable") ? null : limit.resetAt,
-    minutesUntilReset: limit.minutesUntilReset,
+    resetAt: effectiveResetAt,
+    resetSource: effectiveResetAt === null ? null : "provider",
+    minutesUntilReset: isFable
+      ? (weeklyLimit?.minutesUntilReset ?? null)
+      : limit.minutesUntilReset,
     points: [],
     resetMarkers: [],
     projection: {
@@ -1028,7 +1511,17 @@ function renderLiveFallback(snapshots) {
     lastActivityAt: null,
     status: snapshot.status,
     error: snapshot.status === "error" ? snapshot.error : null,
-    limits: snapshot.status === "ok" ? snapshot.limits.map(fallbackLimit) : [],
+    limits:
+      snapshot.status === "ok"
+        ? snapshot.limits.map((limit) =>
+            fallbackLimit(
+              limit,
+              snapshot.limits.find(
+                (candidate) => candidate.key === "base.weekly",
+              ),
+            ),
+          )
+        : [],
   }));
   renderAnalytics({
     generatedAt: new Date(now).toISOString(),
@@ -1048,6 +1541,12 @@ function renderLiveFallback(snapshots) {
         .sort()
         .at(-1) ?? null,
     scanIntervalSeconds: null,
+    fleetThroughput: emptyFleetThroughput(
+      new Date(
+        now - 300 * periodMultiplier * PERIOD_CONTEXT_MULTIPLIER * 60_000,
+      ).toISOString(),
+      new Date(now).toISOString(),
+    ),
     recommendations: { general: null, fable: null, watch: null },
   });
 }
@@ -1055,6 +1554,7 @@ function renderLiveFallback(snapshots) {
 function renderUnavailableShell() {
   accountCount.textContent = "—";
   limitCount.textContent = "—";
+  limitCount.removeAttribute("aria-label");
   errorCount.textContent = "—";
   historyStatus.textContent = "Not connected";
   historyStatus.className = "warning-text";
@@ -1101,6 +1601,13 @@ function renderUnavailableShell() {
     ),
   );
   accountCards.replaceChildren(card);
+  throughputCharts.replaceChildren(
+    element(
+      "article",
+      "throughput-empty",
+      "Start seat-monitor-server to load fleet throughput history.",
+    ),
+  );
 }
 
 function updateCountdowns() {
@@ -1118,6 +1625,17 @@ async function requestJson(url) {
     throw new Error("Dashboard request failed.");
   }
   return response.json();
+}
+
+async function loadServerVersion() {
+  try {
+    const status = await requestJson("/api/server/status");
+    if (typeof status.version === "string") {
+      appVersion.textContent = `v${status.version}`;
+    }
+  } catch {
+    appVersion.textContent = "version unavailable";
+  }
 }
 
 async function fetchDashboard(forceRefresh = false) {
@@ -1151,7 +1669,24 @@ async function fetchDashboard(forceRefresh = false) {
       periods: String(periodMultiplier),
     });
     const analytics = await requestJson(`/api/history/analytics?${query}`);
-    renderAnalytics(analytics);
+    const throughputFrom = new Date(
+      to.getTime() - throughputRangeDays * 86_400_000,
+    );
+    const throughputQuery = new URLSearchParams({
+      from: throughputFrom.toISOString(),
+      to: to.toISOString(),
+      resolution: "auto",
+    });
+    let fleetThroughput = analytics.fleetThroughput;
+    try {
+      const throughputAnalytics = await requestJson(
+        `/api/history/analytics?${throughputQuery}`,
+      );
+      fleetThroughput = throughputAnalytics.fleetThroughput;
+    } catch {
+      // Keep the primary analytics response when the longer range is unavailable.
+    }
+    renderAnalytics({ ...analytics, fleetThroughput });
     const errors = analytics.accounts.filter(
       (account) => account.status === "error",
     ).length;
@@ -1191,6 +1726,17 @@ rangeControls.addEventListener("click", (event) => {
   }
   void fetchDashboard(false);
 });
+throughputRangeControls.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-throughput-days]");
+  if (!button) {
+    return;
+  }
+  throughputRangeDays = Number(button.dataset.throughputDays);
+  for (const candidate of throughputRangeControls.querySelectorAll("button")) {
+    candidate.setAttribute("aria-pressed", String(candidate === button));
+  }
+  void fetchDashboard(false);
+});
 stackedHistoryMedia.addEventListener("change", () => {
   void fetchDashboard(false);
 });
@@ -1199,3 +1745,4 @@ setInterval(() => {
   void fetchDashboard(false);
 }, 60_000);
 void fetchDashboard(false);
+void loadServerVersion();

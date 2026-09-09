@@ -9,6 +9,8 @@ created: 1788382897000
 
 # Server Scheduler and Settings
 
+> History retention settings in this note were superseded by [[sm.task.2026-09-08-tiered-history-compaction]]. Current defaults use six hours of raw observations, 30 days of hourly rollups, and 365 days of daily rollups.
+
 ## Objective
 
 Continue collecting quota history whenever `seat-monitor-server` is running, even when no dashboard is open. Make the scan cadence and related operational defaults configurable through a private JSON settings file while preserving existing environment variables, CLI/API contracts, cache coalescing, and loopback-only behavior.

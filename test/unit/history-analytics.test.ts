@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { quotaSuccessSchema } from "../../src/domain/quota.js";
+import {
+  quotaSuccessSchema,
+  type QuotaSnapshot,
+} from "../../src/domain/quota.js";
 import {
   buildHistoryAnalytics,
   projectExhaustion,
@@ -8,10 +11,12 @@ import {
 } from "../../src/history/analytics.js";
 import type {
   HistoryLimitSeries,
+  HistoryResetEvent,
   HistorySeriesPoint,
 } from "../../src/history/types.js";
 import {
   claudeSnapshot,
+  codexSnapshot,
   codexSnapshotWithSpark,
   nowMilliseconds,
   resetAfter,
@@ -41,7 +46,7 @@ function minutesBeforeNow(minutes: number): string {
 function series(
   key: string,
   values: readonly number[],
-  resetAt = resetAfter(300),
+  resetAt: string | null = resetAfter(300),
 ): HistoryLimitSeries {
   return {
     accountAlias: "claude-ops@example.com",
@@ -55,6 +60,58 @@ function series(
     },
     points: values.map((value, index) =>
       point(minutesBeforeNow((values.length - index - 1) * 60), value, resetAt),
+    ),
+  };
+}
+
+function withoutResets(
+  snapshot: QuotaSnapshot,
+  keys: readonly string[],
+): QuotaSnapshot {
+  if (snapshot.status !== "ok") {
+    throw new TypeError("Expected a successful quota fixture.");
+  }
+  return quotaSuccessSchema.parse({
+    ...snapshot,
+    limits: snapshot.limits.map((limit) =>
+      keys.includes(limit.key) ? { ...limit, resetAt: null } : limit,
+    ),
+  });
+}
+
+function resetEvent(
+  limitKey: string,
+  resetAt: string,
+  lastSeenAt = minutesBeforeNow(1),
+): HistoryResetEvent {
+  return {
+    accountAlias: "claude-ops@example.com",
+    platform: "Claude",
+    limitKey,
+    resetAt,
+    lastSeenAt,
+    kind: "provider",
+  };
+}
+
+function accountSessionSeries(
+  accountAlias: string,
+  platform: "Claude" | "Codex",
+  key: string,
+  values: readonly number[],
+): HistoryLimitSeries {
+  return {
+    accountAlias,
+    platform,
+    plan: platform === "Claude" ? "max" : "pro",
+    limit: {
+      key,
+      label: key,
+      scope: "window",
+      availability: "available",
+    },
+    points: values.map((value, index) =>
+      point(minutesBeforeNow((values.length - index - 1) * 15), value, null),
     ),
   };
 }
@@ -131,6 +188,221 @@ describe("historical quota analytics", () => {
         resetAt,
       ).status,
     ).toBe("insufficient_history");
+  });
+
+  it("preserves a fresh exhausted reading when retained series are unavailable", () => {
+    const result = buildHistoryAnalytics({
+      snapshots: [claudeSnapshot({ sessionUsed: 100 })],
+      series: [],
+      historyHealth: "unavailable",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+    const session = result.accounts[0]?.limits.find(
+      (limit) => limit.key === "base.session",
+    );
+
+    expect(session?.points).toEqual([]);
+    expect(session?.projection).toEqual(
+      expect.objectContaining({
+        status: "already_exhausted",
+        projectedFromUsedPercent: 100,
+        projectedExhaustionAt: new Date(nowMilliseconds).toISOString(),
+        sampleCount: 1,
+        spanMinutes: 0,
+      }),
+    );
+  });
+
+  it("prefers the current provider reset over retained history", () => {
+    const currentReset = resetAfter(300);
+    const result = buildHistoryAnalytics({
+      snapshots: [claudeSnapshot({ weeklyRemainingMinutes: 300 })],
+      series: [],
+      resetEvents: [resetEvent("base.weekly", resetAfter(600))],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(
+      result.accounts[0]?.limits.find((limit) => limit.key === "base.weekly"),
+    ).toEqual(
+      expect.objectContaining({
+        resetAt: currentReset,
+        resetSource: "provider",
+      }),
+    );
+  });
+
+  it("advances a recent weekly anchor and shares it with Fable", () => {
+    const snapshot = withoutResets(claudeSnapshot(), [
+      "base.weekly",
+      "fable.weekly",
+    ]);
+    const previousReset = minutesBeforeNow(24 * 60);
+    const expectedReset = new Date(
+      Date.parse(previousReset) + 7 * 24 * 60 * 60_000,
+    ).toISOString();
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [series("base.weekly", [10, 20, 30], null)],
+      resetEvents: [resetEvent("base.weekly", previousReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 7 * 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    const weekly = result.accounts[0]?.limits.find(
+      (limit) => limit.key === "base.weekly",
+    );
+    const fable = result.accounts[0]?.limits.find(
+      (limit) => limit.key === "fable.weekly",
+    );
+    expect(weekly).toEqual(
+      expect.objectContaining({
+        resetAt: expectedReset,
+        resetSource: "expected",
+      }),
+    );
+    expect(fable).toEqual(
+      expect.objectContaining({
+        resetAt: expectedReset,
+        resetSource: "expected",
+      }),
+    );
+    expect(weekly?.projection.status).toBe("exhaustion_projected");
+  });
+
+  it("carries a still-future Session reset but does not extrapolate it", () => {
+    const snapshot = withoutResets(
+      claudeSnapshot({ sessionRemainingMinutes: null }),
+      ["base.session"],
+    );
+    const futureReset = resetAfter(60);
+    const future = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [],
+      resetEvents: [resetEvent("base.session", futureReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+    const elapsed = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [],
+      resetEvents: [resetEvent("base.session", minutesBeforeNow(60))],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(
+      future.accounts[0]?.limits.find((limit) => limit.key === "base.session"),
+    ).toEqual(
+      expect.objectContaining({
+        resetAt: futureReset,
+        resetSource: "expected",
+      }),
+    );
+    expect(
+      elapsed.accounts[0]?.limits.find((limit) => limit.key === "base.session"),
+    ).toEqual(expect.objectContaining({ resetAt: null, resetSource: null }));
+  });
+
+  it("refuses to advance a weekly anchor by more than one period", () => {
+    const snapshot = withoutResets(claudeSnapshot(), ["base.weekly"]);
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [],
+      resetEvents: [resetEvent("base.weekly", minutesBeforeNow(8 * 24 * 60))],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 10 * 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(
+      result.accounts[0]?.limits.find((limit) => limit.key === "base.weekly"),
+    ).toEqual(expect.objectContaining({ resetAt: null, resetSource: null }));
+  });
+
+  it("refuses an expected reset whose local time does not exist", () => {
+    const springNow = Date.parse("2026-03-02T18:00:00.000Z");
+    const snapshot = withoutResets(claudeSnapshot(), ["base.weekly"]);
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [],
+      resetEvents: [
+        resetEvent(
+          "base.weekly",
+          "2026-03-01T10:30:00.000Z",
+          "2026-03-01T10:00:00.000Z",
+        ),
+      ],
+      historyHealth: "ready",
+      nowMilliseconds: springNow,
+      fromMilliseconds: springNow - 7 * 24 * 60 * 60_000,
+      toMilliseconds: springNow,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(
+      result.accounts[0]?.limits.find((limit) => limit.key === "base.weekly"),
+    ).toEqual(expect.objectContaining({ resetAt: null, resetSource: null }));
+  });
+
+  it("preserves a historical projection boundary after a current scan error", () => {
+    const historicalReset = resetAfter(300);
+    const failed: QuotaSnapshot = {
+      accountAlias: "claude-ops@example.com",
+      platform: "Claude",
+      status: "error",
+      plan: null,
+      limits: [],
+      observedAt: new Date(nowMilliseconds).toISOString(),
+      error: { code: "timeout", message: "Claude usage check timed out." },
+    };
+    const result = buildHistoryAnalytics({
+      snapshots: [failed],
+      series: [series("base.session", [70, 80, 90], historicalReset)],
+      resetEvents: [resetEvent("base.session", historicalReset)],
+      historyHealth: "degraded",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    const session = result.accounts[0]?.limits.find(
+      (limit) => limit.key === "base.session",
+    );
+    expect(session).toEqual(
+      expect.objectContaining({
+        resetAt: historicalReset,
+        resetSource: "expected",
+      }),
+    );
+    expect(session?.projection.status).toBe("exhausts_before_reset");
   });
 
   it("treats Fable as nested capacity without converting its percentage", () => {
@@ -362,6 +634,151 @@ describe("historical quota analytics", () => {
     expect(result.scanIntervalSeconds).toBe(60);
   });
 
+  it("builds account session overlays and mean vendor rate series", () => {
+    const claudeOne = claudeSnapshot({ alias: "claude-one@example.com" });
+    const claudeTwo = claudeSnapshot({ alias: "claude-two@example.com" });
+    const codex = codexSnapshot("codex-one@example.com");
+    const result = buildHistoryAnalytics({
+      snapshots: [claudeOne, claudeTwo, codex],
+      series: [
+        accountSessionSeries(
+          "claude-one@example.com",
+          "Claude",
+          "base.session",
+          [0, 10, 15],
+        ),
+        accountSessionSeries(
+          "claude-two@example.com",
+          "Claude",
+          "base.session",
+          [0, 20, 30],
+        ),
+        accountSessionSeries(
+          "codex-one@example.com",
+          "Codex",
+          "codex.primary",
+          [10, 15, 20],
+        ),
+      ],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 1,
+      scanIntervalSeconds: 60,
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(result.fleetThroughput.sessions).toEqual([
+      expect.objectContaining({
+        accountAlias: "claude-one@example.com",
+        platform: "Claude",
+      }),
+      expect.objectContaining({
+        accountAlias: "claude-two@example.com",
+        platform: "Claude",
+      }),
+      expect.objectContaining({
+        accountAlias: "codex-one@example.com",
+        platform: "Codex",
+        limitKey: "codex.primary",
+      }),
+    ]);
+    expect(result.fleetThroughput.from).toBe(minutesBeforeNow(315));
+    expect(
+      result.fleetThroughput.sessions[0]?.points.map(
+        (point) => point.usedPercent,
+      ),
+    ).toContain(15);
+    expect(
+      result.fleetThroughput.vendors
+        .find((vendor) => vendor.platform === "Claude")
+        ?.points.at(-1),
+    ).toEqual(
+      expect.objectContaining({
+        ratePercentPerHour: 52.5,
+        accountCount: 2,
+      }),
+    );
+    expect(
+      result.fleetThroughput.vendors
+        .find((vendor) => vendor.platform === "Codex")
+        ?.points.at(-1),
+    ).toEqual(
+      expect.objectContaining({
+        ratePercentPerHour: 20,
+        accountCount: 1,
+      }),
+    );
+    expect(result.fleetThroughput.smoothingWindowMinutes).toBe(60);
+  });
+
+  it("does not calculate a fleet rate across a session reset", () => {
+    const snapshot = claudeSnapshot({ alias: "claude-reset@example.com" });
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        accountSessionSeries(
+          "claude-reset@example.com",
+          "Claude",
+          "base.session",
+          [80, 90, 5, 10],
+        ),
+      ],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 1,
+      scanIntervalSeconds: 60,
+      timeZone: "America/Los_Angeles",
+    });
+    const rates = result.fleetThroughput.vendors.find(
+      (vendor) => vendor.platform === "Claude",
+    )?.points;
+
+    expect(rates?.map((point) => point.ratePercentPerHour)).toEqual([40, 30]);
+  });
+
+  it.each([
+    [1, 60],
+    [7, 6 * 60],
+    [30, 24 * 60],
+    [365, 7 * 24 * 60],
+  ])(
+    "uses scale-aware smoothing for a %d-day fleet range",
+    (days, expectedSmoothingMinutes) => {
+      const snapshot = claudeSnapshot({ alias: "claude-scale@example.com" });
+      const result = buildHistoryAnalytics({
+        snapshots: [snapshot],
+        series: [
+          accountSessionSeries(
+            "claude-scale@example.com",
+            "Claude",
+            "base.session",
+            [0, 5, 10],
+          ),
+        ],
+        historyHealth: "ready",
+        nowMilliseconds,
+        fromMilliseconds: nowMilliseconds - days * 86_400_000,
+        toMilliseconds: nowMilliseconds,
+        requestedResolution: "auto",
+        scanIntervalSeconds: 60,
+        timeZone: "America/Los_Angeles",
+      });
+
+      expect(result.fleetThroughput.from).toBe(
+        new Date(nowMilliseconds - days * 86_400_000).toISOString(),
+      );
+      expect(result.fleetThroughput.smoothingWindowMinutes).toBe(
+        expectedSmoothingMinutes,
+      );
+    },
+  );
+
   it("can hide Spark without changing the raw Codex snapshot", () => {
     const snapshot = codexSnapshotWithSpark();
     const result = buildHistoryAnalytics({
@@ -380,6 +797,9 @@ describe("historical quota analytics", () => {
       "codex.primary",
     ]);
     expect(snapshot.status === "ok" ? snapshot.limits : []).toHaveLength(2);
+    expect(result.fleetThroughput.sessions).toEqual([
+      expect.objectContaining({ limitKey: "codex.primary" }),
+    ]);
   });
 
   it("suppresses rolling resets but preserves boundaries and adjustments", () => {

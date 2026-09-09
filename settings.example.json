@@ -3,7 +3,8 @@
   "scanOnStartup": true,
   "port": 3000,
   "history": {
-    "rawRetentionDays": 30,
+    "rawRetentionHours": 6,
+    "hourlyRetentionDays": 30,
     "retentionDays": 365
   },
   "dashboard": {

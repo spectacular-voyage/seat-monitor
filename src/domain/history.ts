@@ -19,7 +19,7 @@ export const historySeriesPointSchema = z
     resetAt: isoInstantSchema.nullable(),
     windowDurationMinutes: z.number().positive().nullable(),
     sampleCount: z.number().int().positive(),
-    resolution: z.enum(["raw", "hour"]),
+    resolution: z.enum(["raw", "hour", "day"]),
   })
   .strict();
 
@@ -63,6 +63,7 @@ export const analyticsLimitSchema = z
     headroomPercent: z.number().min(0).max(100).nullable(),
     windowDurationMinutes: z.number().positive().nullable(),
     resetAt: isoInstantSchema.nullable(),
+    resetSource: z.enum(["provider", "expected"]).nullable().default(null),
     minutesUntilReset: z.number().int().nonnegative().nullable(),
     points: z.array(historySeriesPointSchema),
     resetMarkers: z.array(resetMarkerSchema),
@@ -116,6 +117,50 @@ const fableRecommendationSchema = z
   })
   .strict();
 
+const fleetThroughputSchema = z
+  .object({
+    from: isoInstantSchema,
+    to: isoInstantSchema,
+    rateWindowMinutes: z.number().int().positive(),
+    smoothingWindowMinutes: z.number().int().positive(),
+    sessions: z.array(
+      z
+        .object({
+          accountAlias: z.string().min(1),
+          platform: platformSchema,
+          limitKey: z.string().min(1),
+          limitLabel: z.string().min(1),
+          windowDurationMinutes: z.number().positive().nullable(),
+          points: z.array(
+            z
+              .object({
+                observedAt: isoInstantSchema,
+                usedPercent: z.number().min(0).max(100),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+    vendors: z.array(
+      z
+        .object({
+          platform: platformSchema,
+          points: z.array(
+            z
+              .object({
+                observedAt: isoInstantSchema,
+                ratePercentPerHour: z.number().nonnegative(),
+                accountCount: z.number().int().positive(),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 export const historyAnalyticsSchema = z
   .object({
     apiVersion: z.literal(1),
@@ -136,6 +181,7 @@ export const historyAnalyticsSchema = z
     scanIntervalSeconds: z.number().positive().nullable(),
     historyHealth: historyHealthSchema,
     accounts: z.array(analyticsAccountSchema),
+    fleetThroughput: fleetThroughputSchema,
     recommendations: z
       .object({
         general: useRecommendationSchema.nullable(),

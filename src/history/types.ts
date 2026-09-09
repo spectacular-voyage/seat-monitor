@@ -10,6 +10,7 @@ export type StoredScanRun = {
 };
 
 export type HistoryResolution = "raw" | "hour" | "auto";
+export type HistoryPointResolution = "raw" | "hour" | "day";
 
 export type HistorySeriesPoint = {
   observedAt: string;
@@ -19,7 +20,7 @@ export type HistorySeriesPoint = {
   resetAt: string | null;
   windowDurationMinutes: number | null;
   sampleCount: number;
-  resolution: Exclude<HistoryResolution, "auto">;
+  resolution: HistoryPointResolution;
 };
 
 export type HistoryLimitSeries = {
@@ -35,6 +36,7 @@ export type HistoryResetEvent = {
   platform: Platform;
   limitKey: string;
   resetAt: string;
+  lastSeenAt: string;
   kind: "provider";
 };
 

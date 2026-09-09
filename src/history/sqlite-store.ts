@@ -13,7 +13,6 @@ import type { HistoryConfiguration } from "./config.js";
 import type {
   HistoryLimitSeries,
   HistoryResetEvent,
-  HistoryResolution,
   HistorySeriesPoint,
   ScanHistoryQuery,
   ScanSource,
@@ -23,6 +22,7 @@ import type {
 
 const DAY_MILLISECONDS = 86_400_000;
 const HOUR_MILLISECONDS = 3_600_000;
+const MAINTENANCE_INTERVAL_MILLISECONDS = 5 * 60_000;
 
 type RunRow = {
   id: number;
@@ -70,6 +70,7 @@ type RollupRow = {
   availability: string;
   bucket_start_ms: number;
   sample_count: number;
+  first_used_percent: number | null;
   last_used_percent: number | null;
   minimum_used_percent: number | null;
   maximum_used_percent: number | null;
@@ -82,6 +83,7 @@ type ResetRow = {
   platform: string;
   limit_key: string;
   reset_at_ms: number;
+  last_seen_at_ms: number;
 };
 
 type SeriesRecord = {
@@ -103,6 +105,18 @@ type HourAccumulator = {
   maximumUsed: number | null;
   usedSum: number;
   usedCount: number;
+  lastResetAt: number | null;
+  lastWindowDuration: number | null;
+};
+
+type RollupAccumulator = {
+  template: RollupRow;
+  bucketStart: number;
+  sampleCount: number;
+  firstUsed: number | null;
+  lastUsed: number | null;
+  minimumUsed: number | null;
+  maximumUsed: number | null;
   lastResetAt: number | null;
   lastWindowDuration: number | null;
 };
@@ -165,11 +179,56 @@ function createSchema(database: DatabaseSync): void {
   const versionRow = database.prepare("PRAGMA user_version").get() as
     { user_version?: number } | undefined;
   const version = versionRow?.user_version ?? 0;
-  if (version > 1) {
+  if (version > 2) {
     throw new TypeError("History database schema is newer than this version.");
   }
   if (version === 1) {
-    database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+    const resetEventColumns = database
+      .prepare("PRAGMA table_info(reset_events)")
+      .all() as { name: string }[];
+    if (
+      !resetEventColumns.some((column) => column.name === "last_seen_at_ms")
+    ) {
+      database.exec(
+        "ALTER TABLE reset_events ADD COLUMN last_seen_at_ms INTEGER NOT NULL DEFAULT 0",
+      );
+    }
+    database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+      UPDATE reset_events
+      SET last_seen_at_ms = first_seen_at_ms
+      WHERE last_seen_at_ms IS NULL OR last_seen_at_ms = 0;
+      PRAGMA user_version = 2;
+    `);
+  }
+  if (version === 1 || version === 2) {
+    database.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+      CREATE TABLE IF NOT EXISTS daily_limit_rollups (
+        account_key TEXT NOT NULL,
+        account_alias TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('Claude', 'Codex')),
+        plan TEXT,
+        limit_key TEXT NOT NULL,
+        label TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('global', 'model', 'window')),
+        availability TEXT NOT NULL CHECK (availability IN ('available', 'unsupported')),
+        bucket_start_ms INTEGER NOT NULL,
+        sample_count INTEGER NOT NULL CHECK (sample_count > 0),
+        first_used_percent REAL,
+        last_used_percent REAL,
+        minimum_used_percent REAL,
+        maximum_used_percent REAL,
+        last_reset_at_ms INTEGER,
+        last_window_duration_minutes REAL,
+        PRIMARY KEY(account_key, limit_key, bucket_start_ms)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS daily_rollups_time_idx
+        ON daily_limit_rollups(bucket_start_ms);
+      PRAGMA user_version = 2;
+    `);
     return;
   }
   database.exec(`
@@ -229,6 +288,7 @@ function createSchema(database: DatabaseSync): void {
       limit_key TEXT NOT NULL,
       reset_at_ms INTEGER NOT NULL,
       first_seen_at_ms INTEGER NOT NULL,
+      last_seen_at_ms INTEGER NOT NULL,
       kind TEXT NOT NULL CHECK (kind = 'provider'),
       PRIMARY KEY(account_key, limit_key, reset_at_ms, kind)
     ) STRICT;
@@ -256,7 +316,28 @@ function createSchema(database: DatabaseSync): void {
     ) STRICT;
     CREATE INDEX IF NOT EXISTS hourly_rollups_time_idx
       ON hourly_limit_rollups(bucket_start_ms);
-    PRAGMA user_version = 1;
+    CREATE TABLE IF NOT EXISTS daily_limit_rollups (
+      account_key TEXT NOT NULL,
+      account_alias TEXT NOT NULL,
+      platform TEXT NOT NULL CHECK (platform IN ('Claude', 'Codex')),
+      plan TEXT,
+      limit_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('global', 'model', 'window')),
+      availability TEXT NOT NULL CHECK (availability IN ('available', 'unsupported')),
+      bucket_start_ms INTEGER NOT NULL,
+      sample_count INTEGER NOT NULL CHECK (sample_count > 0),
+      first_used_percent REAL,
+      last_used_percent REAL,
+      minimum_used_percent REAL,
+      maximum_used_percent REAL,
+      last_reset_at_ms INTEGER,
+      last_window_duration_minutes REAL,
+      PRIMARY KEY(account_key, limit_key, bucket_start_ms)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS daily_rollups_time_idx
+      ON daily_limit_rollups(bucket_start_ms);
+    PRAGMA user_version = 2;
   `);
 }
 
@@ -299,6 +380,48 @@ function aggregateHours(rows: readonly RawSeriesRow[]): HourAccumulator[] {
         bucket.maximumUsed === null
           ? row.used_percent
           : Math.max(bucket.maximumUsed, row.used_percent);
+    }
+  }
+  return [...buckets.values()];
+}
+
+function aggregateDays(rows: readonly RollupRow[]): RollupAccumulator[] {
+  const buckets = new Map<string, RollupAccumulator>();
+  for (const row of rows) {
+    const bucketStart =
+      Math.floor(row.bucket_start_ms / DAY_MILLISECONDS) * DAY_MILLISECONDS;
+    const key = `${row.account_key}\0${row.limit_key}\0${String(bucketStart)}`;
+    let bucket = buckets.get(key);
+    if (bucket === undefined) {
+      bucket = {
+        template: row,
+        bucketStart,
+        sampleCount: 0,
+        firstUsed: row.first_used_percent,
+        lastUsed: row.last_used_percent,
+        minimumUsed: row.minimum_used_percent,
+        maximumUsed: row.maximum_used_percent,
+        lastResetAt: row.last_reset_at_ms,
+        lastWindowDuration: row.last_window_duration_minutes,
+      };
+      buckets.set(key, bucket);
+    }
+    bucket.sampleCount += row.sample_count;
+    bucket.lastUsed = row.last_used_percent;
+    bucket.lastResetAt = row.last_reset_at_ms;
+    bucket.lastWindowDuration = row.last_window_duration_minutes;
+    bucket.template = row;
+    if (row.minimum_used_percent !== null) {
+      bucket.minimumUsed =
+        bucket.minimumUsed === null
+          ? row.minimum_used_percent
+          : Math.min(bucket.minimumUsed, row.minimum_used_percent);
+    }
+    if (row.maximum_used_percent !== null) {
+      bucket.maximumUsed =
+        bucket.maximumUsed === null
+          ? row.maximum_used_percent
+          : Math.max(bucket.maximumUsed, row.maximum_used_percent);
     }
   }
   return [...buckets.values()];
@@ -378,10 +501,13 @@ export class SqliteHistoryStore implements HistoryStore {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertReset = this.#database.prepare(`
-      INSERT OR IGNORE INTO reset_events(
+      INSERT INTO reset_events(
         account_key, account_alias, platform, limit_key, reset_at_ms,
-        first_seen_at_ms, kind
-      ) VALUES (?, ?, ?, ?, ?, ?, 'provider')
+        first_seen_at_ms, last_seen_at_ms, kind
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'provider')
+      ON CONFLICT(account_key, limit_key, reset_at_ms, kind) DO UPDATE SET
+        account_alias = excluded.account_alias,
+        last_seen_at_ms = MAX(reset_events.last_seen_at_ms, excluded.last_seen_at_ms)
     `);
 
     this.#database.exec("BEGIN IMMEDIATE");
@@ -426,6 +552,7 @@ export class SqliteHistoryStore implements HistoryStore {
                 snapshot.platform,
                 limit.key,
                 Date.parse(limit.resetAt),
+                Date.parse(snapshot.observedAt),
                 Date.parse(snapshot.observedAt),
               );
             }
@@ -519,13 +646,23 @@ export class SqliteHistoryStore implements HistoryStore {
   public readSeries(query: SeriesHistoryQuery): HistoryLimitSeries[] {
     const nowMilliseconds = this.#now().getTime();
     const rawBoundary =
-      nowMilliseconds - this.#configuration.rawRetentionDays * DAY_MILLISECONDS;
+      Math.floor(
+        (nowMilliseconds -
+          this.#configuration.rawRetentionHours * HOUR_MILLISECONDS) /
+          HOUR_MILLISECONDS,
+      ) * HOUR_MILLISECONDS;
+    const hourlyBoundary =
+      Math.floor(
+        (nowMilliseconds -
+          this.#configuration.hourlyRetentionDays * DAY_MILLISECONDS) /
+          DAY_MILLISECONDS,
+      ) * DAY_MILLISECONDS;
     const records: SeriesRecord[] = [];
 
     const addRaw = (
       fromMilliseconds: number,
       toMilliseconds: number,
-      resolution: Exclude<HistoryResolution, "auto">,
+      resolution: "raw" | "hour",
     ): void => {
       if (fromMilliseconds >= toMilliseconds) {
         return;
@@ -547,42 +684,43 @@ export class SqliteHistoryStore implements HistoryStore {
     };
 
     const addRollups = (
+      table: "hourly_limit_rollups" | "daily_limit_rollups",
       fromMilliseconds: number,
       toMilliseconds: number,
+      resolution: "hour" | "day",
     ): void => {
       if (fromMilliseconds >= toMilliseconds) {
         return;
       }
       for (const row of this.#readRollupRows(
+        table,
         fromMilliseconds,
         toMilliseconds,
         query.accountAlias,
       )) {
-        records.push(this.#rollupRecord(row));
+        records.push(this.#rollupRecord(row, resolution));
       }
     };
 
     if (query.resolution === "raw") {
       addRaw(query.fromMilliseconds, query.toMilliseconds, "raw");
-    } else if (query.resolution === "hour") {
-      addRollups(
-        query.fromMilliseconds,
-        Math.min(query.toMilliseconds, rawBoundary),
-      );
-      addRaw(
-        Math.max(query.fromMilliseconds, rawBoundary),
-        query.toMilliseconds,
-        "hour",
-      );
     } else {
       addRollups(
+        "daily_limit_rollups",
         query.fromMilliseconds,
+        Math.min(query.toMilliseconds, hourlyBoundary),
+        "day",
+      );
+      addRollups(
+        "hourly_limit_rollups",
+        Math.max(query.fromMilliseconds, hourlyBoundary),
         Math.min(query.toMilliseconds, rawBoundary),
+        "hour",
       );
       addRaw(
         Math.max(query.fromMilliseconds, rawBoundary),
         query.toMilliseconds,
-        "raw",
+        query.resolution === "hour" ? "hour" : "raw",
       );
     }
     return groupSeries(records);
@@ -600,9 +738,10 @@ export class SqliteHistoryStore implements HistoryStore {
     }
     const rows = this.#database
       .prepare(
-        `SELECT account_alias, platform, limit_key, reset_at_ms
+        `SELECT account_alias, platform, limit_key, reset_at_ms,
+                last_seen_at_ms
          FROM reset_events WHERE ${conditions.join(" AND ")}
-         ORDER BY reset_at_ms`,
+         ORDER BY last_seen_at_ms, reset_at_ms`,
       )
       .all(...parameters) as unknown as ResetRow[];
     return rows.map((row) => ({
@@ -610,6 +749,7 @@ export class SqliteHistoryStore implements HistoryStore {
       platform: platform(row.platform),
       limitKey: row.limit_key,
       resetAt: new Date(row.reset_at_ms).toISOString(),
+      lastSeenAt: new Date(row.last_seen_at_ms).toISOString(),
       kind: "provider",
     }));
   }
@@ -624,21 +764,27 @@ export class SqliteHistoryStore implements HistoryStore {
     const lastMaintenance = Number(lastMaintenanceRow?.value ?? "0");
     if (
       Number.isFinite(lastMaintenance) &&
-      nowMilliseconds - lastMaintenance < DAY_MILLISECONDS
+      nowMilliseconds - lastMaintenance < MAINTENANCE_INTERVAL_MILLISECONDS
     ) {
       return;
     }
 
     const rawCutoff =
-      nowMilliseconds - this.#configuration.rawRetentionDays * DAY_MILLISECONDS;
+      Math.floor(
+        (nowMilliseconds -
+          this.#configuration.rawRetentionHours * HOUR_MILLISECONDS) /
+          HOUR_MILLISECONDS,
+      ) * HOUR_MILLISECONDS;
+    const hourlyCutoff =
+      Math.floor(
+        (nowMilliseconds -
+          this.#configuration.hourlyRetentionDays * DAY_MILLISECONDS) /
+          DAY_MILLISECONDS,
+      ) * DAY_MILLISECONDS;
     const totalCutoff =
       nowMilliseconds - this.#configuration.retentionDays * DAY_MILLISECONDS;
-    const oldRows = this.#readRawRows(
-      Number.MIN_SAFE_INTEGER,
-      rawCutoff,
-      undefined,
-    );
-    const rollups = aggregateHours(oldRows);
+    const dailyCutoff =
+      Math.floor(totalCutoff / DAY_MILLISECONDS) * DAY_MILLISECONDS;
     const insertRollup = this.#database.prepare(`
       INSERT OR REPLACE INTO hourly_limit_rollups(
         account_key, account_alias, platform, plan, limit_key, label, scope,
@@ -647,9 +793,20 @@ export class SqliteHistoryStore implements HistoryStore {
         average_used_percent, last_reset_at_ms, last_window_duration_minutes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    const insertDailyRollup = this.#database.prepare(`
+      INSERT OR REPLACE INTO daily_limit_rollups(
+        account_key, account_alias, platform, plan, limit_key, label, scope,
+        availability, bucket_start_ms, sample_count, first_used_percent,
+        last_used_percent, minimum_used_percent, maximum_used_percent,
+        last_reset_at_ms, last_window_duration_minutes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      const rollups = aggregateHours(
+        this.#readRawRows(Number.MIN_SAFE_INTEGER, rawCutoff, undefined),
+      );
       for (const bucket of rollups) {
         const row = bucket.template;
         insertRollup.run(
@@ -672,12 +829,44 @@ export class SqliteHistoryStore implements HistoryStore {
           bucket.lastWindowDuration,
         );
       }
+      const dailyRollups = aggregateDays(
+        this.#readRollupRows(
+          "hourly_limit_rollups",
+          Number.MIN_SAFE_INTEGER,
+          hourlyCutoff,
+          undefined,
+        ),
+      );
+      for (const bucket of dailyRollups) {
+        const row = bucket.template;
+        insertDailyRollup.run(
+          row.account_key,
+          row.account_alias,
+          row.platform,
+          row.plan,
+          row.limit_key,
+          row.label,
+          row.scope,
+          row.availability,
+          bucket.bucketStart,
+          bucket.sampleCount,
+          bucket.firstUsed,
+          bucket.lastUsed,
+          bucket.minimumUsed,
+          bucket.maximumUsed,
+          bucket.lastResetAt,
+          bucket.lastWindowDuration,
+        );
+      }
       this.#database
         .prepare("DELETE FROM scan_runs WHERE completed_at_ms < ?")
         .run(rawCutoff);
       this.#database
         .prepare("DELETE FROM hourly_limit_rollups WHERE bucket_start_ms < ?")
-        .run(totalCutoff);
+        .run(hourlyCutoff);
+      this.#database
+        .prepare("DELETE FROM daily_limit_rollups WHERE bucket_start_ms < ?")
+        .run(dailyCutoff);
       this.#database
         .prepare("DELETE FROM reset_events WHERE reset_at_ms < ?")
         .run(totalCutoff);
@@ -725,6 +914,7 @@ export class SqliteHistoryStore implements HistoryStore {
   }
 
   #readRollupRows(
+    table: "hourly_limit_rollups" | "daily_limit_rollups",
     fromMilliseconds: number,
     toMilliseconds: number,
     accountAlias: string | undefined,
@@ -739,9 +929,10 @@ export class SqliteHistoryStore implements HistoryStore {
       .prepare(
         `SELECT account_key, account_alias, platform, plan, limit_key, label,
                 scope, availability, bucket_start_ms, sample_count,
+                first_used_percent,
                 last_used_percent, minimum_used_percent, maximum_used_percent,
                 last_reset_at_ms, last_window_duration_minutes
-         FROM hourly_limit_rollups
+         FROM ${table}
          WHERE ${conditions.join(" AND ")}
          ORDER BY bucket_start_ms`,
       )
@@ -799,7 +990,7 @@ export class SqliteHistoryStore implements HistoryStore {
     };
   }
 
-  #rollupRecord(row: RollupRow): SeriesRecord {
+  #rollupRecord(row: RollupRow, resolution: "hour" | "day"): SeriesRecord {
     return {
       accountKey: row.account_key,
       accountAlias: row.account_alias,
@@ -819,7 +1010,7 @@ export class SqliteHistoryStore implements HistoryStore {
         resetAt: instant(row.last_reset_at_ms),
         windowDurationMinutes: row.last_window_duration_minutes,
         sampleCount: row.sample_count,
-        resolution: "hour",
+        resolution,
       },
     };
   }
