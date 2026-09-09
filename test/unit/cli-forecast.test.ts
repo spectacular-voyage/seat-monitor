@@ -170,5 +170,40 @@ describe("CLI forecast contract", () => {
     expect(text).toContain("insufficient history");
     expect(markdown).toContain("## Who exhausts next");
     expect(markdown).toContain("| Limit | Consumed | Rate | Basis |");
+
+    const resetFirst = forecast.accounts.find(
+      (account) => account.accountAlias === "reset-first",
+    );
+    const firstRisk = forecast.riskRanking[0];
+    expect(resetFirst).toBeDefined();
+    expect(firstRisk).toBeDefined();
+    if (resetFirst === undefined || firstRisk === undefined) {
+      return;
+    }
+    const edgeText = renderTextForecast({
+      ...forecast,
+      riskRanking: [
+        {
+          ...firstRisk,
+          projectedExhaustionAt: null,
+          minutesToExhaustion: null,
+        },
+      ],
+      accounts: [
+        {
+          ...resetFirst,
+          status: "error",
+          error: { code: "timeout", message: "Usage check timed out." },
+          limits: resetFirst.limits.map((limit) => ({
+            ...limit,
+            projectedExhaustionAt: null,
+            projectedExhaustionRangeEndAt: null,
+          })),
+        },
+      ],
+    });
+    expect(edgeText).toContain("unknown time");
+    expect(edgeText).toContain("ERROR timeout — Usage check timed out.");
+    expect(edgeText).toContain("reset before projected exhaustion at unknown");
   });
 });
