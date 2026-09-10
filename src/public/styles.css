@@ -579,10 +579,15 @@ button:focus-visible {
   stroke-width: 1;
 }
 
-.throughput-axis-label,
+.throughput-axis-label {
+  fill: #7d867f;
+  font-size: 14px;
+  font-weight: 650;
+}
+
 .throughput-time-label {
   fill: #7d867f;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .throughput-line {
@@ -1029,6 +1034,11 @@ button:focus-visible {
   fill: #eef3ef;
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+}
+
+.throughput-plot .chart-hover-label {
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .forecast-line {
