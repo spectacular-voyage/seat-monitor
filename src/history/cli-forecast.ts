@@ -30,7 +30,7 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
     limits: account.limits.map((limit): CliForecastLimit => ({
       key: limit.key,
       label: limit.label,
-      currentConsumedPercent: limit.currentUsedPercent,
+      usedPercent: limit.currentUsedPercent,
       ratePercentPerHour: limit.projection.ratePercentPerHour,
       rateBasis: limit.projection.rateBasis,
       projectionStatus: limit.projection.status,

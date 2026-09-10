@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../src/cli.js";
-import { cliForecastSchema } from "../../src/domain/cli-forecast.js";
+import {
+  cliForecastSchema,
+  cliQuotaSchema,
+} from "../../src/domain/cli-forecast.js";
 import {
   publicQuotaArraySchema,
   quotaSuccessSchema,
@@ -98,11 +101,57 @@ describe("CLI", () => {
     expect(exitCode).toBe(0);
     expect(stderr.read()).toBe("");
     expect(stdout.read()).not.toContain("\n\n");
-    const payload = publicQuotaArraySchema.parse(JSON.parse(stdout.read()));
+    const payload = publicQuotaArraySchema.parse(
+      cliQuotaSchema.parse(JSON.parse(stdout.read())).accounts,
+    );
     expect(payload).toEqual([
       expect.objectContaining({ accountAlias: "Codex_Work" }),
     ]);
   });
+
+  it.each([["--json"], ["--format", "json"]])(
+    "uses the same envelope and percentage name with optional forecast content (%j)",
+    async (...flags) => {
+      for (const forecast of [false, true]) {
+        const stdout = writer();
+        expect(
+          await runCli([...flags, ...(forecast ? ["--forecast"] : [])], {
+            scan: () => Promise.resolve([fixture()]),
+            now: () => new Date("2026-08-26T18:00:00.000Z"),
+            stdout: stdout.sink,
+            stderr: writer().sink,
+          }),
+        ).toBe(0);
+        const payload = (forecast ? cliForecastSchema : cliQuotaSchema).parse(
+          JSON.parse(stdout.read()),
+        );
+        expect(payload).toMatchObject({
+          apiVersion: 1,
+          generatedAt: "2026-08-26T18:00:00.000Z",
+          historyHealth: "unavailable",
+          accounts: [
+            { accountAlias: "Codex_Work", limits: [{ usedPercent: 42 }] },
+          ],
+        });
+        expect(stdout.read()).not.toContain("currentConsumedPercent");
+        if (forecast) {
+          expect(payload).toHaveProperty("riskRanking");
+          expect(payload).toHaveProperty(
+            "accounts.0.limits.0.projectionStatus",
+            "insufficient_history",
+          );
+        } else {
+          expect(payload).not.toHaveProperty("riskRanking");
+          expect(payload).not.toHaveProperty(
+            "accounts.0.limits.0.projectionStatus",
+          );
+          expect(payload).not.toHaveProperty(
+            "accounts.0.limits.0.ratePercentPerHour",
+          );
+        }
+      }
+    },
+  );
 
   it("defaults to a log-free aligned text report", async () => {
     const stdout = writer();
@@ -198,7 +247,9 @@ describe("CLI", () => {
     expect(exitCode).toBe(1);
     expect(stderr.read()).toBe("");
     expect(
-      publicQuotaArraySchema.parse(JSON.parse(stdout.read())),
+      publicQuotaArraySchema.parse(
+        cliQuotaSchema.parse(JSON.parse(stdout.read())).accounts,
+      ),
     ).toHaveLength(1);
   });
 
@@ -225,7 +276,10 @@ describe("CLI", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout.read())).toHaveLength(1);
+    expect(cliQuotaSchema.parse(JSON.parse(stdout.read()))).toMatchObject({
+      historyHealth: "ready",
+      accounts: [expect.objectContaining({ accountAlias: "Codex_Work" })],
+    });
     expect(
       history.listScans({
         fromMilliseconds: Date.parse("2026-08-26T17:00:00.000Z"),
@@ -288,7 +342,7 @@ describe("CLI", () => {
       expect.objectContaining({
         limits: [
           expect.objectContaining({
-            currentConsumedPercent: 60,
+            usedPercent: 60,
             ratePercentPerHour: 40,
             rateBasis: "epoch",
             sampleCount: 3,
@@ -340,7 +394,7 @@ describe("CLI", () => {
     expect(payload.historyHealth).toBe("unavailable");
     expect(payload.accounts[0]?.limits[0]).toEqual(
       expect.objectContaining({
-        currentConsumedPercent: 100,
+        usedPercent: 100,
         projectionStatus: "already_exhausted",
         projectedExhaustionAt: "2026-08-26T18:00:00.000Z",
         minutesToExhaustion: 0,
@@ -459,7 +513,7 @@ describe("CLI", () => {
     expect(payload.historyHealth).toBe("degraded");
     expect(payload.accounts[0]?.limits[0]).toEqual(
       expect.objectContaining({
-        currentConsumedPercent: 100,
+        usedPercent: 100,
         projectionStatus: "already_exhausted",
         projectedExhaustionAt: "2026-08-26T18:00:00.000Z",
       }),

@@ -68,7 +68,7 @@ export function renderTextForecast(forecast: CliForecast): string {
     }
     for (const limit of account.limits) {
       lines.push(
-        `  ${limit.label}: ${value(limit.currentConsumedPercent, "%")} · ${value(limit.ratePercentPerHour, "%/h")} (${limit.rateBasis ?? "no basis"}) · ${outlook(limit)} · ${reset(limit)} · ${String(limit.sampleCount)} samples/${String(limit.observationSpanMinutes)}m`,
+        `  ${limit.label}: ${value(limit.usedPercent, "%")} · ${value(limit.ratePercentPerHour, "%/h")} (${limit.rateBasis ?? "no basis"}) · ${outlook(limit)} · ${reset(limit)} · ${String(limit.sampleCount)} samples/${String(limit.observationSpanMinutes)}m`,
       );
     }
   }
@@ -103,7 +103,7 @@ export function renderMarkdownForecast(forecast: CliForecast): string {
     );
     for (const limit of account.limits) {
       lines.push(
-        `| ${limit.label.replaceAll("|", "\\|")} | ${value(limit.currentConsumedPercent, "%")} | ${value(limit.ratePercentPerHour, "%/h")} | ${limit.rateBasis ?? "—"} | ${outlook(limit)} | ${reset(limit)} | ${String(limit.sampleCount)} | ${String(limit.observationSpanMinutes)}m |`,
+        `| ${limit.label.replaceAll("|", "\\|")} | ${value(limit.usedPercent, "%")} | ${value(limit.ratePercentPerHour, "%/h")} | ${limit.rateBasis ?? "—"} | ${outlook(limit)} | ${reset(limit)} | ${String(limit.sampleCount)} | ${String(limit.observationSpanMinutes)}m |`,
       );
     }
     lines.push("");

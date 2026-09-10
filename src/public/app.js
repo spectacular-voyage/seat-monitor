@@ -1221,6 +1221,7 @@ function createCapacityLimitGroup(parent, children) {
 
 function createFleetAccount(account) {
   const item = element("article", "fleet-account");
+  item.dataset.platform = account.platform;
   const header = element("header", "fleet-account-header");
   const identity = element("div", "fleet-identity");
   identity.append(

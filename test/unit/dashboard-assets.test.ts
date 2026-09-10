@@ -147,7 +147,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("const left = 82");
     expect(javascript).toContain("labelWidth: 156");
     expect(css).toContain(".account-card.claude-history");
-    expect(css).toContain("--history-card-background: #2b171e");
+    expect(css).toContain("--history-card-background: #241419");
     expect(css).toContain(".account-card.codex-history");
     expect(css).toContain("--history-card-background: #152039");
     expect(css).not.toContain("--history-panel-background");

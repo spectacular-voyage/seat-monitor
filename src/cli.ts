@@ -8,6 +8,7 @@ import {
   AccountConfigurationError,
   defaultAccountsConfigPath,
 } from "./config/accounts.js";
+import { cliQuotaSchema } from "./domain/cli-forecast.js";
 import { isMainModule } from "./entry-point.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
 import { buildCliForecast } from "./history/cli-forecast.js";
@@ -275,10 +276,17 @@ export async function runCli(
       );
     }
   } else {
+    const historyHealth = history?.health ?? "unavailable";
     ownedHistory?.close();
     const output = toPublicSnapshots(snapshots, nowMilliseconds);
     if (selection.format === "json") {
-      stdout.write(`${JSON.stringify(output)}\n`);
+      const payload = cliQuotaSchema.parse({
+        apiVersion: 1,
+        generatedAt: now.toISOString(),
+        historyHealth,
+        accounts: output,
+      });
+      stdout.write(`${JSON.stringify(payload)}\n`);
       return snapshots.some((snapshot) => snapshot.status === "error") ? 1 : 0;
     }
     const report = buildQuotaReport(output, {

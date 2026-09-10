@@ -166,7 +166,7 @@ seat-monitor --json
 seat-monitor --format json
 ```
 
-Current quota output remains the compatibility default, including the top-level JSON array. Add `--forecast` when you need retained-history usage rates and exhaustion outlooks:
+Both JSON modes return a versioned object with `apiVersion`, `generatedAt`, `historyHealth`, and `accounts`. Current quota output is the default; `riskRanking` and per-limit forecast fields are absent unless `--forecast` is passed. Limits use `usedPercent` in both modes. Add `--forecast` when you need retained-history usage rates and exhaustion outlooks:
 
 ```sh
 seat-monitor --forecast
@@ -181,6 +181,8 @@ seat-monitor --version
 ```
 
 Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports lead with a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `riskRanking`, and `accounts`; each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
+
+JSON migration: consumers of the former plain array should read `payload.accounts` instead of `payload`; forecast consumers should read `usedPercent` instead of `currentConsumedPercent`.
 
 Forecast mode does not change exit-code policy. A launcher-oriented gate with distinct policy and unable-to-answer exit codes is planned separately.
 
