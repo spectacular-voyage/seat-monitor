@@ -138,6 +138,14 @@ describe("dashboard assets", () => {
     expect(css).toContain("stroke: #3b463e");
     expect(css).toContain(".reset-marker.projected");
     expect(css).toContain(".chart-hover-guide");
+    expect(css).toMatch(
+      /\.throughput-axis-label \{[^}]*font-size: 14px;[^}]*font-weight: 650;/su,
+    );
+    expect(css).toMatch(
+      /\.throughput-plot \.chart-hover-label \{[^}]*font-size: 14px;[^}]*font-weight: 650;/su,
+    );
+    expect(javascript).toContain("const left = 82");
+    expect(javascript).toContain("labelWidth: 156");
     expect(css).toContain(".account-card.claude-history");
     expect(css).toContain("--history-card-background: #2b171e");
     expect(css).toContain(".account-card.codex-history");

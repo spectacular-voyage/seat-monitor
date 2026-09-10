@@ -300,8 +300,19 @@ function chartRangeStart(limit, queryStart, rangeEnd) {
 
 function addTimeAxisHover(
   svg,
-  { rangeStart, rangeEnd, width, height, left, right, top, bottom },
+  {
+    rangeStart,
+    rangeEnd,
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    labelWidth = 108,
+  },
 ) {
+  const halfLabelWidth = labelWidth / 2;
   const guide = svgElement("line", {
     y1: top,
     y2: height - bottom,
@@ -310,7 +321,7 @@ function addTimeAxisHover(
   });
   const labelBackground = svgElement("rect", {
     y: height - bottom + 4,
-    width: 108,
+    width: labelWidth,
     height: bottom - 5,
     rx: 3,
     class: "chart-hover-label-background",
@@ -350,10 +361,13 @@ function addTimeAxisHover(
     const milliseconds =
       rangeStart +
       ((svgX - left) / (width - left - right)) * (rangeEnd - rangeStart);
-    const labelX = Math.max(left + 54, Math.min(width - right - 54, svgX));
+    const labelX = Math.max(
+      left + halfLabelWidth,
+      Math.min(width - right - halfLabelWidth, svgX),
+    );
     guide.setAttribute("x1", String(svgX));
     guide.setAttribute("x2", String(svgX));
-    labelBackground.setAttribute("x", String(labelX - 54));
+    labelBackground.setAttribute("x", String(labelX - halfLabelWidth));
     label.setAttribute("x", String(labelX));
     label.textContent = formatAxisDateTime(milliseconds);
     setVisible(true);
@@ -687,7 +701,7 @@ function createThroughputLineGraph(
 
   const width = 760;
   const height = 196;
-  const left = 48;
+  const left = 82;
   const right = 12;
   const top = 12;
   const bottom = 26;
@@ -786,6 +800,7 @@ function createThroughputLineGraph(
     right,
     top,
     bottom,
+    labelWidth: 156,
   });
   wrapper.append(svg);
   return wrapper;
