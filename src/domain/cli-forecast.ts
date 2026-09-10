@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { historyHealthSchema, projectionSchema } from "./history.js";
-import { platformSchema, quotaErrorSchema } from "./quota.js";
+import {
+  platformSchema,
+  publicQuotaArraySchema,
+  quotaErrorSchema,
+} from "./quota.js";
 
 const isoInstantSchema = z.iso.datetime({ offset: true });
 
@@ -9,7 +13,7 @@ const cliForecastLimitSchema = z
   .object({
     key: z.string().min(1),
     label: z.string().min(1),
-    currentConsumedPercent: z.number().min(0).max(100).nullable(),
+    usedPercent: z.number().min(0).max(100).nullable(),
     ratePercentPerHour: z.number().nonnegative().nullable(),
     rateBasis: projectionSchema.shape.rateBasis,
     projectionStatus: projectionSchema.shape.status,
@@ -51,15 +55,19 @@ const cliRiskEntrySchema = z
   })
   .strict();
 
-export const cliForecastSchema = z
+export const cliQuotaSchema = z
   .object({
     apiVersion: z.literal(1),
     generatedAt: isoInstantSchema,
     historyHealth: historyHealthSchema,
-    riskRanking: z.array(cliRiskEntrySchema),
-    accounts: z.array(cliForecastAccountSchema),
+    accounts: publicQuotaArraySchema,
   })
   .strict();
+
+export const cliForecastSchema = cliQuotaSchema.extend({
+  riskRanking: z.array(cliRiskEntrySchema),
+  accounts: z.array(cliForecastAccountSchema),
+});
 
 export type CliForecast = z.infer<typeof cliForecastSchema>;
 export type CliForecastLimit = z.infer<typeof cliForecastLimitSchema>;

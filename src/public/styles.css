@@ -328,7 +328,8 @@ button:focus-visible {
   padding: 11px 14px;
   grid-template-columns: minmax(220px, 0.72fr) minmax(0, 2.28fr);
   gap: 18px;
-  border-bottom: 1px solid #282f2a;
+  border-bottom: 1px solid var(--history-card-border, #282f2a);
+  background: var(--history-card-background, transparent);
 }
 
 .fleet-account:last-child {
@@ -703,12 +704,14 @@ button:focus-visible {
   background: var(--history-card-background);
 }
 
-.account-card.claude-history {
-  --history-card-background: #2b171e;
+.account-card.claude-history,
+.fleet-account[data-platform="Claude"] {
+  --history-card-background: #241419;
   --history-card-border: #603443;
 }
 
-.account-card.codex-history {
+.account-card.codex-history,
+.fleet-account[data-platform="Codex"] {
   --history-card-background: #152039;
   --history-card-border: #36517d;
 }
