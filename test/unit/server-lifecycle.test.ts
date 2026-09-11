@@ -165,6 +165,31 @@ describe("detached server lifecycle", () => {
     expect(unverified.read()).toContain("identity could not be verified");
   });
 
+  it("reports an identity-verified externally managed foreground server", async () => {
+    const paths = resolveServerRuntimePaths({
+      XDG_STATE_HOME: directory(),
+    });
+    const stdout = writer();
+
+    await expect(
+      statusDetachedServer({
+        paths,
+        stdout: stdout.sink,
+        findExternalServer: () =>
+          Promise.resolve({
+            pid: 52_525,
+            url: "http://127.0.0.1:3000/",
+            version: "0.1.7",
+          }),
+      }),
+    ).resolves.toBe(0);
+
+    expect(stdout.read()).toContain(
+      "running in externally managed foreground mode (pid: 52525)",
+    );
+    expect(stdout.read()).toContain("version 0.1.7");
+  });
+
   it("refuses to signal an unverified live PID", async () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),
@@ -336,7 +361,10 @@ describe("detached server lifecycle", () => {
       runServerCli(["status"], {
         runForeground,
         stdout: statusOutput.sink,
-        lifecycle: { paths },
+        lifecycle: {
+          paths,
+          findExternalServer: () => Promise.resolve(null),
+        },
       }),
     ).resolves.toBe(1);
     await expect(

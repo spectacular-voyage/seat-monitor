@@ -136,12 +136,14 @@ describe("CLI", () => {
         expect(stdout.read()).not.toContain("currentConsumedPercent");
         if (forecast) {
           expect(payload).toHaveProperty("riskRanking");
+          expect(payload).toHaveProperty("fleetBurn");
           expect(payload).toHaveProperty(
             "accounts.0.limits.0.projectionStatus",
             "insufficient_history",
           );
         } else {
           expect(payload).not.toHaveProperty("riskRanking");
+          expect(payload).not.toHaveProperty("fleetBurn");
           expect(payload).not.toHaveProperty(
             "accounts.0.limits.0.projectionStatus",
           );
@@ -338,6 +340,12 @@ describe("CLI", () => {
         minutesToExhaustion: 60,
       }),
     ]);
+    expect(payload.fleetBurn.find((burn) => burn.platform === "Codex")).toEqual(
+      expect.objectContaining({
+        totalRatePercentPerHour: 40,
+        accountCount: 1,
+      }),
+    );
     expect(payload.accounts).toEqual([
       expect.objectContaining({
         limits: [
@@ -368,6 +376,18 @@ describe("CLI", () => {
 
     expect(payload.historyHealth).toBe("unavailable");
     expect(payload.riskRanking).toEqual([]);
+    expect(payload.fleetBurn).toEqual([
+      expect.objectContaining({
+        platform: "Claude",
+        totalRatePercentPerHour: null,
+        accountCount: 0,
+      }),
+      expect.objectContaining({
+        platform: "Codex",
+        totalRatePercentPerHour: null,
+        accountCount: 0,
+      }),
+    ]);
     expect(payload.accounts[0]?.limits[0]).toEqual(
       expect.objectContaining({
         projectionStatus: "insufficient_history",
@@ -456,8 +476,10 @@ describe("CLI", () => {
     });
 
     expect(text.read()).toContain("WHO EXHAUSTS NEXT");
+    expect(text.read()).toContain("FLEET BURN");
     expect(text.read()).toContain("insufficient history");
     expect(markdown.read()).toContain("## Who exhausts next");
+    expect(markdown.read()).toContain("## Fleet burn");
     expect(markdown.read()).toContain("| Limit | Consumed | Rate |");
   });
 

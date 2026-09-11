@@ -38,7 +38,7 @@ const usage = `Usage: seat-monitor [--forecast] [--format text|md|json] [--json]
 Options:
   --format text|md|json  Select output format (default: text)
   --json                 Alias for --format json
-  --forecast             Include usage rates and exhaustion projections
+  --forecast             Include fleet burn, usage rates, and projections
   --init-config          Create a private example accounts.json
   --version              Show the Seat Monitor version
   --help                 Show this help

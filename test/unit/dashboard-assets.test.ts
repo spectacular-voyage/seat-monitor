@@ -62,6 +62,9 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
     expect(javascript).toContain("renderFleetThroughput");
+    expect(javascript).toContain("Claude total session burn");
+    expect(javascript).toContain("Codex total primary burn");
+    expect(javascript).not.toContain("average account consumption rate");
     expect(javascript).toContain("createThroughputLineGraph");
     expect(javascript).toContain("throughputRangeDays * 86_400_000");
     expect(javascript).toContain("throughput.smoothingWindowMinutes");
@@ -83,6 +86,8 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('class: "chart-hover-target"');
     expect(javascript).toContain('target.addEventListener("pointermove"');
     expect(javascript).toContain("futureResetAt - durationMilliseconds");
+    expect(javascript).toContain("candidateFutureResetAt -");
+    expect(javascript).toContain("durationMilliseconds <= latestMeasuredAt");
     expect(javascript).toContain(
       "const chartEnd = futureResetAt ?? forecastEnd",
     );

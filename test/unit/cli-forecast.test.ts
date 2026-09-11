@@ -131,6 +131,16 @@ describe("CLI forecast contract", () => {
       new: "insufficient_history",
     });
     expect(
+      forecast.fleetBurn.find((burn) => burn.platform === "Codex"),
+    ).toEqual(
+      expect.objectContaining({
+        totalRatePercentPerHour: 120,
+        accountCount: 4,
+        rateWindowMinutes: 30,
+        smoothingWindowMinutes: 6 * 60,
+      }),
+    );
+    expect(
       forecast.riskRanking.map((risk) => [
         risk.rank,
         risk.accountAlias,
@@ -163,12 +173,16 @@ describe("CLI forecast contract", () => {
     const text = renderTextForecast(forecast);
     const markdown = renderMarkdownForecast(forecast);
     expect(text).toContain("already exhausted at");
+    expect(text).toContain("FLEET BURN — 6h moving average");
+    expect(text).toContain("Codex: 120 pp/h · 4 measurable accounts");
     expect(text).toContain("exhausts before reset at");
     expect(text).toContain("reset before projected exhaustion at");
     expect(text).toContain("exhaustion projected at");
     expect(text).toContain("not consuming");
     expect(text).toContain("insufficient history");
     expect(markdown).toContain("## Who exhausts next");
+    expect(markdown).toContain("## Fleet burn");
+    expect(markdown).toContain("| Codex | 120 pp/h | 4 |");
     expect(markdown).toContain("| Limit | Consumed | Rate | Basis |");
 
     const resetFirst = forecast.accounts.find(

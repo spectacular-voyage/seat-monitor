@@ -13,7 +13,12 @@ import {
   HistoryUnavailableError,
 } from "../../src/history/service.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
-import { buildServer, findServerPort } from "../../src/server.js";
+import {
+  buildServer,
+  findExternallyManagedServer,
+  findServerPort,
+} from "../../src/server.js";
+import type { ServerSettings } from "../../src/config/server-settings.js";
 import { PACKAGE_VERSION } from "../../src/version.js";
 
 const assets = {
@@ -86,6 +91,37 @@ describe("HTTP server", () => {
       ),
     ).resolves.toBe(3_000);
     expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("finds an externally managed server across default fallback ports", async () => {
+    const settings: ServerSettings = {
+      scanIntervalSeconds: 60,
+      scanOnStartup: true,
+      port: 3_000,
+      useDefaultPortFallback: true,
+      history: {
+        rawRetentionHours: 6,
+        hourlyRetentionDays: 30,
+        retentionDays: 365,
+      },
+      dashboard: { showSpark: false },
+    };
+    const probe = vi.fn((url: string) =>
+      Promise.resolve(
+        url === "http://127.0.0.1:3002/"
+          ? { pid: 52_525, url, version: PACKAGE_VERSION }
+          : null,
+      ),
+    );
+
+    await expect(findExternallyManagedServer(settings, probe)).resolves.toEqual(
+      {
+        pid: 52_525,
+        url: "http://127.0.0.1:3002/",
+        version: PACKAGE_VERSION,
+      },
+    );
+    expect(probe).toHaveBeenCalledTimes(32);
   });
 
   it("exposes identity for detached lifecycle acknowledgement", async () => {
