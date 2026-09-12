@@ -207,6 +207,7 @@ describe("historical quota analytics", () => {
     expect(result.rateBasis).toBeNull();
     expect(result.projectedFromUsedPercent).toBe(0);
     expect(result.projectedExhaustionAt).toBeNull();
+    expect(result.projectedExhaustionRangeEndAt).toBeNull();
     expect(result.sampleCount).toBe(4);
   });
 
