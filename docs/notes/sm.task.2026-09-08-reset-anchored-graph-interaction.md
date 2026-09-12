@@ -18,7 +18,7 @@ Make quota graphs explain their time axis and upcoming boundary directly. Remove
 - A Claude Session with no reset timestamp says **Starts when a message is sent**. Session windows are re-anchored by activity; `Reset unknown` incorrectly implies missing information about an already-running clock.
 - Masthead warnings include projected exhaustion before reset, but not `already_exhausted`. Exhausted state remains visible in current usage, graph, tone, and outlook without a persistent top-of-page duplicate.
 - Historical provider reset markers remain solid. The current future reset is a dashed `projected` marker. Expected resets use the same future visual treatment while retaining their expected provenance in the marker title.
-- When a limit has a future reset, the graph's right edge is that reset. The selected ½×, 1×, 2×, 5×, or 10× duration is worked backward from the reset, so narrower views may intentionally omit earlier history rather than hide the upcoming boundary.
+- When a limit has a future reset, the graph's right edge is that reset only if the selected ½×, 1×, 2×, 5×, or 10× duration reaches at least one measured point. A narrower reset-anchored view that would begin after all measurements falls back to the most recent selected duration ending now instead of rendering a future-only empty graph.
 - Limits without a usable future reset retain the existing now/forecast viewport.
 - Usage and fleet-throughput SVGs add a pointer hover guide. Moving across a plotted line region displays the corresponding local month, day, and time along the x-axis.
 - A truly empty selected range says **No measured history in this time range**, not that history begins after another scan.
@@ -36,3 +36,5 @@ The final source audit verified that only `exhausts_before_reset` reaches the ma
 ## Completion
 
 Completed on 2026-09-08. Full verification passed `npm run check` with 24 files and 168 tests, `npm run package:check`, and `git diff --check`. The managed server was rebuilt and restarted at `http://127.0.0.1:3000/`; its served assets contain reset anchoring, hover interaction, Session-start wording, and no exhausted-quota masthead copy.
+
+Refined on 2026-09-11 after ½× views exposed future-only reset-anchored ranges. A replay against the live analytics payload reduced empty graphs from seven of twelve to zero while preserving reset anchoring for the three limits whose selected windows already reach measured history.

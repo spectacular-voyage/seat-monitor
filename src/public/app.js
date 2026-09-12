@@ -407,7 +407,7 @@ function createUsageGraph(
     limit.depth === 0 && limit.resetAt !== null
       ? Date.parse(limit.resetAt)
       : Number.NaN;
-  const futureResetAt =
+  const candidateFutureResetAt =
     Number.isFinite(resetAtMilliseconds) && resetAtMilliseconds > rangeEnd
       ? resetAtMilliseconds
       : null;
@@ -416,6 +416,21 @@ function createUsageGraph(
     periodMultiplier *
     PERIOD_CONTEXT_MULTIPLIER *
     60_000;
+  const latestMeasuredAt = chartLimits.reduce(
+    (latest, chartLimit) =>
+      chartLimit.points.reduce((limitLatest, point) => {
+        const observedAt = Date.parse(point.observedAt);
+        return point.usedPercent === null || !Number.isFinite(observedAt)
+          ? limitLatest
+          : Math.max(limitLatest, observedAt);
+      }, latest),
+    Number.NEGATIVE_INFINITY,
+  );
+  const futureResetAt =
+    candidateFutureResetAt !== null &&
+    candidateFutureResetAt - durationMilliseconds <= latestMeasuredAt
+      ? candidateFutureResetAt
+      : null;
   const rangeStart =
     futureResetAt === null
       ? chartRangeStart(limit, queryStart, rangeEnd)
@@ -903,18 +918,18 @@ function renderFleetThroughput(throughput) {
     const latestAccountCount = vendor?.points.at(-1)?.accountCount ?? 0;
     const rateTitle =
       platform === "Claude"
-        ? "Claude average session rate"
-        : "Codex average primary rate";
+        ? "Claude total session burn"
+        : "Codex total primary burn";
     const card = createThroughputCard(
       `throughput-rate throughput-${platform.toLocaleLowerCase("en-US")}`,
       rateTitle,
-      `${formatWindowMinutes(throughput.smoothingWindowMinutes)} moving average of the trailing-${throughput.rateWindowMinutes}m slope across measurable accounts${latestAccountCount === 0 ? "." : ` · ${latestAccountCount} in the latest sample.`}`,
+      `${formatWindowMinutes(throughput.smoothingWindowMinutes)} moving average of summed trailing-${throughput.rateWindowMinutes}m account slopes${latestAccountCount === 0 ? "." : ` · ${latestAccountCount} measurable in the latest sample.`}`,
     );
     card.append(
       createThroughputLineGraph(
         [
           {
-            label: `${platform} mean rate`,
+            label: `${platform} total burn`,
             colorClass: VENDOR_RATE_COLOR_CLASSES[platform],
             points,
           },
@@ -922,10 +937,10 @@ function renderFleetThroughput(throughput) {
         rangeStart,
         rangeEnd,
         {
-          ariaLabel: `${platform} average account consumption rate`,
+          ariaLabel: `${platform} total account quota burn rate`,
           maximum,
           formatAxisValue: (value) =>
-            `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)}%/h`,
+            `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)} pp/h`,
         },
       ),
     );

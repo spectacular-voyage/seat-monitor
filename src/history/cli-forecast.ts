@@ -20,6 +20,17 @@ function minutesToExhaustion(
 
 export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
   const nowMilliseconds = Date.parse(analytics.generatedAt);
+  const fleetBurn = analytics.fleetThroughput.vendors.map((vendor) => {
+    const latest = vendor.points.at(-1);
+    return {
+      platform: vendor.platform,
+      totalRatePercentPerHour: latest?.ratePercentPerHour ?? null,
+      accountCount: latest?.accountCount ?? 0,
+      observedAt: latest?.observedAt ?? null,
+      rateWindowMinutes: analytics.fleetThroughput.rateWindowMinutes,
+      smoothingWindowMinutes: analytics.fleetThroughput.smoothingWindowMinutes,
+    };
+  });
   const accounts = analytics.accounts.map((account) => ({
     accountAlias: account.accountAlias,
     platform: account.platform,
@@ -87,6 +98,7 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
     generatedAt: analytics.generatedAt,
     historyHealth: analytics.historyHealth,
     riskRanking,
+    fleetBurn,
     accounts,
   });
 }

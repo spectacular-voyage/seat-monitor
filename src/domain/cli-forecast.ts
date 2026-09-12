@@ -55,6 +55,17 @@ const cliRiskEntrySchema = z
   })
   .strict();
 
+const cliFleetBurnSchema = z
+  .object({
+    platform: platformSchema,
+    totalRatePercentPerHour: z.number().nonnegative().nullable(),
+    accountCount: z.number().int().nonnegative(),
+    observedAt: isoInstantSchema.nullable(),
+    rateWindowMinutes: z.number().int().positive(),
+    smoothingWindowMinutes: z.number().int().positive(),
+  })
+  .strict();
+
 export const cliQuotaSchema = z
   .object({
     apiVersion: z.literal(1),
@@ -66,6 +77,7 @@ export const cliQuotaSchema = z
 
 export const cliForecastSchema = cliQuotaSchema.extend({
   riskRanking: z.array(cliRiskEntrySchema),
+  fleetBurn: z.array(cliFleetBurnSchema),
   accounts: z.array(cliForecastAccountSchema),
 });
 

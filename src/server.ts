@@ -40,7 +40,9 @@ import {
   startDetachedServer,
   statusDetachedServer,
   stopDetachedServer,
+  probeForegroundServer,
   writeServerRuntimeState,
+  type ExternalServerIdentity,
   type LifecycleDependencies,
 } from "./server-lifecycle.js";
 import { PACKAGE_VERSION } from "./version.js";
@@ -49,13 +51,14 @@ export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
+const STATUS_FALLBACK_PORT_COUNT = 32;
 const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
 
 With no command, Seat Monitor runs in the foreground.
   start    Start the server in the background
   stop     Stop the verified background server
   restart  Stop and start the background server
-  status   Report verified background server status
+  status   Report identity-verified server status
   --version  Show the Seat Monitor version
   --help   Show this help
 `;
@@ -495,6 +498,26 @@ export async function findServerPort(
   throw new Error("No available server port remains above the default.");
 }
 
+export async function findExternallyManagedServer(
+  settings: ServerSettings = readServerSettings(),
+  probe: (
+    url: string,
+  ) => Promise<ExternalServerIdentity | null> = probeForegroundServer,
+): Promise<ExternalServerIdentity | null> {
+  const configuration = readServerConfiguration(settings);
+  const candidateCount = settings.useDefaultPortFallback
+    ? Math.min(STATUS_FALLBACK_PORT_COUNT, 65_536 - configuration.port)
+    : 1;
+  const candidates = await Promise.all(
+    Array.from({ length: candidateCount }, (_value, index) =>
+      probe(
+        `http://${configuration.host}:${String(configuration.port + index)}/`,
+      ),
+    ),
+  );
+  return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
 async function runForegroundServer(instanceId?: string): Promise<void> {
   const settings = readServerSettings();
   const configuration = readServerConfiguration(settings);
@@ -619,6 +642,8 @@ export async function runServerCli(
       dependencies.entryPath ??
       dependencies.lifecycle?.entryPath ??
       fileURLToPath(import.meta.url),
+    findExternalServer:
+      dependencies.lifecycle?.findExternalServer ?? findExternallyManagedServer,
     stdout,
     stderr,
   };

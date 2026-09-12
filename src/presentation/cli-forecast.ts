@@ -4,6 +4,26 @@ function value(value: number | null, suffix = ""): string {
   return value === null ? "—" : `${String(value)}${suffix}`;
 }
 
+function windowDuration(minutes: number): string {
+  if (minutes % (7 * 24 * 60) === 0) {
+    return `${String(minutes / (7 * 24 * 60))}w`;
+  }
+  if (minutes % (24 * 60) === 0) {
+    return `${String(minutes / (24 * 60))}d`;
+  }
+  if (minutes % 60 === 0) {
+    return `${String(minutes / 60)}h`;
+  }
+  return `${String(minutes)}m`;
+}
+
+function fleetBurnBasis(forecast: CliForecast): string {
+  const first = forecast.fleetBurn[0];
+  return first === undefined
+    ? ""
+    : `${windowDuration(first.smoothingWindowMinutes)} moving average of summed trailing-${String(first.rateWindowMinutes)}m account slopes`;
+}
+
 function projectionRange(limit: CliForecastLimit): string {
   if (limit.projectedExhaustionAt === null) {
     return "unknown";
@@ -37,12 +57,19 @@ function reset(limit: CliForecastLimit): string {
 }
 
 export function renderTextForecast(forecast: CliForecast): string {
+  const burnBasis = fleetBurnBasis(forecast);
   const lines = [
     `FORECAST — ${forecast.generatedAt}`,
     `HISTORY — ${forecast.historyHealth}`,
     "",
-    "WHO EXHAUSTS NEXT",
+    `FLEET BURN${burnBasis.length === 0 ? "" : ` — ${burnBasis}`}`,
   ];
+  for (const burn of forecast.fleetBurn) {
+    lines.push(
+      `  ${burn.platform}: ${value(burn.totalRatePercentPerHour, " pp/h")} · ${String(burn.accountCount)} measurable account${burn.accountCount === 1 ? "" : "s"}${burn.observedAt === null ? "" : ` · ${burn.observedAt}`}`,
+    );
+  }
+  lines.push("", "WHO EXHAUSTS NEXT");
   if (forecast.riskRanking.length === 0) {
     lines.push("  No exhaustion time is currently derivable.");
   } else {
@@ -80,6 +107,17 @@ export function renderMarkdownForecast(forecast: CliForecast): string {
     `# FORECAST — ${forecast.generatedAt}`,
     "",
     `History: **${forecast.historyHealth}**`,
+    "",
+    "## Fleet burn",
+    "",
+    fleetBurnBasis(forecast),
+    "",
+    "| Provider | Total burn | Measurable accounts | Observed |",
+    "| --- | ---: | ---: | --- |",
+    ...forecast.fleetBurn.map(
+      (burn) =>
+        `| ${burn.platform} | ${value(burn.totalRatePercentPerHour, " pp/h")} | ${String(burn.accountCount)} | ${burn.observedAt ?? "—"} |`,
+    ),
     "",
     "## Who exhausts next",
     "",

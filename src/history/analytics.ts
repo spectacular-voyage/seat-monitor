@@ -529,24 +529,58 @@ function canonicalSessionLimit(
   return account.limits.find((limit) => limit.key === key);
 }
 
+function beginsThroughputEpoch(
+  previous: HistorySeriesPoint & { usedPercent: number },
+  current: HistorySeriesPoint & { usedPercent: number },
+): boolean {
+  if (previous.usedPercent - current.usedPercent >= MATERIAL_DROP_PERCENT) {
+    return true;
+  }
+  if (
+    previous.resetAt === null ||
+    current.resetAt === null ||
+    previous.resetAt === current.resetAt
+  ) {
+    return false;
+  }
+  const previousReset = Date.parse(previous.resetAt);
+  return (
+    previousReset >=
+      Date.parse(previous.observedAt) - RESET_JITTER_MILLISECONDS &&
+    previousReset <= Date.parse(current.observedAt) + RESET_JITTER_MILLISECONDS
+  );
+}
+
 function sessionRatePoints(
   points: readonly (HistorySeriesPoint & { usedPercent: number })[],
 ): { observedAt: string; ratePercentPerHour: number }[] {
   const sorted = [...points].sort(
     (left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt),
   );
+  // Provider percentages can oscillate by a point or two. Preserve the highest
+  // reading within an epoch so that quantization noise cannot erase real burn.
+  const monotonic = sorted.map((point) => ({ ...point }));
   const rates: { observedAt: string; ratePercentPerHour: number }[] = [];
   let segmentStart = 0;
+  let segmentMaximum = monotonic[0]?.usedPercent ?? 0;
   for (let index = 1; index < sorted.length; index += 1) {
     const current = sorted[index];
     const previous = sorted[index - 1];
-    if (current === undefined || previous === undefined) {
+    const monotonicCurrent = monotonic[index];
+    if (
+      current === undefined ||
+      previous === undefined ||
+      monotonicCurrent === undefined
+    ) {
       continue;
     }
-    if (current.usedPercent < previous.usedPercent) {
+    if (beginsThroughputEpoch(previous, current)) {
       segmentStart = index;
+      segmentMaximum = current.usedPercent;
       continue;
     }
+    segmentMaximum = Math.max(segmentMaximum, current.usedPercent);
+    monotonicCurrent.usedPercent = segmentMaximum;
     const currentMilliseconds = Date.parse(current.observedAt);
     let baseline: { observedAt: string; usedPercent: number } | undefined;
     for (
@@ -554,7 +588,7 @@ function sessionRatePoints(
       candidateIndex >= segmentStart;
       candidateIndex -= 1
     ) {
-      const candidate = sorted[candidateIndex];
+      const candidate = monotonic[candidateIndex];
       if (candidate === undefined) {
         continue;
       }
@@ -583,7 +617,8 @@ function sessionRatePoints(
       observedAt: current.observedAt,
       ratePercentPerHour: Number(
         (
-          ((current.usedPercent - baseline.usedPercent) / spanMinutes) *
+          ((monotonicCurrent.usedPercent - baseline.usedPercent) /
+            spanMinutes) *
           60
         ).toFixed(3),
       ),
@@ -753,12 +788,9 @@ function buildFleetThroughput(
       .map(([observedAt, accountRates]) => ({
         observedAt: new Date(observedAt).toISOString(),
         ratePercentPerHour: Number(
-          (
-            [...accountRates.values()].reduce(
-              (total, rate) => total + rate,
-              0,
-            ) / accountRates.size
-          ).toFixed(3),
+          [...accountRates.values()]
+            .reduce((total, rate) => total + rate, 0)
+            .toFixed(3),
         ),
         accountCount: accountRates.size,
       }));

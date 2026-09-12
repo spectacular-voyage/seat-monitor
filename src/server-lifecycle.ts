@@ -23,7 +23,23 @@ const serverRuntimeStateSchema = z
   })
   .strict();
 
+const serverStatusIdentitySchema = z
+  .object({
+    mode: z.enum(["foreground", "background"]),
+    instanceId: z.uuid().nullable(),
+    pid: z.number().int().positive(),
+    startedAt: z.iso.datetime({ offset: true }).nullable(),
+    host: z.enum(["127.0.0.1", "localhost"]),
+    port: z.number().int().min(1).max(65_535),
+    version: z.string().min(1),
+  })
+  .loose();
+
 export type ServerRuntimeState = z.infer<typeof serverRuntimeStateSchema>;
+export type ExternalServerIdentity = Pick<
+  z.infer<typeof serverStatusIdentitySchema>,
+  "pid" | "version"
+> & { url: string };
 
 export type ServerRuntimePaths = {
   directory: string;
@@ -50,6 +66,7 @@ export type LifecycleDependencies = {
   }) => Promise<number>;
   isProcessAlive?: (pid: number) => boolean;
   fetchIdentity?: (state: ServerRuntimeState) => Promise<boolean>;
+  findExternalServer?: () => Promise<ExternalServerIdentity | null>;
   sendSignal?: (pid: number, signal: NodeJS.Signals) => void;
   startupTimeoutMilliseconds?: number;
   stopTimeoutMilliseconds?: number;
@@ -143,26 +160,44 @@ function processIsAlive(pid: number): boolean {
 }
 
 async function fetchIdentity(state: ServerRuntimeState): Promise<boolean> {
+  const payload = await fetchServerStatus(state.url);
+  return (
+    payload?.mode === "background" &&
+    payload.instanceId === state.instanceId &&
+    payload.pid === state.pid
+  );
+}
+
+async function fetchServerStatus(
+  url: string,
+): Promise<z.infer<typeof serverStatusIdentitySchema> | null> {
   try {
-    const response = await fetch(new URL("/api/server/status", state.url), {
+    const response = await fetch(new URL("/api/server/status", url), {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(500),
     });
     if (!response.ok) {
-      return false;
+      return null;
     }
-    const payload = await response.json();
-    return (
-      typeof payload === "object" &&
-      payload !== null &&
-      "instanceId" in payload &&
-      payload.instanceId === state.instanceId &&
-      "pid" in payload &&
-      payload.pid === state.pid
-    );
+    const parsed = serverStatusIdentitySchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function probeForegroundServer(
+  url: string,
+): Promise<ExternalServerIdentity | null> {
+  const payload = await fetchServerStatus(url);
+  if (payload?.mode !== "foreground" || payload.instanceId !== null) {
+    return null;
+  }
+  return {
+    pid: payload.pid,
+    version: payload.version,
+    url: new URL("/", url).toString(),
+  };
 }
 
 async function launchDetached(
@@ -223,6 +258,8 @@ function lifecycleDefaults(dependencies: LifecycleDependencies) {
     sleep: dependencies.sleep ?? sleep,
     isProcessAlive: dependencies.isProcessAlive ?? processIsAlive,
     fetchIdentity: dependencies.fetchIdentity ?? fetchIdentity,
+    findExternalServer:
+      dependencies.findExternalServer ?? (() => Promise.resolve(null)),
     sendSignal:
       dependencies.sendSignal ??
       ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal)),
@@ -319,6 +356,13 @@ export async function statusDetachedServer(
   const runtime = lifecycleDefaults(dependencies);
   const state = await readServerRuntimeState(runtime.paths);
   if (state === null) {
+    const external = await runtime.findExternalServer();
+    if (external !== null) {
+      runtime.stdout.write(
+        `Seat Monitor is running in externally managed foreground mode (pid: ${String(external.pid)}) at ${external.url} (version ${external.version}).\n`,
+      );
+      return 0;
+    }
     runtime.stdout.write("Seat Monitor is not running in background.\n");
     return 1;
   }

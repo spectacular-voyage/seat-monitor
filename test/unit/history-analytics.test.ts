@@ -634,7 +634,7 @@ describe("historical quota analytics", () => {
     expect(result.scanIntervalSeconds).toBe(60);
   });
 
-  it("builds account session overlays and mean vendor rate series", () => {
+  it("builds account session overlays and total vendor burn series", () => {
     const claudeOne = claudeSnapshot({ alias: "claude-one@example.com" });
     const claudeTwo = claudeSnapshot({ alias: "claude-two@example.com" });
     const codex = codexSnapshot("codex-one@example.com");
@@ -697,7 +697,7 @@ describe("historical quota analytics", () => {
         ?.points.at(-1),
     ).toEqual(
       expect.objectContaining({
-        ratePercentPerHour: 52.5,
+        ratePercentPerHour: 105,
         accountCount: 2,
       }),
     );
@@ -712,6 +712,44 @@ describe("historical quota analytics", () => {
       }),
     );
     expect(result.fleetThroughput.smoothingWindowMinutes).toBe(60);
+  });
+
+  it("keeps small provider regressions in the total burn calculation", () => {
+    const active = claudeSnapshot({ alias: "claude-active@example.com" });
+    const idle = claudeSnapshot({ alias: "claude-idle@example.com" });
+    const result = buildHistoryAnalytics({
+      snapshots: [active, idle],
+      series: [
+        accountSessionSeries(
+          "claude-active@example.com",
+          "Claude",
+          "base.session",
+          [56, 60, 59, 64],
+        ),
+        accountSessionSeries(
+          "claude-idle@example.com",
+          "Claude",
+          "base.session",
+          [0, 0, 0, 0],
+        ),
+      ],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 1,
+      scanIntervalSeconds: 60,
+      timeZone: "America/Los_Angeles",
+    });
+    const rates = result.fleetThroughput.vendors.find(
+      (vendor) => vendor.platform === "Claude",
+    )?.points;
+
+    expect(rates?.map((point) => point.ratePercentPerHour)).toEqual([
+      16, 12, 10.667,
+    ]);
+    expect(rates?.map((point) => point.accountCount)).toEqual([2, 2, 2]);
   });
 
   it("does not calculate a fleet rate across a session reset", () => {
@@ -740,6 +778,39 @@ describe("historical quota analytics", () => {
     )?.points;
 
     expect(rates?.map((point) => point.ratePercentPerHour)).toEqual([40, 30]);
+  });
+
+  it("honors a provider reset when the usage drop is small", () => {
+    const snapshot = claudeSnapshot({ alias: "claude-low-reset@example.com" });
+    const resetSeries = accountSessionSeries(
+      "claude-low-reset@example.com",
+      "Claude",
+      "base.session",
+      [3, 4, 1, 2],
+    );
+    const previousReset = minutesBeforeNow(20);
+    const nextReset = resetAfter(300);
+    resetSeries.points = resetSeries.points.map((historyPoint, index) => ({
+      ...historyPoint,
+      resetAt: index < 2 ? previousReset : nextReset,
+    }));
+    const result = buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [resetSeries],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      periodMultiplier: 1,
+      scanIntervalSeconds: 60,
+      timeZone: "America/Los_Angeles",
+    });
+    const rates = result.fleetThroughput.vendors.find(
+      (vendor) => vendor.platform === "Claude",
+    )?.points;
+
+    expect(rates?.map((point) => point.ratePercentPerHour)).toEqual([4, 4]);
   });
 
   it.each([
