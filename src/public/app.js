@@ -1234,8 +1234,17 @@ function createCapacityLimitGroup(parent, children) {
   return group;
 }
 
+function accountHistoryId(account) {
+  return `account-history-${account.platform}-${account.accountAlias}`;
+}
+
 function createFleetAccount(account) {
-  const item = element("article", "fleet-account");
+  const item = element("a", "fleet-account");
+  item.href = `#${encodeURIComponent(accountHistoryId(account))}`;
+  item.setAttribute(
+    "aria-label",
+    `View usage history for ${account.platform} ${account.accountAlias}`,
+  );
   item.dataset.platform = account.platform;
   const header = element("header", "fleet-account-header");
   const identity = element("div", "fleet-identity");
@@ -1305,6 +1314,8 @@ function createAccountCard(account, rangeStart, rangeEnd) {
         ? "codex-history"
         : "";
   const card = element("article", `account-card ${providerClass}`);
+  card.id = accountHistoryId(account);
+  card.tabIndex = -1;
   const header = element("header", "account-header");
   const identity = element("div", "account-identity-line");
   identity.append(
@@ -1469,7 +1480,10 @@ function renderAnalytics(payload) {
       ),
     );
   } else {
-    for (const account of accounts) {
+    const historyAccounts = [...accounts].sort((left, right) =>
+      left.accountAlias.localeCompare(right.accountAlias),
+    );
+    for (const account of historyAccounts) {
       accountCards.append(createAccountCard(account, rangeStart, rangeEnd));
     }
   }
