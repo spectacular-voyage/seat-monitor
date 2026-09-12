@@ -190,6 +190,26 @@ describe("historical quota analytics", () => {
     ).toBe("insufficient_history");
   });
 
+  it("reports an idle limit as flat once enough history exists", () => {
+    const resetAt = resetAfter(300);
+    const result = projectExhaustion(
+      [
+        point(minutesBeforeNow(45), 0, resetAt),
+        point(minutesBeforeNow(30), 0, resetAt),
+        point(minutesBeforeNow(15), 0, resetAt),
+        point(minutesBeforeNow(0), 0, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("not_consuming");
+    expect(result.ratePercentPerHour).toBe(0);
+    expect(result.rateBasis).toBeNull();
+    expect(result.projectedFromUsedPercent).toBe(0);
+    expect(result.projectedExhaustionAt).toBeNull();
+    expect(result.sampleCount).toBe(4);
+  });
+
   it("preserves a fresh exhausted reading when retained series are unavailable", () => {
     const result = buildHistoryAnalytics({
       snapshots: [claudeSnapshot({ sessionUsed: 100 })],

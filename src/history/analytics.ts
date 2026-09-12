@@ -321,13 +321,28 @@ export function projectExhaustion(
   const usageValues = epoch.map((point) => point.usedPercent);
   if (
     epoch.length < MINIMUM_RATE_SAMPLES ||
-    spanMinutes < MINIMUM_RATE_SPAN_MINUTES ||
-    Math.max(...usageValues) - Math.min(...usageValues) <
-      MINIMUM_MEASURABLE_CHANGE
+    spanMinutes < MINIMUM_RATE_SPAN_MINUTES
   ) {
     return {
       status: "insufficient_history",
       ratePercentPerHour: null,
+      rateBasis: null,
+      projectedFromUsedPercent: latest.usedPercent,
+      projectedExhaustionAt: null,
+      projectedExhaustionRangeEndAt: null,
+      sampleCount: epoch.length,
+      spanMinutes,
+    };
+  }
+  // Enough samples over a long enough span, but the reading never moved: the
+  // account is idle rather than under-observed.
+  if (
+    Math.max(...usageValues) - Math.min(...usageValues) <
+    MINIMUM_MEASURABLE_CHANGE
+  ) {
+    return {
+      status: "not_consuming",
+      ratePercentPerHour: 0,
       rateBasis: null,
       projectedFromUsedPercent: latest.usedPercent,
       projectedExhaustionAt: null,
