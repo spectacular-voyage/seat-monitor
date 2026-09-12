@@ -184,6 +184,21 @@ describe("CLI forecast contract", () => {
     expect(markdown).toContain("## Fleet burn");
     expect(markdown).toContain("| Codex | 120 pp/h | 4 |");
     expect(markdown).toContain("| Limit | Consumed | Rate | Basis |");
+    for (const [minutes, label] of [
+      [7 * 24 * 60, "1w"],
+      [24 * 60, "1d"],
+      [30, "30m"],
+    ] as const) {
+      expect(
+        renderTextForecast({
+          ...forecast,
+          fleetBurn: forecast.fleetBurn.map((burn) => ({
+            ...burn,
+            smoothingWindowMinutes: minutes,
+          })),
+        }),
+      ).toContain(`FLEET BURN — ${label} moving average`);
+    }
 
     const resetFirst = forecast.accounts.find(
       (account) => account.accountAlias === "reset-first",

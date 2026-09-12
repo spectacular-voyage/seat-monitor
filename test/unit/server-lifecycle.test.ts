@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readServerRuntimeState,
+  probeForegroundServer,
   resolveServerRuntimePaths,
   restartDetachedServer,
   startDetachedServer,
@@ -26,6 +27,7 @@ function directory(): string {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const value of temporaryDirectories.splice(0)) {
     rmSync(value, { force: true, recursive: true });
   }
@@ -51,6 +53,23 @@ function runtimeState(
     host: "127.0.0.1",
     port: 3_000,
     url: "http://127.0.0.1:3000/",
+  };
+}
+
+function statusPayload(
+  mode: "foreground" | "background",
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    mode,
+    instanceId:
+      mode === "background" ? "1298b3d9-e131-4b4c-a1c6-54124064fd82" : null,
+    pid: 42_424,
+    startedAt: mode === "background" ? "2026-09-07T18:00:00.000Z" : null,
+    host: "127.0.0.1",
+    port: 3_000,
+    version: "0.1.8",
+    ...overrides,
   };
 }
 
@@ -188,6 +207,77 @@ describe("detached server lifecycle", () => {
       "running in externally managed foreground mode (pid: 52525)",
     );
     expect(stdout.read()).toContain("version 0.1.7");
+  });
+
+  it("probes and validates a foreground server status endpoint", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(statusPayload("foreground")), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      probeForegroundServer("http://127.0.0.1:3000/anything"),
+    ).resolves.toEqual({
+      pid: 42_424,
+      url: "http://127.0.0.1:3000/",
+      version: "0.1.8",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3000/api/server/status"),
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
+  });
+
+  it("validates internally managed identity through the status endpoint", async () => {
+    const paths = resolveServerRuntimePaths({
+      XDG_STATE_HOME: directory(),
+    });
+    await writeServerRuntimeState(paths, runtimeState());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(statusPayload("background")), {
+            status: 200,
+          }),
+        ),
+      ),
+    );
+    const stdout = writer();
+
+    await expect(
+      statusDetachedServer({
+        paths,
+        stdout: stdout.sink,
+        isProcessAlive: () => true,
+      }),
+    ).resolves.toBe(0);
+    expect(stdout.read()).toContain("running in background (pid: 42424)");
+  });
+
+  it("rejects non-foreground, invalid, failed, and unreachable probes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(statusPayload("background")), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockRejectedValueOnce(new Error("unreachable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(
+        probeForegroundServer("http://127.0.0.1:3000/"),
+      ).resolves.toBeNull();
+    }
   });
 
   it("refuses to signal an unverified live PID", async () => {

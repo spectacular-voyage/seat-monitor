@@ -122,6 +122,21 @@ describe("HTTP server", () => {
       },
     );
     expect(probe).toHaveBeenCalledTimes(32);
+
+    probe.mockClear();
+    await expect(
+      findExternallyManagedServer(
+        { ...settings, useDefaultPortFallback: false },
+        probe,
+      ),
+    ).resolves.toBeNull();
+    expect(probe).toHaveBeenCalledOnce();
+
+    probe.mockClear();
+    await expect(
+      findExternallyManagedServer({ ...settings, port: 65_535 }, probe),
+    ).resolves.toBeNull();
+    expect(probe).toHaveBeenCalledOnce();
   });
 
   it("exposes identity for detached lifecycle acknowledgement", async () => {
