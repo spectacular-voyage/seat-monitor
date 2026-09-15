@@ -95,6 +95,8 @@ describe("HTTP server", () => {
 
   it("finds an externally managed server across default fallback ports", async () => {
     const settings: ServerSettings = {
+      host: "127.0.0.1",
+      allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
       port: 3_000,
@@ -121,6 +123,23 @@ describe("HTTP server", () => {
         version: PACKAGE_VERSION,
       },
     );
+    expect(probe).toHaveBeenCalledTimes(32);
+
+    probe.mockClear();
+    await expect(
+      findExternallyManagedServer(
+        {
+          ...settings,
+          host: "0.0.0.0",
+          allowedHosts: ["192.168.1.50"],
+        },
+        probe,
+      ),
+    ).resolves.toEqual({
+      pid: 52_525,
+      url: "http://127.0.0.1:3002/",
+      version: PACKAGE_VERSION,
+    });
     expect(probe).toHaveBeenCalledTimes(32);
 
     probe.mockClear();
@@ -624,13 +643,99 @@ describe("HTTP server", () => {
     });
   });
 
-  it("refuses non-loopback listeners", async () => {
+  it("serves allowed LAN addresses and rejects other hosts and origins", async () => {
+    const scan = vi.fn(() => Promise.resolve([]));
+    const server = await buildServer({
+      assets,
+      scan,
+      host: "0.0.0.0",
+      allowedHosts: ["192.168.1.50", "Desktop.local"],
+    });
+    try {
+      for (const host of [
+        "192.168.1.50:3000",
+        "desktop.local:3000",
+        "127.0.0.1:3000",
+        "localhost:3000",
+      ]) {
+        for (const url of ["/", "/api/quota", "/api/server/status"]) {
+          const response = await server.inject({
+            url,
+            headers: {
+              host,
+              origin: `http://${host}`,
+              "sec-fetch-site": "same-origin",
+            },
+          });
+          expect(response.statusCode).toBe(200);
+        }
+      }
+      scan.mockClear();
+      for (const headers of [
+        { host: "attacker.example:3000" },
+        { host: "192.168.1.50:3001" },
+        { host: "192.168.1.50.attacker.example:3000" },
+        { host: "0.0.0.0:3000" },
+        { host: "192.168.1.50:3000", origin: "http://attacker.example" },
+        { host: "192.168.1.50:3000", origin: "https://192.168.1.50:3000" },
+        { host: "192.168.1.50:3000", origin: "http://192.168.1.50:3001" },
+        { host: "192.168.1.50:3000", origin: "http://desktop.local:3000" },
+        { host: "192.168.1.50:3000", origin: "http://user@192.168.1.50:3000" },
+        { host: "192.168.1.50:3000", origin: "http://192.168.1.50:3000/path" },
+        { host: "192.168.1.50:3000", origin: "null" },
+        { host: "192.168.1.50:3000", "sec-fetch-site": "cross-site" },
+      ]) {
+        const response = await server.inject({
+          url: "/api/quota?refresh=true",
+          headers,
+        });
+        expect(response.statusCode).toBe(403);
+      }
+      expect(scan).not.toHaveBeenCalled();
+      expect(
+        (
+          await server.inject({
+            url: "/api/quota",
+            headers: { host: "192.168.1.50:3000" },
+          })
+        ).statusCode,
+      ).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts canonical origins on HTTP's default port", async () => {
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      host: "0.0.0.0",
+      allowedHosts: ["desktop.local"],
+      port: 80,
+    });
+    try {
+      for (const host of ["desktop.local", "desktop.local:80"]) {
+        expect(
+          (
+            await server.inject({
+              url: "/",
+              headers: { host, origin: "http://desktop.local" },
+            })
+          ).statusCode,
+        ).toBe(200);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses LAN listeners without explicit allowed hosts", async () => {
     await expect(
       buildServer({
         assets,
         host: "0.0.0.0",
         scan: () => Promise.resolve([]),
       }),
-    ).rejects.toThrow("loopback");
+    ).rejects.toThrow("requires at least one allowed host");
   });
 });

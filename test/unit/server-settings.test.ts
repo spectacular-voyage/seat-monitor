@@ -29,6 +29,8 @@ describe("server settings", () => {
     const filePath = join(directory(), "missing.json");
 
     expect(readServerSettings({}, filePath)).toEqual({
+      host: "127.0.0.1",
+      allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
       port: 3_000,
@@ -72,6 +74,8 @@ describe("server settings", () => {
         filePath,
       ),
     ).toEqual({
+      host: "127.0.0.1",
+      allowedHosts: [],
       scanIntervalSeconds: 120,
       scanOnStartup: true,
       port: 4_000,
@@ -83,6 +87,63 @@ describe("server settings", () => {
       },
       dashboard: { showSpark: true },
     });
+  });
+
+  it("reads LAN settings and overrides them from the environment", () => {
+    const filePath = join(directory(), "settings.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        host: "0.0.0.0",
+        allowedHosts: ["192.168.1.50", "Desktop.local"],
+      }),
+    );
+    expect(readServerSettings({}, filePath)).toMatchObject({
+      host: "0.0.0.0",
+      allowedHosts: ["192.168.1.50", "desktop.local"],
+    });
+    expect(
+      readServerSettings(
+        {
+          SEAT_MONITOR_HOST: "127.0.0.1",
+          SEAT_MONITOR_ALLOWED_HOSTS: "192.168.1.60, Other.local",
+        },
+        filePath,
+      ),
+    ).toMatchObject({
+      host: "127.0.0.1",
+      allowedHosts: ["192.168.1.60", "other.local"],
+    });
+  });
+
+  it.each([
+    "*",
+    "*.local",
+    "http://desktop.local",
+    "desktop.local:3000",
+    "desktop.local/path",
+    "user@desktop.local",
+    "0.0.0.0",
+    "999.1.1.1",
+    "",
+    "desktop.local?x",
+    "desktop.local#x",
+  ])("rejects invalid allowed host %j", (host) => {
+    expect(() =>
+      readServerSettings(
+        { SEAT_MONITOR_HOST: "0.0.0.0", SEAT_MONITOR_ALLOWED_HOSTS: host },
+        join(directory(), "missing.json"),
+      ),
+    ).toThrow(ServerSettingsError);
+  });
+
+  it("requires allowed hosts before enabling LAN listening", () => {
+    expect(() =>
+      readServerSettings(
+        { SEAT_MONITOR_HOST: "0.0.0.0" },
+        join(directory(), "missing.json"),
+      ),
+    ).toThrow("requires at least one allowed host");
   });
 
   it("does not enable fallback for an explicitly configured default port", () => {

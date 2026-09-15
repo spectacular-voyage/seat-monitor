@@ -110,6 +110,28 @@ describe("detached server lifecycle", () => {
     }
   });
 
+  it("preserves a loopback management URL for a LAN listener", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    const state = { ...runtimeState(), host: "0.0.0.0" as const };
+    await writeServerRuntimeState(paths, state);
+    await expect(readServerRuntimeState(paths)).resolves.toEqual(state);
+    const fetchIdentity = vi.fn(() => Promise.resolve(true));
+    expect(
+      await statusDetachedServer({
+        paths,
+        stdout: writer().sink,
+        isProcessAlive: () => true,
+        fetchIdentity,
+      }),
+    ).toBe(0);
+    expect(fetchIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "0.0.0.0",
+        url: "http://127.0.0.1:3000/",
+      }),
+    );
+  });
+
   it("stops only an identity-matched live process", async () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),
@@ -212,10 +234,13 @@ describe("detached server lifecycle", () => {
   it("probes and validates a foreground server status endpoint", async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify(statusPayload("foreground")), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify(statusPayload("foreground", { host: "0.0.0.0" })),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -237,14 +262,18 @@ describe("detached server lifecycle", () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),
     });
-    await writeServerRuntimeState(paths, runtimeState());
+    await writeServerRuntimeState(paths, {
+      ...runtimeState(),
+      host: "0.0.0.0",
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
         Promise.resolve(
-          new Response(JSON.stringify(statusPayload("background")), {
-            status: 200,
-          }),
+          new Response(
+            JSON.stringify(statusPayload("background", { host: "0.0.0.0" })),
+            { status: 200 },
+          ),
         ),
       ),
     );

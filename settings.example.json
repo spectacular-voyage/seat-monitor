@@ -2,6 +2,8 @@
   "scanIntervalSeconds": 60,
   "scanOnStartup": true,
   "port": 3000,
+  "host": "127.0.0.1",
+  "allowedHosts": [],
   "history": {
     "rawRetentionHours": 6,
     "hourlyRetentionDays": 30,

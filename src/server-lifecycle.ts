@@ -6,6 +6,8 @@ import { isAbsolute, join } from "node:path";
 
 import { z } from "zod";
 
+import { serverHostSchema } from "./config/server-network.js";
+
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 const STOP_TIMEOUT_MILLISECONDS = 5_000;
 const KILL_TIMEOUT_MILLISECONDS = 1_000;
@@ -17,7 +19,7 @@ const serverRuntimeStateSchema = z
     instanceId: z.uuid(),
     pid: z.number().int().positive(),
     startedAt: z.iso.datetime({ offset: true }),
-    host: z.enum(["127.0.0.1", "localhost"]),
+    host: serverHostSchema,
     port: z.number().int().min(1).max(65_535),
     url: z.url(),
   })
@@ -29,7 +31,7 @@ const serverStatusIdentitySchema = z
     instanceId: z.uuid().nullable(),
     pid: z.number().int().positive(),
     startedAt: z.iso.datetime({ offset: true }).nullable(),
-    host: z.enum(["127.0.0.1", "localhost"]),
+    host: serverHostSchema,
     port: z.number().int().min(1).max(65_535),
     version: z.string().min(1),
   })
