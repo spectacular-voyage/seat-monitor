@@ -234,10 +234,13 @@ describe("detached server lifecycle", () => {
   it("probes and validates a foreground server status endpoint", async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify(statusPayload("foreground")), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify(statusPayload("foreground", { host: "0.0.0.0" })),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -259,14 +262,18 @@ describe("detached server lifecycle", () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),
     });
-    await writeServerRuntimeState(paths, runtimeState());
+    await writeServerRuntimeState(paths, {
+      ...runtimeState(),
+      host: "0.0.0.0",
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
         Promise.resolve(
-          new Response(JSON.stringify(statusPayload("background")), {
-            status: 200,
-          }),
+          new Response(
+            JSON.stringify(statusPayload("background", { host: "0.0.0.0" })),
+            { status: 200 },
+          ),
         ),
       ),
     );

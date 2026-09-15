@@ -31,7 +31,7 @@ const serverStatusIdentitySchema = z
     instanceId: z.uuid().nullable(),
     pid: z.number().int().positive(),
     startedAt: z.iso.datetime({ offset: true }).nullable(),
-    host: z.enum(["127.0.0.1", "localhost"]),
+    host: serverHostSchema,
     port: z.number().int().min(1).max(65_535),
     version: z.string().min(1),
   })
