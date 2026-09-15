@@ -110,6 +110,28 @@ describe("detached server lifecycle", () => {
     }
   });
 
+  it("preserves a loopback management URL for a LAN listener", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    const state = { ...runtimeState(), host: "0.0.0.0" as const };
+    await writeServerRuntimeState(paths, state);
+    await expect(readServerRuntimeState(paths)).resolves.toEqual(state);
+    const fetchIdentity = vi.fn(() => Promise.resolve(true));
+    expect(
+      await statusDetachedServer({
+        paths,
+        stdout: writer().sink,
+        isProcessAlive: () => true,
+        fetchIdentity,
+      }),
+    ).toBe(0);
+    expect(fetchIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "0.0.0.0",
+        url: "http://127.0.0.1:3000/",
+      }),
+    );
+  });
+
   it("stops only an identity-matched live process", async () => {
     const paths = resolveServerRuntimePaths({
       XDG_STATE_HOME: directory(),

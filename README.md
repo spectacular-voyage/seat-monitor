@@ -223,7 +223,7 @@ When no port is configured, the server prefers `3000` and walks upward (`3001`, 
 
 Open the loopback URL printed at startup. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an active quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; already-exhausted quotas remain visible in account detail without a persistent masthead duplicate. Only the stale-scan warning exposes a contextual **Refresh now** action. At a glance rows are ordered by the most recent observed usage increase and link to the corresponding account history. Per-account history cards stay in alphabetical order by account alias as usage changes. Per-account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Historical provider resets are solid. A future reset is dashed and anchors the graph's right edge when the selected period reaches measured history; narrower views that would otherwise begin in the future instead show the most recent measured interval ending now. Hovering over usage or throughput lines shows the corresponding local day and time on the x-axis. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. A separate Fleet throughput section uses distinct multi-account graphs for Claude Session and Codex primary consumption, followed by one total-burn graph per vendor. Total burn sums the measurable account slopes, so it is expressed in account-quota percentage points per hour and can exceed 100. Its independent controls select one day, week, 30-day month, or year; the rate line applies scale-aware moving averages of one hour, six hours, one day, or one week respectively to suppress quantization spikes. Per-account controls continue to show ½, 1, 2, 5, or 10 quota periods. Recommendation cards and diagnostic counts follow the history sections, and reported limits appear as a current/expected ratio.
 
-`GET /api/quota` remains the same runtime-validated array as CLI JSON mode. Historical data is additive:
+`GET /api/quota` retains its runtime-validated array response. CLI JSON wraps that account array in an object. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
 - `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
@@ -274,6 +274,8 @@ Environment variables override the settings file:
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
 - `SEAT_MONITOR_PORT`
+- `SEAT_MONITOR_HOST`, as `127.0.0.1` (default), `localhost`, or `0.0.0.0`
+- `SEAT_MONITOR_ALLOWED_HOSTS`, as comma-separated server IPv4 addresses or hostnames without ports
 - `SEAT_MONITOR_HISTORY_RAW_HOURS`
 - `SEAT_MONITOR_HISTORY_HOURLY_DAYS`
 - `SEAT_MONITOR_HISTORY_RETENTION_DAYS`
@@ -283,11 +285,48 @@ Set `dashboard.showSpark` to `false` when Spark limits are not relevant. This hi
 
 Omit `port` to enable automatic fallback above port 3000. Supplying `port`, even as `3000`, requests that exact port.
 
-The settings file cannot enable remote listening. `SEAT_MONITOR_HOST` remains compatibility-only and still accepts only `127.0.0.1` or `localhost`.
+### Trusted LAN access
+
+To enable IPv4 LAN access, merge these fields into your settings file, replacing the example IP and hostname with the server addresses your devices use:
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 3000,
+  "allowedHosts": ["192.168.1.50", "desktop.local"]
+}
+```
+
+Restart the server and open `http://192.168.1.50:3000` from another LAN device. Reserve the server's IP in your router if you use its address. `0.0.0.0` listens on all IPv4 interfaces; it requires a nonempty `allowedHosts` list. Entries identify the **server**, not client IPs, and cannot contain ports, schemes, paths, or wildcards. Loopback URLs remain allowed for local access and background lifecycle checks. Browser requests must use a listed Host and, when supplied, a matching HTTP Origin; cross-site requests remain blocked.
+
+For the systemd user service, you can instead run `systemctl --user edit seat-monitor` and add:
+
+```ini
+[Service]
+Environment="SEAT_MONITOR_HOST=0.0.0.0"
+Environment="SEAT_MONITOR_PORT=3000"
+Environment="SEAT_MONITOR_ALLOWED_HOSTS=192.168.1.50,desktop.local"
+```
+
+Then apply it:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart seat-monitor
+journalctl --user -u seat-monitor -n 30 --no-pager
+```
+
+LAN access has no application authentication or TLS: anyone who can reach the listener can read account aliases, quota, and history and request a refresh. The host allowlist prevents unwanted browser origins; it is not client authentication. Restrict the listening port to your trusted subnet with your firewall, and do not forward it from the internet. If UFW is already enabled, for example, allow port 3000 from your actual subnet (replace `192.168.1.0/24`):
+
+```sh
+sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp
+```
+
+These LAN settings require a build containing the LAN-access change; npm v0.1.9 remains loopback-only.
 
 The server:
 
-- binds to loopback only;
+- binds to loopback by default, with explicit trusted-LAN opt-in;
 - validates Host, Origin, and cross-site browser headers;
 - applies a restrictive Content Security Policy;
 - continues scheduled scans while the server process is running;
@@ -297,7 +336,7 @@ The server:
 
 Account checks run in parallel with a default concurrency of eight. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
 
-An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. The application itself intentionally refuses non-loopback hosts because it does not implement remote authentication or TLS.
+An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. Remote authentication and TLS are not implemented; network exposure is intended only for a trusted LAN.
 
 ## Development
 

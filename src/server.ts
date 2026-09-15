@@ -17,6 +17,7 @@ import {
   readServerSettings,
   type ServerSettings,
 } from "./config/server-settings.js";
+import { serverNetworkSchema } from "./config/server-network.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
 import { createRecordingScanner } from "./history/recording-scanner.js";
 import {
@@ -106,6 +107,7 @@ export type ServerOptions = {
   now?: () => Date;
   freshnessMilliseconds?: number;
   host?: string;
+  allowedHosts?: string[];
   port?: number;
   assets?: DashboardAssets;
   dashboardAssetLoader?: DashboardAssetLoader;
@@ -133,17 +135,12 @@ async function loadDashboardAssets(): Promise<DashboardAssets> {
   return { html, javascript, css };
 }
 
-function isAllowedAuthority(authority: string, port: number): boolean {
-  const normalized = authority.toLocaleLowerCase("en-US");
-  return (
-    normalized === `127.0.0.1:${String(port)}` ||
-    normalized === `localhost:${String(port)}`
-  );
-}
-
-function requestIsAllowed(request: FastifyRequest, port: number): boolean {
+function requestIsAllowed(
+  request: FastifyRequest,
+  authorities: Set<string>,
+): boolean {
   const authority = request.headers.host;
-  if (authority === undefined || !isAllowedAuthority(authority, port)) {
+  if (authority === undefined || !authorities.has(authority.toLowerCase())) {
     return false;
   }
 
@@ -156,7 +153,11 @@ function requestIsAllowed(request: FastifyRequest, port: number): boolean {
     return true;
   }
   try {
-    return isAllowedAuthority(new URL(origin).host, port);
+    const parsed = new URL(origin);
+    return (
+      parsed.origin === origin &&
+      parsed.origin === new URL(`http://${authority}`).origin
+    );
   } catch {
     return false;
   }
@@ -191,14 +192,19 @@ function historyRange(options: {
 export async function buildServer(
   options: ServerOptions = {},
 ): Promise<FastifyInstance> {
-  const host = options.host ?? DEFAULT_HOST;
+  const network = serverNetworkSchema.parse({
+    host: options.host ?? DEFAULT_HOST,
+    allowedHosts: options.allowedHosts ?? [],
+  });
   const port = options.port ?? DEFAULT_PORT;
-  if (host !== "127.0.0.1" && host !== "localhost") {
-    throw new TypeError("Version 1 only supports a loopback listener.");
-  }
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new TypeError("Server port must be an integer from 1 to 65535.");
   }
+  const authorities = new Set(
+    ["127.0.0.1", "localhost", ...network.allowedHosts].flatMap((host) =>
+      port === 80 ? [host, `${host}:80`] : [`${host}:${String(port)}`],
+    ),
+  );
 
   const now = options.now ?? (() => new Date());
   const baseScan = options.scan ?? createDefaultScanner();
@@ -242,7 +248,7 @@ export async function buildServer(
     );
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
-    if (!requestIsAllowed(request, port)) {
+    if (!requestIsAllowed(request, authorities)) {
       return sendForbidden(reply);
     }
   });
@@ -317,7 +323,7 @@ export async function buildServer(
       instanceId: options.lifecycle?.instanceId ?? null,
       pid: process.pid,
       startedAt: options.lifecycle?.startedAt ?? null,
-      host,
+      host: network.host,
       port,
       version: PACKAGE_VERSION,
     };
@@ -447,18 +453,6 @@ export async function buildServer(
   return server;
 }
 
-function readServerConfiguration(settings: ServerSettings): {
-  host: "127.0.0.1" | "localhost";
-  port: number;
-} {
-  const configuredHost = process.env.SEAT_MONITOR_HOST ?? DEFAULT_HOST;
-  if (configuredHost !== "127.0.0.1" && configuredHost !== "localhost") {
-    throw new TypeError("Version 1 only supports a loopback listener.");
-  }
-  const host = configuredHost;
-  return { host, port: settings.port };
-}
-
 type PortAvailabilityProbe = (host: string, port: number) => Promise<boolean>;
 
 const portIsAvailable: PortAvailabilityProbe = (host, port) =>
@@ -504,7 +498,10 @@ export async function findExternallyManagedServer(
     url: string,
   ) => Promise<ExternalServerIdentity | null> = probeForegroundServer,
 ): Promise<ExternalServerIdentity | null> {
-  const configuration = readServerConfiguration(settings);
+  const configuration = {
+    host: settings.host === "0.0.0.0" ? "127.0.0.1" : settings.host,
+    port: settings.port,
+  };
   const candidateCount = settings.useDefaultPortFallback
     ? Math.min(STATUS_FALLBACK_PORT_COUNT, 65_536 - configuration.port)
     : 1;
@@ -520,12 +517,14 @@ export async function findExternallyManagedServer(
 
 async function runForegroundServer(instanceId?: string): Promise<void> {
   const settings = readServerSettings();
-  const configuration = readServerConfiguration(settings);
+  const configuration = { host: settings.host, port: settings.port };
   const port = await findServerPort({
     ...configuration,
     useDefaultFallback: settings.useDefaultPortFallback,
   });
   const selectedConfiguration = { ...configuration, port };
+  const localHost = settings.host === "0.0.0.0" ? "127.0.0.1" : settings.host;
+  const localUrl = `http://${localHost}:${String(port)}/`;
   if (port !== configuration.port) {
     process.stderr.write(
       `Seat Monitor default port ${String(configuration.port)} is busy; using ${String(port)}.\n`,
@@ -534,6 +533,7 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
   const startedAt = new Date().toISOString();
   const server = await buildServer({
     ...selectedConfiguration,
+    allowedHosts: settings.allowedHosts,
     reloadDashboardAssets: import.meta.url.endsWith("/server.ts"),
     history: createDefaultHistoryService(
       process.env,
@@ -582,16 +582,19 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
         startedAt,
         host: selectedConfiguration.host,
         port: selectedConfiguration.port,
-        url: `http://${selectedConfiguration.host}:${String(selectedConfiguration.port)}/`,
+        url: localUrl,
       });
     }
   } catch (error) {
     await shutdown();
     throw error;
   }
-  process.stderr.write(
-    `Seat Monitor listening on http://${selectedConfiguration.host}:${String(selectedConfiguration.port)}\n`,
-  );
+  process.stderr.write(`Seat Monitor listening on ${localUrl}\n`);
+  if (settings.host === "0.0.0.0") {
+    process.stderr.write(
+      `Trusted LAN access: ${settings.allowedHosts.map((host) => `http://${host}:${String(port)}/`).join(", ")}\n`,
+    );
+  }
 }
 
 export type ServerCliDependencies = {

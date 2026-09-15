@@ -4,6 +4,12 @@ import { isAbsolute, join } from "node:path";
 
 import { z } from "zod";
 
+import {
+  allowedHostSchema,
+  serverHostSchema,
+  serverNetworkSchema,
+} from "./server-network.js";
+
 export const DEFAULT_SCAN_INTERVAL_SECONDS = 60;
 export const MINIMUM_SCAN_INTERVAL_SECONDS = 30;
 export const MAXIMUM_SCAN_INTERVAL_SECONDS = 3_600;
@@ -22,6 +28,8 @@ const settingsFileSchema = z
       .optional(),
     scanOnStartup: z.boolean().optional(),
     port: z.number().int().min(1).max(65_535).optional(),
+    host: serverHostSchema.optional(),
+    allowedHosts: z.array(allowedHostSchema).optional(),
     history: z
       .object({
         rawRetentionHours: retentionHoursSchema.optional(),
@@ -42,6 +50,8 @@ const settingsFileSchema = z
   .strict();
 
 export type ServerSettings = {
+  host: z.infer<typeof serverHostSchema>;
+  allowedHosts: string[];
   scanIntervalSeconds: number;
   scanOnStartup: boolean;
   port: number;
@@ -161,6 +171,20 @@ export function readServerSettings(
     throw new ServerSettingsError("The server settings path must be absolute.");
   }
   const file = readSettingsFile(filePath);
+  const network = serverNetworkSchema.safeParse({
+    host: environment.SEAT_MONITOR_HOST ?? file.host ?? "127.0.0.1",
+    allowedHosts:
+      environment.SEAT_MONITOR_ALLOWED_HOSTS === undefined
+        ? (file.allowedHosts ?? [])
+        : environment.SEAT_MONITOR_ALLOWED_HOSTS.split(",").map((host) =>
+            host.trim(),
+          ),
+  });
+  if (!network.success) {
+    throw new ServerSettingsError(
+      network.error.issues.map((issue) => issue.message).join(" "),
+    );
+  }
   const legacyRawDays = environment.SEAT_MONITOR_HISTORY_RAW_DAYS;
   const configuredRawHours = environment.SEAT_MONITOR_HISTORY_RAW_HOURS;
   const rawRetentionHours =
@@ -210,6 +234,7 @@ export function readServerSettings(
   }
 
   return {
+    ...network.data,
     scanIntervalSeconds: integerEnvironment(
       environment.SEAT_MONITOR_SCAN_INTERVAL_SECONDS,
       file.scanIntervalSeconds ?? DEFAULT_SCAN_INTERVAL_SECONDS,
