@@ -1411,8 +1411,9 @@ function renderRecommendations(recommendations) {
     strategyContent(
       fableStrategy,
       "Fable work",
-      "Not available",
-      "No account reports a usable Fable sub-cap.",
+      "No viable account",
+      "No account has positive headroom across session, shared weekly, and Fable capacity.",
+      "warning-text",
     );
   } else {
     const reason = {

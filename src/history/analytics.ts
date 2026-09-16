@@ -845,6 +845,9 @@ function fableRecommendation(
     const effectiveHeadroomPercent = Math.min(
       ...constraints.map((limit) => limit.headroomPercent ?? 0),
     );
+    if (effectiveHeadroomPercent === 0) {
+      return [];
+    }
     const projectedExhaustions = constraints
       .filter(
         (limit) =>
