@@ -323,7 +323,7 @@ LAN access has no application authentication or TLS: anyone who can reach the li
 sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp
 ```
 
-These LAN settings require a build containing the LAN-access change; npm v0.1.9 remains loopback-only.
+These LAN settings require v0.1.10 or later; npm v0.1.9 remains loopback-only.
 
 The server:
 
