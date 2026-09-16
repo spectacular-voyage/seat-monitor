@@ -8,6 +8,7 @@ import type { Platform } from "../domain/quota.js";
 
 const accountAliasSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.@+-]*$/);
 const credentialEnvironmentSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/);
+const emailSchema = z.email();
 const profileNameSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
 
 const commonShape = {
@@ -36,6 +37,7 @@ const claudeProfileDefinitionSchema = z
       .object({
         type: z.literal("claude_profile"),
         profile: profileNameSchema,
+        expectedEmail: emailSchema,
       })
       .strict(),
   })
@@ -101,6 +103,7 @@ export type LoadedClaudeProfileAccount = LoadedAccountBase & {
   auth: {
     type: "claude_profile";
     profile: string;
+    expectedEmail: string;
     claudeConfigDir: string;
   };
 };
@@ -279,6 +282,7 @@ export function loadAccounts(
         auth: {
           type: "claude_profile",
           profile: definition.auth.profile,
+          expectedEmail: definition.auth.expectedEmail,
           claudeConfigDir: join(claudeProfilesRoot, definition.auth.profile),
         },
       };

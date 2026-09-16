@@ -5,7 +5,8 @@
       "platform": "Claude",
       "auth": {
         "type": "claude_profile",
-        "profile": "claude-personal"
+        "profile": "claude-personal",
+        "expectedEmail": "personal@example.com"
       }
     },
     {

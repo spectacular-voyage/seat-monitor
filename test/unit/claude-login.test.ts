@@ -17,7 +17,12 @@ describe("loginClaudeProfile", () => {
     const account: LoadedClaudeProfileAccount = {
       accountAlias: "claude-personal@example.com",
       platform: "Claude",
-      auth: { type: "claude_profile", profile: "personal", claudeConfigDir },
+      auth: {
+        type: "claude_profile",
+        profile: "personal",
+        expectedEmail: "personal@example.com",
+        claudeConfigDir,
+      },
     };
     let receivedArgs: readonly string[] = [];
     let receivedEnvironment: NodeJS.ProcessEnv | undefined;

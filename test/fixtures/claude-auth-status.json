@@ -2,5 +2,6 @@
   "loggedIn": true,
   "authMethod": "oauth_token",
   "apiProvider": "firstParty",
+  "email": "profile@example.com",
   "subscriptionType": "max"
 }

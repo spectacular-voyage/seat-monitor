@@ -1,5 +1,9 @@
+import {
+  LONGEST_QUOTA_PERIOD_MINUTES,
+  compareFleetAccountsByWeeklyReset,
+} from "./capacity-order.js";
+
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const ACCOUNT_SERIES_COLOR_COUNT = 8;
 const VENDOR_RATE_COLOR_CLASSES = {
@@ -1301,7 +1305,7 @@ function renderFleetCapacity(accounts) {
     );
     return;
   }
-  for (const account of accounts) {
+  for (const account of [...accounts].sort(compareFleetAccountsByWeeklyReset)) {
     fleetCapacity.append(createFleetAccount(account));
   }
 }
@@ -1411,8 +1415,9 @@ function renderRecommendations(recommendations) {
     strategyContent(
       fableStrategy,
       "Fable work",
-      "Not available",
-      "No account reports a usable Fable sub-cap.",
+      "No viable account",
+      "No account has positive headroom across session, shared weekly, and Fable capacity.",
+      "warning-text",
     );
   } else {
     const reason = {

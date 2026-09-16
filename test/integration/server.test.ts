@@ -24,6 +24,7 @@ import { PACKAGE_VERSION } from "../../src/version.js";
 const assets = {
   html: "<!doctype html><title>Test</title>",
   javascript: "void 0;",
+  capacityOrder: "export const order = 1;",
   css: "body {}",
 };
 
@@ -194,6 +195,7 @@ describe("HTTP server", () => {
     let currentAssets = {
       html: "<!doctype html><title>Version 1</title>",
       javascript: "window.version = 1;",
+      capacityOrder: "export const version = 1;",
       css: "body { --version: 1; }",
     };
     const dashboardAssetLoader = vi.fn(() => Promise.resolve(currentAssets));
@@ -204,17 +206,18 @@ describe("HTTP server", () => {
     });
 
     const first = await Promise.all(
-      ["/", "/app.js", "/styles.css"].map((url) =>
+      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
     currentAssets = {
       html: "<!doctype html><title>Version 2</title>",
       javascript: "window.version = 2;",
+      capacityOrder: "export const version = 2;",
       css: "body { --version: 2; }",
     };
     const second = await Promise.all(
-      ["/", "/app.js", "/styles.css"].map((url) =>
+      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -223,11 +226,13 @@ describe("HTTP server", () => {
     expect(first.map((response) => response.body)).toEqual([
       "<!doctype html><title>Version 1</title>",
       "window.version = 1;",
+      "export const version = 1;",
       "body { --version: 1; }",
     ]);
     expect(second.map((response) => response.body)).toEqual([
       "<!doctype html><title>Version 2</title>",
       "window.version = 2;",
+      "export const version = 2;",
       "body { --version: 2; }",
     ]);
     expect(
@@ -235,7 +240,7 @@ describe("HTTP server", () => {
         (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
-    expect(dashboardAssetLoader).toHaveBeenCalledTimes(6);
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(8);
   });
 
   it("keeps supplied packaged dashboard assets cached", async () => {
@@ -245,7 +250,7 @@ describe("HTTP server", () => {
     });
 
     const responses = await Promise.all(
-      ["/", "/app.js", "/styles.css"].map((url) =>
+      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -254,6 +259,7 @@ describe("HTTP server", () => {
     expect(responses.map((response) => response.body)).toEqual([
       assets.html,
       assets.javascript,
+      assets.capacityOrder,
       assets.css,
     ]);
     expect(

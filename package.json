@@ -1,6 +1,6 @@
 {
   "name": "seat-monitor",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "type": "module",
   "description": "Multi-account Claude and Codex quota monitor",
   "license": "Apache-2.0",

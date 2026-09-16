@@ -10,6 +10,10 @@ const javascript = readFileSync(
   new URL("../../src/public/app.js", import.meta.url),
   "utf8",
 );
+const capacityOrderJavascript = readFileSync(
+  new URL("../../src/public/capacity-order.js", import.meta.url),
+  "utf8",
+);
 const css = readFileSync(
   new URL("../../src/public/styles.css", import.meta.url),
   "utf8",
@@ -72,6 +76,16 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("reported limits out of");
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
+    expect(javascript).toContain(
+      'compareFleetAccountsByWeeklyReset,\n} from "./capacity-order.js"',
+    );
+    expect(javascript).toContain(
+      "[...accounts].sort(compareFleetAccountsByWeeklyReset)",
+    );
+    expect(capacityOrderJavascript).toContain(
+      "limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES",
+    );
+    expect(capacityOrderJavascript).toContain("Number.POSITIVE_INFINITY");
     expect(javascript).toContain("showReset: false");
     expect(capacityLimitSource).not.toContain("weekly reset");
     expect(javascript).toContain('"expected reset in "');

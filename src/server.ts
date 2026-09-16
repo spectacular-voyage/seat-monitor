@@ -97,6 +97,7 @@ const historyAnalyticsQuerySchema = z
 type DashboardAssets = {
   html: string;
   javascript: string;
+  capacityOrder: string;
   css: string;
 };
 
@@ -127,12 +128,13 @@ export type ServerOptions = {
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
-  const [html, javascript, css] = await Promise.all([
+  const [html, javascript, capacityOrder, css] = await Promise.all([
     readFile(new URL("./public/index.html", import.meta.url), "utf8"),
     readFile(new URL("./public/app.js", import.meta.url), "utf8"),
+    readFile(new URL("./public/capacity-order.js", import.meta.url), "utf8"),
     readFile(new URL("./public/styles.css", import.meta.url), "utf8"),
   ]);
-  return { html, javascript, css };
+  return { html, javascript, capacityOrder, css };
 }
 
 function requestIsAllowed(
@@ -308,6 +310,15 @@ export async function buildServer(
     return reply
       .type("text/javascript; charset=utf-8")
       .send(currentAssets.javascript);
+  });
+  server.get("/capacity-order.js", async (_request, reply) => {
+    const currentAssets = await readDashboardAssets();
+    if (options.reloadDashboardAssets === true) {
+      reply.header("Cache-Control", "no-store");
+    }
+    return reply
+      .type("text/javascript; charset=utf-8")
+      .send(currentAssets.capacityOrder);
   });
   server.get("/styles.css", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();

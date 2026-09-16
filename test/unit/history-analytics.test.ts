@@ -504,6 +504,55 @@ describe("historical quota analytics", () => {
     );
   });
 
+  it("does not recommend an account with zero effective Fable headroom", () => {
+    const exhausted = claudeSnapshot({
+      alias: "claude-exhausted@example.com",
+      fableUsed: 100,
+      sessionRemainingMinutes: 10,
+      weeklyRemainingMinutes: 10,
+    });
+    const limited = claudeSnapshot({
+      alias: "claude-limited@example.com",
+      fableUsed: 90,
+      sessionRemainingMinutes: 300,
+      weeklyRemainingMinutes: 300,
+    });
+    const result = buildHistoryAnalytics({
+      snapshots: [exhausted, limited],
+      series: [],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(result.recommendations.fable).toEqual(
+      expect.objectContaining({
+        accountAlias: "claude-limited@example.com",
+        action: "conserve",
+        effectiveHeadroomPercent: 10,
+        reason: "limited_headroom",
+      }),
+    );
+  });
+
+  it("withholds a Fable recommendation when every account is exhausted", () => {
+    const result = buildHistoryAnalytics({
+      snapshots: [claudeSnapshot({ fableUsed: 100 })],
+      series: [],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+
+    expect(result.recommendations.fable).toBeNull();
+  });
+
   it("does not invent a Fable recommendation for unsupported capacity", () => {
     const current = claudeSnapshot();
     if (current.status !== "ok") {

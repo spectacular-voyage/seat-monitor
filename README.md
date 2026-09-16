@@ -55,7 +55,7 @@ npm ci
 
 ## Configure accounts
 
-`seat-monitor --init-config` creates `~/.config/seat-monitor/accounts.json` with mode `0600`. Edit it with the accounts you want to scan and give each account a unique profile name:
+`seat-monitor --init-config` creates `~/.config/seat-monitor/accounts.json` with mode `0600`. Edit it with the accounts you want to scan, give each account a unique profile name, and pin each Claude profile to its expected authenticated email:
 
 ```json
 {
@@ -65,7 +65,8 @@ npm ci
       "platform": "Claude",
       "auth": {
         "type": "claude_profile",
-        "profile": "claude-personal"
+        "profile": "claude-personal",
+        "expectedEmail": "personal@example.com"
       }
     },
     {
@@ -96,7 +97,7 @@ Log into each account once, confirming the intended Claude identity in the brows
 seat-monitor-claude-login 'claude-personal@example.com'
 ```
 
-The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location.
+The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location. Every Claude profile requires `expectedEmail`; scans fail with `identity_mismatch` before reading quota if `/login` has reseated the profile as another account.
 
 The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. On hosts with an enterprise `managed-mcp.json`, the monitor omits strict mode because Claude Code requires that managed policy to remain authoritative. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
@@ -322,7 +323,7 @@ LAN access has no application authentication or TLS: anyone who can reach the li
 sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp
 ```
 
-These LAN settings require a build containing the LAN-access change; npm v0.1.9 remains loopback-only.
+These LAN settings require v0.2.0 or later; npm v0.1.9 remains loopback-only.
 
 The server:
 
