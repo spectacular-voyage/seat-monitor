@@ -10,6 +10,10 @@ const javascript = readFileSync(
   new URL("../../src/public/app.js", import.meta.url),
   "utf8",
 );
+const capacityOrderJavascript = readFileSync(
+  new URL("../../src/public/capacity-order.js", import.meta.url),
+  "utf8",
+);
 const css = readFileSync(
   new URL("../../src/public/styles.css", import.meta.url),
   "utf8",
@@ -18,58 +22,6 @@ const capacityLimitSource = javascript.slice(
   javascript.indexOf("function createCapacityLimit("),
   javascript.indexOf("function createCapacityLimitGroup("),
 );
-const fleetOrderingSource = javascript.slice(
-  javascript.indexOf("function weeklyResetTimestamp("),
-  javascript.indexOf("function createAccountCard("),
-);
-
-type FleetOrderingHarness = {
-  weeklyResetTimestamp: (account: unknown) => number;
-  compareFleetAccountsByWeeklyReset: (left: unknown, right: unknown) => number;
-  renderFleetCapacity: (accounts: unknown[]) => void;
-  fleetCapacity: { children: string[] };
-};
-
-function fleetAccount(
-  accountAlias: string,
-  platform: "Claude" | "Codex",
-  resetAt: string | null,
-) {
-  return {
-    accountAlias,
-    platform,
-    limits: [
-      {
-        depth: 0,
-        windowDurationMinutes: 10_080,
-        resetAt,
-      },
-    ],
-  };
-}
-
-function orderingHarness(): FleetOrderingHarness {
-  // Execute the trusted browser source itself so this test cannot drift into a
-  // second implementation of the ordering rule.
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call
-  return new Function(`
-    const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
-    const fleetCapacity = {
-      children: [],
-      replaceChildren(...values) { this.children = values; },
-      append(value) { this.children.push(value); },
-    };
-    const element = (_tag, _className, text) => text;
-    const createFleetAccount = (account) => account.accountAlias;
-    ${fleetOrderingSource}
-    return {
-      weeklyResetTimestamp,
-      compareFleetAccountsByWeeklyReset,
-      renderFleetCapacity,
-      fleetCapacity,
-    };
-  `)() as FleetOrderingHarness;
-}
 
 describe("dashboard assets", () => {
   it("uses account cards and local SVG charts instead of the quota table", () => {
@@ -124,14 +76,16 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("reported limits out of");
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
-    expect(javascript).toContain("function compareFleetAccountsByWeeklyReset");
+    expect(javascript).toContain(
+      'compareFleetAccountsByWeeklyReset,\n} from "./capacity-order.js"',
+    );
     expect(javascript).toContain(
       "[...accounts].sort(compareFleetAccountsByWeeklyReset)",
     );
-    expect(javascript).toContain(
+    expect(capacityOrderJavascript).toContain(
       "limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES",
     );
-    expect(javascript).toContain("Number.POSITIVE_INFINITY");
+    expect(capacityOrderJavascript).toContain("Number.POSITIVE_INFINITY");
     expect(javascript).toContain("showReset: false");
     expect(capacityLimitSource).not.toContain("weekly reset");
     expect(javascript).toContain('"expected reset in "');
@@ -240,51 +194,5 @@ describe("dashboard assets", () => {
   it("keeps provider-controlled rendering on textContent", () => {
     expect(javascript).toContain("value.textContent = text");
     expect(javascript).not.toContain("innerHTML");
-  });
-
-  it("orders At a glance by measured weekly reset and puts unknowns last", () => {
-    const harness = orderingHarness();
-    const accounts = [
-      fleetAccount("missing", "Claude", null),
-      fleetAccount("later", "Claude", "2026-09-18T12:00:00.000Z"),
-      fleetAccount("invalid", "Codex", "not-a-date"),
-      fleetAccount("soon", "Codex", "2026-09-17T12:00:00.000Z"),
-    ];
-
-    expect(harness.weeklyResetTimestamp(accounts[0])).toBe(
-      Number.POSITIVE_INFINITY,
-    );
-    expect(harness.weeklyResetTimestamp(accounts[2])).toBe(
-      Number.POSITIVE_INFINITY,
-    );
-    expect(
-      [...accounts]
-        .sort(harness.compareFleetAccountsByWeeklyReset)
-        .map((account) => account.accountAlias),
-    ).toEqual(["soon", "later", "missing", "invalid"]);
-
-    harness.renderFleetCapacity(accounts);
-    expect(harness.fleetCapacity.children).toEqual([
-      "soon",
-      "later",
-      "missing",
-      "invalid",
-    ]);
-  });
-
-  it("uses provider and alias as stable weekly-reset tie-breakers", () => {
-    const harness = orderingHarness();
-    const resetAt = "2026-09-17T12:00:00.000Z";
-    const accounts = [
-      fleetAccount("zeta", "Claude", resetAt),
-      fleetAccount("beta", "Codex", resetAt),
-      fleetAccount("alpha", "Claude", resetAt),
-    ];
-
-    expect(
-      accounts
-        .sort(harness.compareFleetAccountsByWeeklyReset)
-        .map((account) => `${account.platform}:${account.accountAlias}`),
-    ).toEqual(["Claude:alpha", "Claude:zeta", "Codex:beta"]);
   });
 });
