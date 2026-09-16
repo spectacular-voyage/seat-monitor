@@ -72,6 +72,14 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("reported limits out of");
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
+    expect(javascript).toContain("function compareFleetAccountsByWeeklyReset");
+    expect(javascript).toContain(
+      "[...accounts].sort(compareFleetAccountsByWeeklyReset)",
+    );
+    expect(javascript).toContain(
+      "limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES",
+    );
+    expect(javascript).toContain("Number.POSITIVE_INFINITY");
     expect(javascript).toContain("showReset: false");
     expect(capacityLimitSource).not.toContain("weekly reset");
     expect(javascript).toContain('"expected reset in "');

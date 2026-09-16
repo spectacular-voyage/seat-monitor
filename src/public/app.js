@@ -1293,6 +1293,31 @@ function createFleetAccount(account) {
   return item;
 }
 
+function weeklyResetTimestamp(account) {
+  const weeklyLimit = account.limits.find(
+    (limit) =>
+      limit.depth === 0 &&
+      limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES,
+  );
+  if (weeklyLimit?.resetAt === null || weeklyLimit?.resetAt === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const timestamp = Date.parse(weeklyLimit.resetAt);
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+}
+
+function compareFleetAccountsByWeeklyReset(left, right) {
+  const leftReset = weeklyResetTimestamp(left);
+  const rightReset = weeklyResetTimestamp(right);
+  if (leftReset !== rightReset) {
+    return leftReset - rightReset;
+  }
+  return (
+    left.platform.localeCompare(right.platform) ||
+    left.accountAlias.localeCompare(right.accountAlias)
+  );
+}
+
 function renderFleetCapacity(accounts) {
   fleetCapacity.replaceChildren();
   if (accounts.length === 0) {
@@ -1301,7 +1326,7 @@ function renderFleetCapacity(accounts) {
     );
     return;
   }
-  for (const account of accounts) {
+  for (const account of [...accounts].sort(compareFleetAccountsByWeeklyReset)) {
     fleetCapacity.append(createFleetAccount(account));
   }
 }
