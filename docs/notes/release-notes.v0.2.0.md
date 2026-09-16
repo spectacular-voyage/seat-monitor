@@ -1,12 +1,12 @@
 ---
-id: sm-release-notes-v0-1-10
-title: Release Notes v0.1.10
+id: sm-release-notes-v0-2-0
+title: Release Notes v0.2.0
 desc: Trusted LAN access, Claude identity pinning, and weekly-reset ordering
 updated: 1789581299000
 created: 1789581299000
 ---
 
-# Seat Monitor v0.1.10
+# Seat Monitor v0.2.0
 
 This release adds opt-in trusted-LAN access, pins Claude profiles to their expected authenticated identities, and makes weekly reset timing the primary At a glance ordering.
 
@@ -23,9 +23,12 @@ This release adds opt-in trusted-LAN access, pins Claude profiles to their expec
 
 - An account with zero effective Fable headroom is no longer recommended for Fable work. The dashboard reports that no viable account has positive headroom across the shared constraints.
 
-## Compatibility
+## Breaking configuration change
 
 - Existing Claude profile entries must add `auth.expectedEmail` before upgrading. `accounts.example.json` and the README show the required field.
+
+## Compatibility
+
 - LAN listening is opt-in. Existing settings retain loopback-only behavior, and no database migration is required.
 - CLI and HTTP response shapes are unchanged. `identity_mismatch` is added to the existing quota error-code vocabulary.
 
@@ -34,11 +37,11 @@ This release adds opt-in trusted-LAN access, pins Claude profiles to their expec
 With npm:
 
 ```sh
-npm install --global seat-monitor@0.1.10
+npm install --global seat-monitor@0.2.0
 ```
 
 With pnpm:
 
 ```sh
-pnpm add --global seat-monitor@0.1.10
+pnpm add --global seat-monitor@0.2.0
 ```
