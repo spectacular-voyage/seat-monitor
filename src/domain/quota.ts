@@ -32,6 +32,7 @@ export const quotaLimitSchema = z
 export const quotaErrorCodeSchema = z.enum([
   "missing_credential",
   "unauthorized",
+  "identity_mismatch",
   "forbidden",
   "rate_limited",
   "timeout",

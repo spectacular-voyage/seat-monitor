@@ -130,6 +130,7 @@ describe("Claude provider", () => {
       auth: {
         type: "claude_profile",
         profile: "profile",
+        expectedEmail: "profile@example.com",
         claudeConfigDir: "/profiles/profile",
       },
     };
@@ -182,6 +183,90 @@ describe("Claude provider", () => {
     ]);
   });
 
+  it("rejects a reseated Claude profile before reading quota", async () => {
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-expected@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "expected",
+        expectedEmail: "expected@example.com",
+        claudeConfigDir: "/profiles/expected",
+      },
+    };
+    const argumentLists: string[][] = [];
+    const provider = createClaudeProvider({
+      profileIsReady: () => Promise.resolve(true),
+      run: (options) => {
+        argumentLists.push([...options.args]);
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            loggedIn: true,
+            email: "other@example.com",
+            subscriptionType: "max",
+          }),
+          stderr: "",
+        });
+      },
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-09-16T18:00:00.000Z"),
+      timeoutMilliseconds: 16_000,
+    });
+
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        status: "error",
+        error: {
+          code: "identity_mismatch",
+          message:
+            "Claude profile expected is authenticated as other@example.com, expected expected@example.com. Run: seat-monitor-claude-login 'claude-expected@example.com'",
+        },
+      }),
+    );
+    expect(argumentLists).toEqual([["auth", "status", "--json"]]);
+  });
+
+  it("requires Claude to report an email for a pinned profile", async () => {
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-profile@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "profile",
+        expectedEmail: "profile@example.com",
+        claudeConfigDir: "/profiles/profile",
+      },
+    };
+    const provider = createClaudeProvider({
+      profileIsReady: () => Promise.resolve(true),
+      run: () =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: JSON.stringify({ loggedIn: true, subscriptionType: "max" }),
+          stderr: "",
+        }),
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-09-16T18:00:00.000Z"),
+      timeoutMilliseconds: 16_000,
+    });
+
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        status: "error",
+        error: {
+          code: "invalid_response",
+          message:
+            "Claude CLI did not report an authenticated email for identity verification.",
+        },
+      }),
+    );
+  });
+
   it("preserves an enterprise-managed MCP configuration", async () => {
     const authFixture = await readFile(
       new URL("../fixtures/claude-auth-status.json", import.meta.url),
@@ -197,6 +282,7 @@ describe("Claude provider", () => {
       auth: {
         type: "claude_profile",
         profile: "enterprise",
+        expectedEmail: "profile@example.com",
         claudeConfigDir: "/profiles/enterprise",
       },
     };
@@ -233,6 +319,7 @@ describe("Claude provider", () => {
       auth: {
         type: "claude_profile",
         profile: "profile",
+        expectedEmail: "profile@example.com",
         claudeConfigDir: "/missing/profile",
       },
     };

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  accountDefinitionSchema,
   AccountConfigurationError,
   defaultAccountsConfigPath,
   loadAccounts,
@@ -23,7 +24,11 @@ describe("account configuration file", () => {
           {
             accountAlias: "claude-user@example.com",
             platform: "Claude",
-            auth: { type: "claude_profile", profile: "claude-user" },
+            auth: {
+              type: "claude_profile",
+              profile: "claude-user",
+              expectedEmail: "user@example.com",
+            },
           },
         ],
       }),
@@ -34,6 +39,11 @@ describe("account configuration file", () => {
         expect.objectContaining({
           accountAlias: "claude-user@example.com",
           enabled: true,
+          auth: {
+            type: "claude_profile",
+            profile: "claude-user",
+            expectedEmail: "user@example.com",
+          },
         }),
       ]);
     } finally {
@@ -132,7 +142,11 @@ describe("loadAccounts", () => {
       {
         accountAlias: "claude-user@example.com",
         platform: "Claude",
-        auth: { type: "claude_profile", profile: "user-example" },
+        auth: {
+          type: "claude_profile",
+          profile: "user-example",
+          expectedEmail: "user@example.com",
+        },
       },
     ];
 
@@ -143,6 +157,7 @@ describe("loadAccounts", () => {
         auth: {
           type: "claude_profile",
           profile: "user-example",
+          expectedEmail: "user@example.com",
           claudeConfigDir: "/claude/user-example",
         },
       },
@@ -258,6 +273,27 @@ describe("loadAccounts", () => {
     ).toThrow(AccountConfigurationError);
   });
 
+  it("requires a valid expected email for Claude profiles", () => {
+    expect(
+      accountDefinitionSchema.safeParse({
+        accountAlias: "Claude",
+        platform: "Claude",
+        auth: { type: "claude_profile", profile: "personal" },
+      }).success,
+    ).toBe(false);
+    expect(
+      accountDefinitionSchema.safeParse({
+        accountAlias: "Claude",
+        platform: "Claude",
+        auth: {
+          type: "claude_profile",
+          profile: "personal",
+          expectedEmail: "not-an-email",
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects relative profile roots", () => {
     expect(() =>
       loadAccounts(
@@ -281,7 +317,11 @@ describe("loadAccounts", () => {
           {
             accountAlias: "Claude",
             platform: "Claude",
-            auth: { type: "claude_profile", profile: "personal" },
+            auth: {
+              type: "claude_profile",
+              profile: "personal",
+              expectedEmail: "user@example.com",
+            },
           },
         ],
         {},

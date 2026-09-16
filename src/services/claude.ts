@@ -19,6 +19,7 @@ import type { QuotaProvider } from "./provider.js";
 
 const claudeAuthStatusSchema = z.looseObject({
   loggedIn: z.boolean(),
+  email: z.email().optional(),
   subscriptionType: z.string().min(1).nullable().optional(),
 });
 
@@ -188,6 +189,28 @@ export function createClaudeProvider(
             "Claude account is not authenticated.",
             context.now().toISOString(),
           );
+        }
+
+        if (account.auth.type === "claude_profile") {
+          if (authStatus.email === undefined) {
+            return createFailureSnapshot(
+              account,
+              "invalid_response",
+              "Claude CLI did not report an authenticated email for identity verification.",
+              context.now().toISOString(),
+            );
+          }
+          if (
+            authStatus.email.toLocaleLowerCase("en-US") !==
+            account.auth.expectedEmail.toLocaleLowerCase("en-US")
+          ) {
+            return createFailureSnapshot(
+              account,
+              "identity_mismatch",
+              `Claude profile ${account.auth.profile} is authenticated as ${authStatus.email}, expected ${account.auth.expectedEmail}. Run: seat-monitor-claude-login '${account.accountAlias}'`,
+              context.now().toISOString(),
+            );
+          }
         }
 
         let limits = unsupportedClaudeLimits;
