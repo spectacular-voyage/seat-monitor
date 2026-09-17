@@ -177,7 +177,7 @@ function median(values: readonly number[]): number {
 }
 
 function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
-  const measured = points
+  let measured = points
     .filter((point): point is MeasuredPoint => point.usedPercent !== null)
     .sort(
       (left, right) =>
@@ -189,7 +189,7 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
   }
   if (latest.resetAt !== null) {
     const latestReset = Date.parse(latest.resetAt);
-    return measured.filter(
+    measured = measured.filter(
       (point) =>
         point.resetAt !== null &&
         Math.abs(Date.parse(point.resetAt) - latestReset) <=
@@ -289,7 +289,8 @@ export function projectExhaustion(
   const epoch = latestEpoch(points);
   const monotonicEpoch = monotonicUsage(epoch);
   const first = monotonicEpoch[0];
-  const latest = monotonicEpoch.at(-1);
+  // Smoothing estimates the rate; current headroom must use the actual reading.
+  const latest = epoch.at(-1);
   if (first === undefined || latest === undefined) {
     return {
       status: "insufficient_history",

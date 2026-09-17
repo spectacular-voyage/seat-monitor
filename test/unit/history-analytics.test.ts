@@ -168,13 +168,55 @@ describe("historical quota analytics", () => {
     );
 
     expect(result.status).toBe("exhausts_before_reset");
-    expect(result.projectedFromUsedPercent).toBe(96);
+    expect(result.projectedFromUsedPercent).toBe(95);
     expect(result.ratePercentPerHour).toBe(4);
     expect(result.rateBasis).toBe("recent_30m");
     expect(result.projectedExhaustionAt).toBe(
-      new Date(nowMilliseconds + 60 * 60_000).toISOString(),
+      new Date(nowMilliseconds + 75 * 60_000).toISOString(),
     );
     expect(result.projectedExhaustionRangeEndAt).not.toBeNull();
+  });
+
+  it.each([69, 71, 91, 99])(
+    "uses the latest %i%% reading after historical exhaustion",
+    (usedPercent) => {
+      const resetAt = resetAfter(1440);
+      const result = projectExhaustion(
+        [
+          point(minutesBeforeNow(180), 98, resetAt),
+          point(minutesBeforeNow(120), 100, resetAt),
+          point(minutesBeforeNow(60), usedPercent, resetAt),
+          point(minutesBeforeNow(30), usedPercent, resetAt),
+          point(minutesBeforeNow(0), usedPercent, resetAt),
+        ],
+        resetAt,
+      );
+      expect(result.status).not.toBe("already_exhausted");
+      expect(result.projectedFromUsedPercent).toBe(usedPercent);
+      if (result.projectedExhaustionAt !== null) {
+        expect(Date.parse(result.projectedExhaustionAt)).toBeGreaterThan(
+          nowMilliseconds,
+        );
+      }
+    },
+  );
+
+  it("fits renewed consumption after a material correction with the same reset", () => {
+    const resetAt = resetAfter(1440);
+    const result = projectExhaustion(
+      [
+        point(minutesBeforeNow(180), 100, resetAt),
+        point(minutesBeforeNow(120), 60, resetAt),
+        point(minutesBeforeNow(60), 65, resetAt),
+        point(minutesBeforeNow(0), 70, resetAt),
+      ],
+      resetAt,
+    );
+    expect(result.status).toBe("exhausts_before_reset");
+    expect(result.sampleCount).toBe(3);
+    expect(result.ratePercentPerHour).toBe(5);
+    expect(result.projectedFromUsedPercent).toBe(70);
+    expect(result.projectedExhaustionAt).toBe(resetAfter(360));
   });
 
   it("withholds projections for sparse or flat observations", () => {
