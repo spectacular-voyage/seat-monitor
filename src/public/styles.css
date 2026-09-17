@@ -31,9 +31,9 @@ button {
 }
 
 .shell {
-  width: min(1260px, calc(100% - 32px));
+  width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 30px 0 36px;
+  padding: 8px 0 36px;
 }
 
 .masthead,
@@ -47,14 +47,28 @@ button {
 }
 
 .masthead {
-  display: grid;
-  align-items: center;
-  grid-template-columns: minmax(190px, auto) minmax(300px, 1fr);
-  gap: 18px;
+  min-height: 28px;
+  padding: 0 14px;
 }
 
 .brand {
+  display: flex;
   min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 9px;
+  row-gap: 2px;
+}
+
+.masthead .eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: clamp(0.98rem, 1.4vw, 1.2rem);
+  letter-spacing: -0.04em;
 }
 
 .eyebrow {
@@ -90,11 +104,16 @@ h2 {
 }
 
 .lede {
-  max-width: 650px;
-  margin-bottom: 0;
+  margin: 0;
   color: #a7ada8;
-  font-size: 0.8rem;
-  line-height: 1.35;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.lede::before {
+  margin-right: 9px;
+  color: #566059;
+  content: "·";
 }
 
 .range-controls button {
@@ -112,7 +131,8 @@ h2 {
 .top-warnings {
   display: grid;
   min-width: 0;
-  gap: 6px;
+  align-content: start;
+  gap: 5px;
 }
 
 .warning-placeholder {
@@ -125,9 +145,9 @@ h2 {
   display: grid;
   min-width: 0;
   align-items: center;
-  padding: 8px 10px;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
+  padding: 6px 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
   border: 1px solid #303732;
   border-radius: 10px;
   background: rgb(18 22 19 / 82%);
@@ -145,8 +165,8 @@ h2 {
 
 .warning-marker {
   display: grid;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   place-items: center;
   border-radius: 50%;
   color: #9ee0b8;
@@ -179,7 +199,7 @@ h2 {
 }
 
 .warning-detail {
-  margin: 2px 0 0;
+  margin: 1px 0 0;
   color: #858e87;
   font-size: 0.68rem;
   line-height: 1.35;
@@ -257,12 +277,24 @@ button:focus-visible,
 .capacity,
 .accounts,
 .throughput {
-  margin-top: 14px;
+  margin-top: 8px;
   padding: 14px;
   border: 1px solid #282e2a;
   border-radius: 18px;
   background: rgb(20 23 21 / 91%);
   box-shadow: 0 30px 80px rgb(0 0 0 / 16%);
+}
+
+.capacity-layout {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
+  gap: 12px;
+}
+
+.capacity-main {
+  min-width: 0;
 }
 
 .bottom-dashboard {
@@ -482,6 +514,17 @@ button:focus-visible,
 
 .accounts-heading {
   align-items: flex-end;
+}
+
+.account-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.account-order-controls button {
+  min-width: 0;
 }
 
 .throughput-heading {
@@ -975,6 +1018,14 @@ button:focus-visible,
   overflow: visible;
 }
 
+.account-card.codex-history .chart-wrap {
+  min-height: 58px;
+}
+
+.account-card.codex-history .chart-empty {
+  min-height: 54px;
+}
+
 .chart-grid-line {
   stroke: #3b463e;
   stroke-width: 1;
@@ -1238,7 +1289,7 @@ noscript {
 
 @media (max-width: 780px) {
   .shell {
-    padding-top: 22px;
+    padding-top: 10px;
   }
 
   .section-heading {
@@ -1247,9 +1298,11 @@ noscript {
   }
 
   .masthead {
-    align-items: start;
+    min-height: 0;
+  }
+
+  .capacity-layout {
     grid-template-columns: 1fr;
-    gap: 12px;
   }
 
   .summary,
@@ -1337,6 +1390,11 @@ noscript {
 
   .range-controls {
     width: 100%;
+  }
+
+  .account-history-controls {
+    width: 100%;
+    justify-content: stretch;
   }
 
   .range-controls button {
