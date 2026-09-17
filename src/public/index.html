@@ -18,25 +18,29 @@
             Current headroom, historical pace, and what resets first.
           </p>
         </div>
-        <section
-          id="top-warnings"
-          class="top-warnings"
-          aria-label="Quota warnings"
-          aria-live="polite"
-        >
-          <p class="warning-placeholder">Checking quota warnings…</p>
-        </section>
       </header>
 
       <section class="capacity" aria-labelledby="capacity-heading">
-        <div class="section-heading">
-          <h2 id="capacity-heading" class="eyebrow">At a glance</h2>
-          <p id="connection-status" class="connection" role="status">
-            Connecting…
-          </p>
-        </div>
-        <div id="fleet-capacity" class="fleet-capacity" aria-live="polite">
-          <p class="fleet-loading">Loading fleet capacity…</p>
+        <div class="capacity-layout">
+          <div class="capacity-main">
+            <div class="section-heading">
+              <h2 id="capacity-heading" class="eyebrow">At a glance</h2>
+              <p id="connection-status" class="connection" role="status">
+                Connecting…
+              </p>
+            </div>
+            <div id="fleet-capacity" class="fleet-capacity" aria-live="polite">
+              <p class="fleet-loading">Loading fleet capacity…</p>
+            </div>
+          </div>
+          <aside
+            id="top-warnings"
+            class="top-warnings"
+            aria-label="Quota warnings"
+            aria-live="polite"
+          >
+            <p class="warning-placeholder">Checking quota warnings…</p>
+          </aside>
         </div>
       </section>
 
@@ -45,18 +49,36 @@
           <h2 id="accounts-heading" class="eyebrow">
             Per-account usage history
           </h2>
-          <div
-            id="range-controls"
-            class="range-controls"
-            aria-label="Number of quota periods"
-          >
-            <button type="button" data-periods="0.5">½×</button>
-            <button type="button" data-periods="1" aria-pressed="true">
-              1×
-            </button>
-            <button type="button" data-periods="2">2×</button>
-            <button type="button" data-periods="5">5×</button>
-            <button type="button" data-periods="10">10×</button>
+          <div class="account-history-controls">
+            <div
+              id="account-order-controls"
+              class="range-controls account-order-controls"
+              aria-label="Account history sort order"
+            >
+              <button
+                type="button"
+                data-account-order="session"
+                aria-pressed="true"
+              >
+                Session %
+              </button>
+              <button type="button" data-account-order="weekly-reset">
+                Weekly reset
+              </button>
+            </div>
+            <div
+              id="range-controls"
+              class="range-controls"
+              aria-label="Number of quota periods"
+            >
+              <button type="button" data-periods="0.5">½×</button>
+              <button type="button" data-periods="1" aria-pressed="true">
+                1×
+              </button>
+              <button type="button" data-periods="2">2×</button>
+              <button type="button" data-periods="5">5×</button>
+              <button type="button" data-periods="10">10×</button>
+            </div>
           </div>
         </div>
         <div id="account-cards" class="account-grid" aria-live="polite">

@@ -35,6 +35,9 @@ describe("dashboard assets", () => {
     expect(html).toContain('data-throughput-days="30"');
     expect(html).toContain('data-throughput-days="365"');
     expect(html).toContain('id="range-controls"');
+    expect(html).toContain('id="account-order-controls"');
+    expect(html).toContain('data-account-order="session"');
+    expect(html).toContain('data-account-order="weekly-reset"');
     expect(html).toContain('data-periods="0.5"');
     expect(html).toContain('data-periods="10"');
     expect(html).not.toContain("data-range-hours");
@@ -43,6 +46,7 @@ describe("dashboard assets", () => {
     expect(html).not.toContain("Each graph uses its own quota period");
     expect(html).toContain('id="fleet-capacity"');
     expect(html).toContain('id="top-warnings"');
+    expect(html).toContain('class="capacity-layout"');
     expect(html).toContain('id="app-version"');
     expect(html).not.toContain('id="refresh"');
     expect(html.indexOf('id="fleet-capacity"')).toBeLessThan(
@@ -79,9 +83,13 @@ describe("dashboard assets", () => {
     expect(javascript).toContain(
       'compareFleetAccountsByWeeklyReset,\n} from "./capacity-order.js"',
     );
+    expect(javascript).toContain("compareAccountsBySessionUtilization");
     expect(javascript).toContain(
       "[...accounts].sort(compareFleetAccountsByWeeklyReset)",
     );
+    expect(javascript).toContain('accountHistoryOrder === "weekly-reset"');
+    expect(javascript).toContain("data-account-order");
+    expect(javascript).toContain("latestAnalyticsPayload");
     expect(capacityOrderJavascript).toContain(
       "limit.windowDurationMinutes === LONGEST_QUOTA_PERIOD_MINUTES",
     );
@@ -111,6 +119,8 @@ describe("dashboard assets", () => {
     expect(javascript).not.toContain('"Quota is exhausted."');
     expect(javascript).not.toContain("History begins after the next scan.");
     expect(javascript).toContain("createChartLegend");
+    expect(javascript).toContain("CODEX_USAGE_CHART_HEIGHT = 100");
+    expect(javascript).toContain('account.platform === "Codex"');
     expect(javascript).toContain("createLimitMetrics");
     expect(javascript).toContain('element("table", "limit-metrics")');
     expect(javascript).toContain(
@@ -125,6 +135,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("PERIOD_CONTEXT_MULTIPLIER = 1.05");
     expect(javascript).toContain("periods: String(periodMultiplier)");
     expect(javascript).toContain("Scheduled scans are stale");
+    expect(javascript).toContain('!limit.key.startsWith("fable")');
     expect(javascript).toContain('{ label: "Refresh now"');
     expect(javascript).toContain(
       'projection.status === "exhausts_before_reset"',
@@ -150,6 +161,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('"usage-series-label", " fable"');
     expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+    expect(css).toContain("grid-template-columns: minmax(0, 1fr) minmax(260px");
     expect(css).toContain(".window-grid.single-panel .window-panel");
     expect(css).toContain(".combined-panel");
     expect(css).toContain("grid-column: span 2");
@@ -168,6 +180,7 @@ describe("dashboard assets", () => {
     expect(css).toContain(".account-card.claude-history");
     expect(css).toContain("--history-card-background: #241419");
     expect(css).toContain(".account-card.codex-history");
+    expect(css).toContain(".account-card.codex-history .chart-wrap");
     expect(css).toContain("--history-card-background: #152039");
     expect(css).not.toContain("--history-panel-background");
     expect(css).not.toContain("--history-chart-background");

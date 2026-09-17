@@ -1,11 +1,14 @@
 import {
   LONGEST_QUOTA_PERIOD_MINUTES,
+  compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
 } from "./capacity-order.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const ACCOUNT_SERIES_COLOR_COUNT = 8;
+const DEFAULT_USAGE_CHART_HEIGHT = 176;
+const CODEX_USAGE_CHART_HEIGHT = 100;
 const VENDOR_RATE_COLOR_CLASSES = {
   Claude: "throughput-color-claude",
   Codex: "throughput-color-codex",
@@ -26,6 +29,7 @@ const fleetCapacity = document.querySelector("#fleet-capacity");
 const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
+const accountOrderControls = document.querySelector("#account-order-controls");
 const throughputRangeControls = document.querySelector(
   "#throughput-range-controls",
 );
@@ -34,6 +38,8 @@ const stackedHistoryMedia = window.matchMedia("(max-width: 780px)");
 let loading = false;
 let periodMultiplier = 1;
 let throughputRangeDays = 1;
+let accountHistoryOrder = "session";
+let latestAnalyticsPayload = null;
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -231,7 +237,11 @@ function renderTopWarnings(payload) {
     .filter((account) => account.status === "ok")
     .flatMap((account) =>
       account.limits
-        .filter((limit) => limit.projection.status === "exhausts_before_reset")
+        .filter(
+          (limit) =>
+            limit.projection.status === "exhausts_before_reset" &&
+            !limit.key.startsWith("fable"),
+        )
         .map((limit) => ({ account, limit })),
     )
     .sort((left, right) => {
@@ -404,6 +414,7 @@ function createUsageGraph(
   rangeEnd,
   overlays = [],
   chartWidth = 640,
+  chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
 ) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
@@ -488,7 +499,7 @@ function createUsageGraph(
   const chartEnd = futureResetAt ?? forecastEnd;
   const chartStart = rangeStart;
   const width = chartWidth;
-  const height = 176;
+  const height = chartHeight;
   const left = 36;
   const right = 12;
   const top = 12;
@@ -1021,6 +1032,7 @@ function createLimit(
   rangeEnd,
   overlays = [],
   chartWidth = 640,
+  chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
 ) {
   const section = element(
     "section",
@@ -1078,7 +1090,14 @@ function createLimit(
     section.append(createChartLegend([limit, ...overlays]));
   }
   section.append(
-    createUsageGraph(limit, rangeStart, rangeEnd, overlays, chartWidth),
+    createUsageGraph(
+      limit,
+      rangeStart,
+      rangeEnd,
+      overlays,
+      chartWidth,
+      chartHeight,
+    ),
   );
 
   section.append(createLimitMetrics([limit, ...overlays]));
@@ -1124,6 +1143,10 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
       !stackedHistoryMedia.matches
         ? 304
         : 640;
+    const chartHeight =
+      account.platform === "Codex"
+        ? CODEX_USAGE_CHART_HEIGHT
+        : DEFAULT_USAGE_CHART_HEIGHT;
     panel.append(
       createLimit(
         entry.limit,
@@ -1131,6 +1154,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         rangeEnd,
         entry.overlays,
         chartWidth,
+        chartHeight,
       ),
     );
     panels.append(panel);
@@ -1458,6 +1482,7 @@ function renderRecommendations(recommendations) {
 }
 
 function renderAnalytics(payload) {
+  latestAnalyticsPayload = payload;
   accountCards.replaceChildren();
   const rangeStart = Date.parse(payload.from);
   const rangeEnd = Date.parse(payload.to);
@@ -1485,8 +1510,10 @@ function renderAnalytics(payload) {
       ),
     );
   } else {
-    const historyAccounts = [...accounts].sort((left, right) =>
-      left.accountAlias.localeCompare(right.accountAlias),
+    const historyAccounts = [...accounts].sort(
+      accountHistoryOrder === "weekly-reset"
+        ? compareFleetAccountsByWeeklyReset
+        : compareAccountsBySessionUtilization,
     );
     for (const account of historyAccounts) {
       accountCards.append(createAccountCard(account, rangeStart, rangeEnd));
@@ -1775,6 +1802,21 @@ rangeControls.addEventListener("click", (event) => {
     candidate.setAttribute("aria-pressed", String(candidate === button));
   }
   void fetchDashboard(false);
+});
+accountOrderControls.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-account-order]");
+  if (!button) {
+    return;
+  }
+  accountHistoryOrder = button.dataset.accountOrder;
+  for (const candidate of accountOrderControls.querySelectorAll("button")) {
+    candidate.setAttribute("aria-pressed", String(candidate === button));
+  }
+  if (latestAnalyticsPayload !== null) {
+    renderAnalytics(latestAnalyticsPayload);
+  } else {
+    void fetchDashboard(false);
+  }
 });
 throughputRangeControls.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-throughput-days]");
