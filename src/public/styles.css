@@ -278,7 +278,7 @@ button:focus-visible,
 .accounts,
 .throughput {
   margin-top: 8px;
-  padding: 14px;
+  padding: 12px 8px;
   border: 1px solid #282e2a;
   border-radius: 18px;
   background: rgb(20 23 21 / 91%);
@@ -358,7 +358,7 @@ button:focus-visible,
 
 .fleet-account {
   display: grid;
-  padding: 11px 14px;
+  padding: 11px 8px;
   grid-template-columns: minmax(220px, 0.72fr) minmax(0, 2.28fr);
   gap: 18px;
   border-bottom: 1px solid var(--history-card-border, #282f2a);
@@ -389,15 +389,6 @@ button:focus-visible,
   min-width: 0;
   align-items: baseline;
   gap: 8px;
-}
-
-.fleet-platform {
-  flex: 0 0 auto;
-  color: #8fd3ab;
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 .fleet-alias {
@@ -1287,6 +1278,12 @@ noscript {
   margin-top: 4px;
 }
 
+@media (min-width: 781px) {
+  .account-card.codex-history .chart-time-label {
+    font-size: 6px;
+  }
+}
+
 @media (max-width: 780px) {
   .shell {
     padding-top: 10px;
@@ -1359,7 +1356,7 @@ noscript {
 
 @media (max-width: 520px) {
   .shell {
-    width: min(100% - 20px, 1260px);
+    width: min(100% - 12px, 1440px);
   }
 
   .summary,
@@ -1381,7 +1378,7 @@ noscript {
   .capacity,
   .accounts,
   .throughput {
-    padding: 17px;
+    padding: 12px 8px;
   }
 
   .strategy-card:last-child {

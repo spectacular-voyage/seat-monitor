@@ -138,6 +138,38 @@ function formatWeeklyResetMoment(resetAt) {
   return `${value("weekday")}, ${value("hour")}:${value("minute")}${value("dayPeriod").toLocaleLowerCase("en-US")}`;
 }
 
+function formatAlertTime(value) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(new Date(value));
+  const part = (type) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")}${part("dayPeriod").toLocaleLowerCase("en-US")}`;
+}
+
+function formatAlertDateTime(value) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).formatToParts(new Date(value));
+  const part = (type) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("weekday")}, ${part("month")} ${part("day")}, ${formatAlertTime(value)}`;
+}
+
+function isSameLocalDay(leftValue, rightValue) {
+  const left = new Date(leftValue);
+  const right = new Date(rightValue);
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
 function projectionText(projection) {
   const exhaustion = formatExhaustionRange(projection);
   switch (projection.status) {
@@ -168,6 +200,23 @@ function formatExhaustionRange(projection) {
     return start;
   }
   return `${start}–${formatDateTime(projection.projectedExhaustionRangeEndAt)}`;
+}
+
+function formatAlertExhaustionRange(projection) {
+  if (projection.projectedExhaustionAt === null) {
+    return "at an unknown time";
+  }
+  const start = formatAlertDateTime(projection.projectedExhaustionAt);
+  if (
+    projection.projectedExhaustionRangeEndAt === null ||
+    projection.projectedExhaustionRangeEndAt === undefined
+  ) {
+    return start;
+  }
+  const end = projection.projectedExhaustionRangeEndAt;
+  return isSameLocalDay(projection.projectedExhaustionAt, end)
+    ? `${start} – ${formatAlertTime(end)}`
+    : `${start} – ${formatAlertDateTime(end)}`;
 }
 
 function formatInterval(seconds) {
@@ -225,7 +274,7 @@ function renderTopWarnings(payload) {
           createWarning(
             "danger",
             "Scheduled scans are stale",
-            `Last completed ${formatDateTime(lastScanAt)}; expected within two ${formatInterval(scanIntervalSeconds)} intervals.`,
+            `Last completed ${formatAlertDateTime(lastScanAt)}; expected within two ${formatInterval(scanIntervalSeconds)} intervals.`,
             { label: "Refresh now", run: () => void fetchDashboard(true) },
           ),
         );
@@ -258,8 +307,8 @@ function renderTopWarnings(payload) {
         "warning",
         `${account.accountAlias} · ${limit.label}`,
         limit.projection.projectedExhaustionAt === null
-          ? "Projected to exhaust before reset."
-          : `Projected to exhaust ${formatExhaustionRange(limit.projection)} before reset.`,
+          ? "Projected to exhaust."
+          : `Projected to exhaust ${formatAlertExhaustionRange(limit.projection)}.`,
       ),
     );
   }
@@ -268,7 +317,7 @@ function renderTopWarnings(payload) {
     const scanDetail =
       lastScanAt === null
         ? "Current scan timing is unavailable."
-        : `Last scan completed ${formatDateTime(lastScanAt)}.`;
+        : `Last scan completed ${formatAlertDateTime(lastScanAt)}.`;
     warnings.push(
       createWarning("healthy", "No projected exhaustions", scanDetail),
     );
@@ -1277,7 +1326,6 @@ function createFleetAccount(account) {
   const header = element("header", "fleet-account-header");
   const identity = element("div", "fleet-identity");
   identity.append(
-    element("span", "fleet-platform", account.platform),
     element("strong", "fleet-alias", account.accountAlias),
     element(
       "span",

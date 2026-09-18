@@ -136,6 +136,16 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("periods: String(periodMultiplier)");
     expect(javascript).toContain("Scheduled scans are stale");
     expect(javascript).toContain('!limit.key.startsWith("fable")');
+    expect(javascript).not.toContain("Projected to exhaust before reset.");
+    expect(javascript).not.toContain("fleet-platform");
+    expect(javascript).toContain("function formatAlertDateTime(value)");
+    expect(javascript).toContain(
+      "function isSameLocalDay(leftValue, rightValue)",
+    );
+    expect(javascript).toContain(
+      "formatAlertExhaustionRange(limit.projection)",
+    );
+    expect(javascript).toContain("formatAlertDateTime(lastScanAt)");
     expect(javascript).toContain('{ label: "Refresh now"');
     expect(javascript).toContain(
       'projection.status === "exhausts_before_reset"',
@@ -181,6 +191,9 @@ describe("dashboard assets", () => {
     expect(css).toContain("--history-card-background: #241419");
     expect(css).toContain(".account-card.codex-history");
     expect(css).toContain(".account-card.codex-history .chart-wrap");
+    expect(css).toMatch(
+      /\.account-card\.codex-history \.chart-time-label\s*\{[^}]*font-size: 6px;/u,
+    );
     expect(css).toContain("--history-card-background: #152039");
     expect(css).not.toContain("--history-panel-background");
     expect(css).not.toContain("--history-chart-background");
