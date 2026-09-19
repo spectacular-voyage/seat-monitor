@@ -180,7 +180,7 @@ describe("dashboard assets", () => {
     expect(css).toContain(".reset-marker.projected");
     expect(css).toContain(".chart-hover-guide");
     expect(css).toMatch(
-      /\.throughput-axis-label \{[^}]*font-size: 14px;[^}]*font-weight: 650;/su,
+      /\.throughput-axis-label \{[^}]*font-size: 11px;[^}]*font-weight: 650;/su,
     );
     expect(css).toMatch(
       /\.throughput-plot \.chart-hover-label \{[^}]*font-size: 14px;[^}]*font-weight: 650;/su,
