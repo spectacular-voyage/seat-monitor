@@ -53,6 +53,75 @@ describe("normalizeCodexResult", () => {
     );
   });
 
+  it("reports available reset credits and expiry without exposing credit IDs", async () => {
+    const fixture = await loadFixture();
+    const rateLimitsResult = fixture.rateLimitsResult as Record<
+      string,
+      unknown
+    >;
+    const snapshot = normalizeCodexResult(
+      "Codex_Work",
+      {
+        ...fixture,
+        rateLimitsResult: {
+          ...rateLimitsResult,
+          rateLimitResetCredits: {
+            availableCount: 3,
+            credits: [
+              {
+                id: "private-credit-1",
+                status: "available",
+                title: "Full reset",
+                expiresAt: Date.parse("2026-10-22T16:00:00Z") / 1_000,
+              },
+              {
+                id: "private-credit-2",
+                status: "available",
+                title: "Expired reset",
+                expiresAt: Date.parse("2026-10-01T00:00:00Z") / 1_000,
+              },
+            ],
+          },
+        },
+      },
+      "2026-10-15T20:00:00Z",
+    );
+    expect(snapshot.status).toBe("ok");
+    if (snapshot.status !== "ok") throw new TypeError("Expected Codex quota.");
+    expect(snapshot.resetOffers).toEqual([
+      {
+        label: "Full reset",
+        count: 1,
+        expiresAt: "2026-10-22T16:00:00.000Z",
+      },
+      { label: "Reset credit", count: 1, expiresAt: null },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("private-credit");
+  });
+
+  it("keeps quota available when reset-credit details are malformed", async () => {
+    const fixture = await loadFixture();
+    const rateLimitsResult = fixture.rateLimitsResult as Record<
+      string,
+      unknown
+    >;
+    const snapshot = normalizeCodexResult(
+      "Codex_Work",
+      {
+        ...fixture,
+        rateLimitsResult: {
+          ...rateLimitsResult,
+          rateLimitResetCredits: { availableCount: "unknown" },
+        },
+      },
+      "2026-10-15T20:00:00Z",
+    );
+    expect(snapshot.status).toBe("ok");
+    if (snapshot.status !== "ok") throw new TypeError("Expected Codex quota.");
+    expect(snapshot.limits).toHaveLength(3);
+    expect(snapshot.resetOffers).toBeNull();
+  });
+
   it("rejects a response with no quota windows", () => {
     expect(() =>
       normalizeCodexResult(

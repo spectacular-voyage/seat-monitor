@@ -6,13 +6,13 @@ Seat Monitor is a strict TypeScript service that presents multi-account Claude a
 
 The original draft named website roots rather than authenticated quota endpoints. The implemented provider boundary follows the supported contracts found during the Phase 0 spike:
 
-| Account type                                   | V1 behavior                                                                                                   |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Claude subscription with persistent login      | Reads plan plus session, weekly-all-models, and weekly-Fable quota/reset windows from `claude -p "/usage"`    |
-| Claude subscription with `claude setup-token`  | Optional auth-only mode; Base and Fable quota remain explicit `unsupported` values                            |
-| Codex on personal ChatGPT plans, including Pro | Reads plan and all quota windows from an isolated, persistent `CODEX_HOME` profile created with `codex login` |
-| Codex on ChatGPT Business or Enterprise        | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                |
-| API-organization usage and spend               | Out of scope for V1 because it is a different billing product from subscription seats                         |
+| Account type                                   | V1 behavior                                                                                                                   |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Claude subscription with persistent login      | Reads plan plus session, weekly-all-models, and weekly-Fable quota/reset windows from `claude -p "/usage"`                    |
+| Claude subscription with `claude setup-token`  | Optional auth-only mode; Base and Fable quota remain explicit `unsupported` values                                            |
+| Codex on personal ChatGPT plans, including Pro | Reads plan, quota windows, and any reset credits from an isolated, persistent `CODEX_HOME` profile created with `codex login` |
+| Codex on ChatGPT Business or Enterprise        | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                                |
+| API-organization usage and spend               | Out of scope for V1 because it is a different billing product from subscription seats                                         |
 
 Seat Monitor does not scrape dashboards, parse terminal control sequences, or reuse browser cookies. The dashboard's optional Claude reset-offer check makes a read-only request to Claude's private OAuth usage endpoint using each verified local profile. It requests the `cedar_ember` reset block as a Claude Code client and treats an ineligible response as unknown, rather than as proof of no offers. This endpoint is undocumented and may change; failure appears as unavailable reset status without changing quota scans. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for the original quota sources and mapping decisions.
 
@@ -102,6 +102,8 @@ The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restric
 The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. On hosts with an enterprise `managed-mcp.json`, the monitor omits strict mode because Claude Code requires that managed policy to remain authoritative. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
 The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Accounts awaiting their first check or whose offer status could not be read are listed there, including checks rate limited by Claude. Checks are staggered to at most one per minute across the fleet, and each account is checked at most once every 20 minutes. The last confirmed offers are kept through failed checks and service restarts, labeled as last seen, and removed when they expire. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
+
+Codex reset credits appear in the same overview badges and expiry section. Their count and detail rows arrive with the existing Codex App Server quota scan, so no additional Codex provider request is made. Last confirmed credits are kept through failed scans and service restarts, labeled as last seen, and removed when they expire. The monitor never redeems a credit.
 
 ### Set up Codex Pro profiles
 
@@ -231,6 +233,7 @@ Open the loopback URL printed at startup. By default, the server scans immediate
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
 - `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
 - `GET /api/claude-resets` returns current or last confirmed reset offers for verified Claude profiles. Its per-account cache is stored privately at `~/.local/state/seat-monitor/claude-resets.json` and never rechecks an account before 20 minutes, including on manual refresh. It does not include credentials or grant identifiers.
+- `GET /api/codex-resets` returns current or last confirmed Codex reset credits from the scheduled quota scan. Its private cache is stored at `~/.local/state/seat-monitor/codex-resets.json`. It makes no additional provider request and does not include credentials or credit IDs.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 

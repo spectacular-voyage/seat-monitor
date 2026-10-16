@@ -9,6 +9,7 @@ import {
   quotaSuccessSchema,
   type QuotaLimit,
   type QuotaSnapshot,
+  type ResetOffer,
 } from "../domain/quota.js";
 import {
   CodexProtocolError,
@@ -47,13 +48,63 @@ const rateLimitBucketSchema = z.looseObject({
   secondary: rateWindowSchema.nullable().optional(),
 });
 
+const resetCreditSummarySchema = z.looseObject({
+  availableCount: z.number().int().nonnegative(),
+  credits: z
+    .array(
+      z.looseObject({
+        status: z.string(),
+        title: z.string().nullable().optional(),
+        expiresAt: z.number().int().nonnegative().nullable().optional(),
+      }),
+    )
+    .nullable()
+    .optional(),
+});
+
 const rateLimitsResultSchema = z.looseObject({
   rateLimits: rateLimitBucketSchema.nullable().optional(),
   rateLimitsByLimitId: z
     .record(z.string(), rateLimitBucketSchema)
     .nullable()
     .optional(),
+  rateLimitResetCredits: z.unknown().optional(),
 });
+
+function resetOffers(
+  summary: z.infer<typeof resetCreditSummarySchema> | null,
+  observedAt: string,
+): ResetOffer[] | null {
+  if (summary === null) return null;
+  const observedMilliseconds = Date.parse(observedAt);
+  const listed = (summary.credits ?? []).filter(
+    (credit) => credit.status === "available",
+  );
+  const offers: ResetOffer[] = listed
+    .filter(
+      (credit) =>
+        credit.expiresAt === undefined ||
+        credit.expiresAt === null ||
+        credit.expiresAt * 1_000 > observedMilliseconds,
+    )
+    .map((credit) => {
+      const title = credit.title?.trim();
+      return {
+        label:
+          title === undefined || title.length === 0 ? "Reset credit" : title,
+        count: 1,
+        expiresAt:
+          credit.expiresAt === undefined || credit.expiresAt === null
+            ? null
+            : unixSecondsToIso(credit.expiresAt),
+      };
+    });
+  const unlisted = Math.max(0, summary.availableCount - listed.length);
+  if (unlisted > 0) {
+    offers.push({ label: "Reset credit", count: unlisted, expiresAt: null });
+  }
+  return offers;
+}
 
 export type CodexProviderDependencies = {
   command?: string;
@@ -87,6 +138,9 @@ export function normalizeCodexResult(
 ): QuotaSnapshot {
   const account = accountResultSchema.parse(result.accountResult);
   const rateLimits = rateLimitsResultSchema.parse(result.rateLimitsResult);
+  const creditSummary = resetCreditSummarySchema.safeParse(
+    rateLimits.rateLimitResetCredits,
+  );
 
   if (account.account === null) {
     throw new CodexProtocolError(1);
@@ -136,6 +190,10 @@ export function normalizeCodexResult(
     status: "ok",
     plan: account.account.planType ?? bucketPlan ?? null,
     limits,
+    resetOffers: resetOffers(
+      creditSummary.success ? creditSummary.data : null,
+      observedAt,
+    ),
     observedAt,
   });
 }

@@ -217,11 +217,60 @@ describe("HTTP server", () => {
       expect(first.json()).toEqual([
         {
           accountAlias: "Claude_Test",
+          platform: "Claude",
           status: "ok",
           offers: [{ label: "Full reset", count: 1, expiresAt: null }],
         },
       ]);
       expect(readClaudeResets).toHaveBeenCalledOnce();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves Codex reset credits with expiry", async () => {
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      readCodexResets: () =>
+        Promise.resolve([
+          {
+            accountAlias: "Codex_Test",
+            status: "ok",
+            lastConfirmedAt: "2026-10-15T20:00:00Z",
+            offers: [
+              {
+                label: "Full reset",
+                count: 1,
+                expiresAt: "2026-10-22T16:00:00Z",
+              },
+            ],
+          },
+        ]),
+    });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/codex-resets",
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual([
+        {
+          accountAlias: "Codex_Test",
+          platform: "Codex",
+          status: "ok",
+          lastConfirmedAt: "2026-10-15T20:00:00Z",
+          offers: [
+            {
+              label: "Full reset",
+              count: 1,
+              expiresAt: "2026-10-22T16:00:00Z",
+            },
+          ],
+        },
+      ]);
     } finally {
       await server.close();
     }

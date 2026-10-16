@@ -31,6 +31,10 @@ import { toPublicSnapshots } from "./presentation/public-dto.js";
 import { createClaudeResetReader } from "./services/claude-reset-cache.js";
 import type { ClaudeAccountResets } from "./services/claude-resets.js";
 import {
+  createCodexResetReader,
+  type CachedCodexResetOffers,
+} from "./services/codex-reset-cache.js";
+import {
   createDefaultScanner,
   type Scanner,
 } from "./services/scan-accounts.js";
@@ -109,6 +113,7 @@ type DashboardAssetLoader = () => Promise<DashboardAssets>;
 export type ServerOptions = {
   scan?: Scanner;
   readClaudeResets?: () => Promise<ClaudeAccountResets[]>;
+  readCodexResets?: () => Promise<CachedCodexResetOffers[]>;
   now?: () => Date;
   freshnessMilliseconds?: number;
   host?: string;
@@ -238,11 +243,13 @@ export async function buildServer(
       options.freshnessMilliseconds ?? DEFAULT_FRESHNESS_MILLISECONDS,
     now,
   });
+  const resetAccounts =
+    options.scan === undefined ? loadConfiguredAccounts() : [];
   const readClaudeResets =
     options.readClaudeResets ??
     (options.scan === undefined
       ? createClaudeResetReader({
-          accounts: loadConfiguredAccounts(),
+          accounts: resetAccounts,
           verifiedAliases: async () =>
             new Set(
               (await cache.readLatest())
@@ -252,6 +259,15 @@ export async function buildServer(
                 )
                 .map((snapshot) => snapshot.accountAlias),
             ),
+          now,
+        })
+      : () => Promise.resolve([]));
+  const readCodexResets =
+    options.readCodexResets ??
+    (options.scan === undefined
+      ? createCodexResetReader({
+          accounts: resetAccounts,
+          snapshots: () => cache.readLatest(),
           now,
         })
       : () => Promise.resolve([]));
@@ -369,7 +385,17 @@ export async function buildServer(
   });
   server.get("/api/claude-resets", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
-    return readClaudeResets();
+    return (await readClaudeResets()).map((account) => ({
+      ...account,
+      platform: "Claude",
+    }));
+  });
+  server.get("/api/codex-resets", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return (await readCodexResets()).map((account) => ({
+      ...account,
+      platform: "Codex",
+    }));
   });
   server.get("/api/history/scans", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
