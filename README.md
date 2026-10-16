@@ -101,7 +101,7 @@ The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restric
 
 The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. On hosts with an enterprise `managed-mcp.json`, the monitor omits strict mode because Claude Code requires that managed policy to remain authoritative. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
-The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
+The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Accounts whose offer status could not be read are listed there, including checks rate limited by Claude. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
 
 ### Set up Codex Pro profiles
 
@@ -230,7 +230,7 @@ Open the loopback URL printed at startup. By default, the server scans immediate
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
 - `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
-- `GET /api/claude-resets` returns current reset offers for verified Claude profiles, cached for 30 seconds. `?refresh=true` bypasses the cache. It does not include credentials or grant identifiers.
+- `GET /api/claude-resets` returns current reset offers for verified Claude profiles, cached for five minutes to reduce account usage requests. `?refresh=true` bypasses the cache. It does not include credentials or grant identifiers.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 

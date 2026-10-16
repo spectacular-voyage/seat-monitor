@@ -70,4 +70,40 @@ describe("Claude reset offers", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("distinguishes a rate-limited offer check from a confirmed empty offer list", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-resets-"));
+    try {
+      await writeFile(
+        join(directory, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "private-token" } }),
+      );
+      const account: LoadedAccount = {
+        accountAlias: "Claude_Test",
+        platform: "Claude",
+        auth: {
+          type: "claude_profile",
+          profile: "test",
+          expectedEmail: "test@example.com",
+          claudeConfigDir: directory,
+        },
+      };
+      const result = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json(
+              { error: { type: "rate_limit_error" } },
+              { status: 429 },
+            ),
+          ),
+      });
+      expect(result).toEqual({
+        accountAlias: "Claude_Test",
+        status: "rate_limited",
+        offers: [],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

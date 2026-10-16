@@ -56,6 +56,7 @@ import { PACKAGE_VERSION } from "./version.js";
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
+const RESET_FRESHNESS_MILLISECONDS = 5 * 60_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
 const STATUS_FALLBACK_PORT_COUNT = 32;
 const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
@@ -395,7 +396,7 @@ export async function buildServer(
     if (
       query.refresh !== "true" &&
       resetCache !== null &&
-      now().getTime() - resetCache.at < DEFAULT_FRESHNESS_MILLISECONDS
+      now().getTime() - resetCache.at < RESET_FRESHNESS_MILLISECONDS
     ) {
       return resetCache.accounts;
     }

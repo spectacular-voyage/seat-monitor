@@ -36,7 +36,7 @@ export type ClaudeResetOffer = {
 
 export type ClaudeAccountResets = {
   accountAlias: string;
-  status: "ok" | "unavailable";
+  status: "ok" | "rate_limited" | "unavailable";
   offers: ClaudeResetOffer[];
 };
 
@@ -73,6 +73,9 @@ export async function readClaudeAccountResets(
         signal: AbortSignal.timeout(5_000),
       },
     );
+    if (response.status === 429) {
+      return { ...unavailable, status: "rate_limited" };
+    }
     if (!response.ok) {
       return unavailable;
     }
