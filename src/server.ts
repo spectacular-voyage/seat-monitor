@@ -318,34 +318,26 @@ export async function buildServer(
 
   server.get("/", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();
-    if (options.reloadDashboardAssets === true) {
-      reply.header("Cache-Control", "no-store");
-    }
+    reply.header("Cache-Control", "no-store");
     return reply.type("text/html; charset=utf-8").send(currentAssets.html);
   });
   server.get("/app.js", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();
-    if (options.reloadDashboardAssets === true) {
-      reply.header("Cache-Control", "no-store");
-    }
+    reply.header("Cache-Control", "no-store");
     return reply
       .type("text/javascript; charset=utf-8")
       .send(currentAssets.javascript);
   });
   server.get("/capacity-order.js", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();
-    if (options.reloadDashboardAssets === true) {
-      reply.header("Cache-Control", "no-store");
-    }
+    reply.header("Cache-Control", "no-store");
     return reply
       .type("text/javascript; charset=utf-8")
       .send(currentAssets.capacityOrder);
   });
   server.get("/styles.css", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();
-    if (options.reloadDashboardAssets === true) {
-      reply.header("Cache-Control", "no-store");
-    }
+    reply.header("Cache-Control", "no-store");
     return reply.type("text/css; charset=utf-8").send(currentAssets.css);
   });
   server.get("/api/server/status", async (_request, reply) => {

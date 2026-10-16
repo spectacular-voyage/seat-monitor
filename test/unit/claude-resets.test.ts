@@ -25,27 +25,39 @@ describe("Claude reset offers", () => {
           claudeConfigDir: directory,
         },
       };
-      const fetch = vi.fn(() =>
-        Promise.resolve(
-          Response.json({
-            cedar_ember: {
-              grants: [
-                {
-                  label: "Full reset",
-                  resets_left: 2,
-                  starts_at: "2026-10-01T00:00:00Z",
-                  ends_at: "2026-10-23T07:00:00Z",
-                },
-                {
-                  label: "Expired",
-                  resets_left: 1,
-                  ends_at: "2026-10-01T00:00:00Z",
-                },
-                { label: "Used", resets_left: 0 },
-              ],
-            },
-          }),
-        ),
+      let requestedUrl: string | null = null;
+      let requestedHeaders: RequestInit["headers"];
+      const fetch = vi.fn(
+        (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+          requestedUrl =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.href
+                : input.url;
+          requestedHeaders = init?.headers;
+          return Promise.resolve(
+            Response.json({
+              cedar_ember: {
+                eligible: true,
+                grants: [
+                  {
+                    label: "Full reset",
+                    resets_left: 2,
+                    starts_at: "2026-10-01T00:00:00Z",
+                    ends_at: "2026-10-23T07:00:00Z",
+                  },
+                  {
+                    label: "Expired",
+                    resets_left: 1,
+                    ends_at: "2026-10-01T00:00:00Z",
+                  },
+                  { label: "Used", resets_left: 0 },
+                ],
+              },
+            }),
+          );
+        },
       );
 
       const result = await readClaudeAccountResets(account, {
@@ -65,6 +77,12 @@ describe("Claude reset offers", () => {
         ],
       });
       expect(fetch).toHaveBeenCalledOnce();
+      expect(requestedUrl).toBe(
+        "https://api.anthropic.com/api/oauth/usage?cedar_ember=1",
+      );
+      expect(new Headers(requestedHeaders).get("User-Agent")).toBe(
+        "claude-cli/2.1.296 (external, cli)",
+      );
       expect(JSON.stringify(result)).not.toContain("private-token");
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -100,6 +118,45 @@ describe("Claude reset offers", () => {
       expect(result).toEqual({
         accountAlias: "Claude_Test",
         status: "rate_limited",
+        offers: [],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat an ineligible client response as proof of no offers", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-resets-"));
+    try {
+      await writeFile(
+        join(directory, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "private-token" } }),
+      );
+      const account: LoadedAccount = {
+        accountAlias: "Claude_Test",
+        platform: "Claude",
+        auth: {
+          type: "claude_profile",
+          profile: "test",
+          expectedEmail: "test@example.com",
+          claudeConfigDir: directory,
+        },
+      };
+      const result = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json({
+              cedar_ember: {
+                eligible: false,
+                ineligible_reason: "surface",
+                grants: [],
+              },
+            }),
+          ),
+      });
+      expect(result).toEqual({
+        accountAlias: "Claude_Test",
+        status: "unavailable",
         offers: [],
       });
     } finally {
