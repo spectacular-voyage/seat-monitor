@@ -191,15 +191,13 @@ describe("HTTP server", () => {
     );
   });
 
-  it("serves reset offers and refreshes them on request", async () => {
-    let count = 1;
-    let nowMilliseconds = Date.parse("2026-10-15T20:00:00Z");
+  it("serves reset offers without HTTP caching", async () => {
     const readClaudeResets = vi.fn(() =>
       Promise.resolve([
         {
           accountAlias: "Claude_Test",
           status: "ok" as const,
-          offers: [{ label: "Full reset", count, expiresAt: null }],
+          offers: [{ label: "Full reset", count: 1, expiresAt: null }],
         },
       ]),
     );
@@ -207,23 +205,11 @@ describe("HTTP server", () => {
       assets,
       scan: () => Promise.resolve([]),
       readClaudeResets,
-      now: () => new Date(nowMilliseconds),
     });
     try {
       const first = await server.inject({
         method: "GET",
         url: "/api/claude-resets",
-        headers: allowedHeaders,
-      });
-      count = 2;
-      const cached = await server.inject({
-        method: "GET",
-        url: "/api/claude-resets",
-        headers: allowedHeaders,
-      });
-      const refreshed = await server.inject({
-        method: "GET",
-        url: "/api/claude-resets?refresh=true",
         headers: allowedHeaders,
       });
       expect(first.statusCode).toBe(200);
@@ -235,29 +221,7 @@ describe("HTTP server", () => {
           offers: [{ label: "Full reset", count: 1, expiresAt: null }],
         },
       ]);
-      expect(cached.body).toBe(first.body);
-      expect(refreshed.json()).toEqual([
-        {
-          accountAlias: "Claude_Test",
-          status: "ok",
-          offers: [{ label: "Full reset", count: 2, expiresAt: null }],
-        },
-      ]);
-      count = 3;
-      nowMilliseconds += 5 * 60_000 + 1;
-      const afterCache = await server.inject({
-        method: "GET",
-        url: "/api/claude-resets",
-        headers: allowedHeaders,
-      });
-      expect(afterCache.json()).toEqual([
-        {
-          accountAlias: "Claude_Test",
-          status: "ok",
-          offers: [{ label: "Full reset", count: 3, expiresAt: null }],
-        },
-      ]);
-      expect(readClaudeResets).toHaveBeenCalledTimes(3);
+      expect(readClaudeResets).toHaveBeenCalledOnce();
     } finally {
       await server.close();
     }

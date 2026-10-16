@@ -409,6 +409,12 @@ button:focus-visible,
   outline-offset: 2px;
 }
 
+.reset-badge-stale {
+  border-color: rgb(226 187 123 / 55%);
+  color: #f0d9ae;
+  background: #46331d;
+}
+
 .claude-resets {
   margin-top: 24px;
   padding: 0 14px;
