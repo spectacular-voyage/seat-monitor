@@ -1378,15 +1378,16 @@ function createFleetAccount(account) {
     0,
   );
   if (account.platform === "Claude" && count > 0) {
+    const current = resetAccount.status === "ok";
     const badge = element(
       "a",
-      "reset-badge",
-      `${count} reset${count === 1 ? "" : "s"} available`,
+      `reset-badge ${current ? "" : "reset-badge-stale"}`,
+      `${count} reset${count === 1 ? "" : "s"} ${current ? "available" : "last seen"}`,
     );
     badge.href = `#${encodeURIComponent(`claude-resets-${account.accountAlias}`)}`;
     badge.setAttribute(
       "aria-label",
-      `${count} limit reset${count === 1 ? "" : "s"} available for ${account.accountAlias}; view expiration`,
+      `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}; view expiration`,
     );
     wrapper.append(badge);
   }
@@ -1394,11 +1395,18 @@ function createFleetAccount(account) {
 }
 
 function renderClaudeResets(accounts) {
-  latestResetAccounts = Array.isArray(accounts) ? accounts : [];
+  latestResetAccounts = Array.isArray(accounts)
+    ? accounts
+    : latestResetAccounts.map((account) => ({
+        ...account,
+        status: "unavailable",
+      }));
   claudeResetOffers.replaceChildren();
   const available = latestResetAccounts.flatMap((account) =>
     account.offers.map((offer) => ({
       accountAlias: account.accountAlias,
+      status: account.status,
+      lastConfirmedAt: account.lastConfirmedAt ?? null,
       ...offer,
     })),
   );
@@ -1431,10 +1439,17 @@ function renderClaudeResets(accounts) {
       element("span", "reset-offer-label", `${offer.count} × ${offer.label}`),
     );
     const expiration = element("span", "reset-offer-expiration");
-    expiration.textContent =
+    const expirationText =
       offer.expiresAt === null
         ? "Expiry not reported"
         : `Expires ${formatDateTime(offer.expiresAt)}`;
+    expiration.textContent =
+      offer.status === "ok"
+        ? expirationText
+        : `${expirationText} · Last confirmed ${offer.lastConfirmedAt === null ? "previously" : formatDateTime(offer.lastConfirmedAt)}; latest check ${offer.status === "rate_limited" ? "rate limited" : "unavailable"}`;
+    if (offer.status !== "ok") {
+      row.classList.add("reset-offer-unavailable");
+    }
     row.append(expiration);
     claudeResetOffers.append(row);
   }
@@ -1447,7 +1462,9 @@ function renderClaudeResets(accounts) {
       ),
     );
   }
-  for (const account of unavailableAccounts) {
+  for (const account of unavailableAccounts.filter(
+    (candidate) => candidate.offers.length === 0,
+  )) {
     const row = element(
       "article",
       "claude-reset-offer reset-offer-unavailable",
@@ -1882,13 +1899,7 @@ async function fetchDashboard(forceRefresh = false) {
       throw new Error("Quota response was invalid.");
     }
     try {
-      renderClaudeResets(
-        await requestJson(
-          forceRefresh
-            ? "/api/claude-resets?refresh=true"
-            : "/api/claude-resets",
-        ),
-      );
+      renderClaudeResets(await requestJson("/api/claude-resets"));
     } catch {
       renderClaudeResets(null);
     }
