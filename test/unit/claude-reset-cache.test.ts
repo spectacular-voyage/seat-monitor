@@ -92,4 +92,66 @@ describe("Claude reset cache", () => {
     });
     expect(readOffer).toHaveBeenCalledTimes(3);
   });
+
+  it("staggered checks never send a fleet burst or recheck an account early", async () => {
+    const second: LoadedAccount = {
+      ...account,
+      accountAlias: "Claude_Second",
+      auth: {
+        type: "claude_profile",
+        profile: "second",
+        expectedEmail: "second@example.com",
+        claudeConfigDir: "/unused/second-profile",
+      },
+    };
+    let stored = {};
+    let current = Date.parse("2026-10-15T20:00:00Z");
+    const readOffer = vi.fn((candidate: LoadedAccount) =>
+      Promise.resolve({
+        accountAlias: candidate.accountAlias,
+        status: "ok" as const,
+        offers: [],
+      }),
+    );
+    const read = createClaudeResetReader({
+      accounts: [account, second],
+      verifiedAliases: () =>
+        Promise.resolve(new Set([account.accountAlias, second.accountAlias])),
+      now: () => new Date(current),
+      storage: {
+        load: () => Promise.resolve(structuredClone(stored)),
+        save: (entries: typeof stored) => {
+          stored = structuredClone(entries);
+          return Promise.resolve();
+        },
+      },
+      readOffer,
+    });
+
+    const first = await read();
+    expect(first.map((item) => item.status)).toEqual(["ok", "pending"]);
+    expect(readOffer).toHaveBeenCalledTimes(1);
+    expect(readOffer.mock.calls[0]?.[0].accountAlias).toBe(
+      account.accountAlias,
+    );
+
+    current += 59_000;
+    expect((await read()).map((item) => item.status)).toEqual([
+      "ok",
+      "pending",
+    ]);
+    expect(readOffer).toHaveBeenCalledTimes(1);
+
+    current += 1_000;
+    expect((await read()).map((item) => item.status)).toEqual(["ok", "ok"]);
+    expect(readOffer).toHaveBeenCalledTimes(2);
+    expect(readOffer.mock.calls[1]?.[0].accountAlias).toBe(second.accountAlias);
+
+    current += 19 * 60_000;
+    await read();
+    expect(readOffer).toHaveBeenCalledTimes(3);
+    expect(readOffer.mock.calls[2]?.[0].accountAlias).toBe(
+      account.accountAlias,
+    );
+  });
 });

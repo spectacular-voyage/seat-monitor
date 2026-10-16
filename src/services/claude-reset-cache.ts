@@ -8,10 +8,10 @@ import type { LoadedAccount } from "../config/accounts.js";
 import {
   readClaudeAccountResets,
   type ClaudeAccountResets,
-  type ClaudeResetOffer,
 } from "./claude-resets.js";
 
 export const CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS = 20 * 60_000;
+export const CLAUDE_RESET_FLEET_GAP_MILLISECONDS = 60_000;
 
 const instantSchema = z.iso.datetime({ offset: true });
 const entrySchema = z.object({
@@ -37,7 +37,8 @@ type CacheStore = {
   save: (entries: Record<string, CacheEntry>) => Promise<void>;
 };
 
-export type CachedClaudeAccountResets = ClaudeAccountResets & {
+export type CachedClaudeAccountResets = Omit<ClaudeAccountResets, "status"> & {
+  status: ClaudeAccountResets["status"] | "pending";
   lastConfirmedAt: string | null;
 };
 
@@ -120,57 +121,91 @@ export function createClaudeResetReader(options: {
     const current = await load();
     const verified = await options.verifiedAliases();
     const nowMilliseconds = now().getTime();
-    const attempted = new Set<string>();
-    const output = await Promise.all(
-      options.accounts
-        .filter((account) => account.platform === "Claude")
-        .map(async (account): Promise<CachedClaudeAccountResets> => {
-          const accountAlias = account.accountAlias;
-          if (!verified.has(accountAlias)) {
-            return {
-              accountAlias,
-              status: "unavailable",
-              offers: [],
-              lastConfirmedAt: null,
-            };
-          }
-          const accountIdentity = identity(account);
-          const prior = current[accountAlias];
-          if (
-            prior?.identity === accountIdentity &&
-            nowMilliseconds - Date.parse(prior.lastAttemptAt) <
-              CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS
-          ) {
-            return visible(accountAlias, prior, nowMilliseconds);
-          }
-
-          const result = await readOffer(account);
-          const lastConfirmedAt =
-            result.status === "ok"
-              ? new Date(nowMilliseconds).toISOString()
-              : prior?.identity === accountIdentity
-                ? (prior.lastConfirmedAt ?? null)
-                : null;
-          const offers: ClaudeResetOffer[] =
-            result.status === "ok"
-              ? result.offers
-              : prior?.identity === accountIdentity
-                ? prior.offers
-                : [];
-          const updated: CacheEntry = {
-            identity: accountIdentity,
-            lastAttemptAt: new Date(nowMilliseconds).toISOString(),
-            lastConfirmedAt,
-            status: result.status,
-            offers,
-          };
-          current[accountAlias] = updated;
-          attempted.add(accountAlias);
-          return visible(accountAlias, updated, nowMilliseconds);
-        }),
+    const accounts = options.accounts.filter(
+      (account) => account.platform === "Claude",
     );
-    if (attempted.size > 0) await storage.save(current);
-    return output;
+    const latestFleetAttempt = Math.max(
+      0,
+      ...Object.values(current).map((entry) => Date.parse(entry.lastAttemptAt)),
+    );
+    const due = accounts
+      .filter(
+        (account) =>
+          account.auth.type === "claude_profile" &&
+          verified.has(account.accountAlias),
+      )
+      .filter((account) => {
+        const prior = current[account.accountAlias];
+        return (
+          prior?.identity !== identity(account) ||
+          nowMilliseconds - Date.parse(prior.lastAttemptAt) >=
+            CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS
+        );
+      })
+      .sort((left, right) => {
+        const leftAttempt = current[left.accountAlias];
+        const rightAttempt = current[right.accountAlias];
+        return (
+          (leftAttempt?.identity === identity(left)
+            ? Date.parse(leftAttempt.lastAttemptAt)
+            : Number.NEGATIVE_INFINITY) -
+          (rightAttempt?.identity === identity(right)
+            ? Date.parse(rightAttempt.lastAttemptAt)
+            : Number.NEGATIVE_INFINITY)
+        );
+      });
+    const selected =
+      nowMilliseconds - latestFleetAttempt >=
+      CLAUDE_RESET_FLEET_GAP_MILLISECONDS
+        ? due[0]
+        : undefined;
+    if (selected !== undefined) {
+      const accountAlias = selected.accountAlias;
+      const accountIdentity = identity(selected);
+      const prior = current[accountAlias];
+      const result = await readOffer(selected);
+      current[accountAlias] = {
+        identity: accountIdentity,
+        lastAttemptAt: new Date(nowMilliseconds).toISOString(),
+        lastConfirmedAt:
+          result.status === "ok"
+            ? new Date(nowMilliseconds).toISOString()
+            : prior?.identity === accountIdentity
+              ? (prior.lastConfirmedAt ?? null)
+              : null,
+        status: result.status,
+        offers:
+          result.status === "ok"
+            ? result.offers
+            : prior?.identity === accountIdentity
+              ? prior.offers
+              : [],
+      };
+      await storage.save(current);
+    }
+    return accounts.map((account): CachedClaudeAccountResets => {
+      const accountAlias = account.accountAlias;
+      if (
+        !verified.has(accountAlias) ||
+        account.auth.type !== "claude_profile"
+      ) {
+        return {
+          accountAlias,
+          status: "unavailable",
+          offers: [],
+          lastConfirmedAt: null,
+        };
+      }
+      const prior = current[accountAlias];
+      return prior?.identity === identity(account)
+        ? visible(accountAlias, prior, nowMilliseconds)
+        : {
+            accountAlias,
+            status: "pending",
+            offers: [],
+            lastConfirmedAt: null,
+          };
+    });
   }
 
   return () => {
