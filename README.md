@@ -14,7 +14,7 @@ The original draft named website roots rather than authenticated quota endpoints
 | Codex on ChatGPT Business or Enterprise        | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                |
 | API-organization usage and spend               | Out of scope for V1 because it is a different billing product from subscription seats                         |
 
-Seat Monitor does not scrape dashboards, parse terminal control sequences, reuse browser cookies, or call private provider endpoints. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for sources and mapping decisions.
+Seat Monitor does not scrape dashboards, parse terminal control sequences, or reuse browser cookies. The dashboard's optional Claude reset-offer check makes a read-only request to Claude's private OAuth usage endpoint using each verified local profile. This endpoint is undocumented and may change; failure appears as unavailable reset status without changing quota scans. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for the original quota sources and mapping decisions.
 
 ## Install
 
@@ -100,6 +100,8 @@ seat-monitor-claude-login 'claude-personal@example.com'
 The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restricts `.credentials.json` to mode `0600`. Profiles default to `~/.local/share/seat-monitor/claude/<profile>`. Set `SEAT_MONITOR_CLAUDE_PROFILES_DIR` to an absolute path to use another location. Every Claude profile requires `expectedEmail`; scans fail with `identity_mismatch` before reading quota if `/login` has reseated the profile as another account.
 
 The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. On hosts with an enterprise `managed-mcp.json`, the monitor omits strict mode because Claude Code requires that managed policy to remain authoritative. Treat `.credentials.json` like a password and never place a profile inside the repository.
+
+The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
 
 ### Set up Codex Pro profiles
 
@@ -228,6 +230,7 @@ Open the loopback URL printed at startup. By default, the server scans immediate
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
 - `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
+- `GET /api/claude-resets` returns current reset offers for verified Claude profiles, cached for 30 seconds. `?refresh=true` bypasses the cache. It does not include credentials or grant identifiers.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 

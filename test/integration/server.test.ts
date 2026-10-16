@@ -191,6 +191,62 @@ describe("HTTP server", () => {
     );
   });
 
+  it("serves reset offers and refreshes them on request", async () => {
+    let count = 1;
+    const readClaudeResets = vi.fn(() =>
+      Promise.resolve([
+        {
+          accountAlias: "Claude_Test",
+          status: "ok" as const,
+          offers: [{ label: "Full reset", count, expiresAt: null }],
+        },
+      ]),
+    );
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      readClaudeResets,
+    });
+    try {
+      const first = await server.inject({
+        method: "GET",
+        url: "/api/claude-resets",
+        headers: allowedHeaders,
+      });
+      count = 2;
+      const cached = await server.inject({
+        method: "GET",
+        url: "/api/claude-resets",
+        headers: allowedHeaders,
+      });
+      const refreshed = await server.inject({
+        method: "GET",
+        url: "/api/claude-resets?refresh=true",
+        headers: allowedHeaders,
+      });
+      expect(first.statusCode).toBe(200);
+      expect(first.headers["cache-control"]).toBe("no-store");
+      expect(first.json()).toEqual([
+        {
+          accountAlias: "Claude_Test",
+          status: "ok",
+          offers: [{ label: "Full reset", count: 1, expiresAt: null }],
+        },
+      ]);
+      expect(cached.body).toBe(first.body);
+      expect(refreshed.json()).toEqual([
+        {
+          accountAlias: "Claude_Test",
+          status: "ok",
+          offers: [{ label: "Full reset", count: 2, expiresAt: null }],
+        },
+      ]);
+      expect(readClaudeResets).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("reloads dashboard assets per request in source development", async () => {
     let currentAssets = {
       html: "<!doctype html><title>Version 1</title>",
