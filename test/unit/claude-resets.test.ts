@@ -159,6 +159,22 @@ describe("Claude reset offers", () => {
         status: "unavailable",
         offers: [],
       });
+      const missingGrants = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(Response.json({ cedar_ember: { eligible: true } })),
+      });
+      expect(missingGrants.status).toBe("unavailable");
+      const emptyGrants = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json({ cedar_ember: { eligible: true, grants: [] } }),
+          ),
+      });
+      expect(emptyGrants).toEqual({
+        accountAlias: "Claude_Test",
+        status: "ok",
+        offers: [],
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

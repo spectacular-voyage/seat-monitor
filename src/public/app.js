@@ -1478,7 +1478,7 @@ function renderResetOffers(accounts) {
         "span",
         "reset-offer-expiration",
         account.status === "rate_limited"
-          ? "Provider rate limited the check; retrying later"
+          ? "Provider rate limited the check; reset probes are limited to one per hour"
           : account.status === "pending"
             ? "Waiting for its scheduled check"
             : "Could not verify this account’s reset offers",
