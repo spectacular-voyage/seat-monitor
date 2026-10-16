@@ -12,6 +12,7 @@ import {
 
 export const CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS = 20 * 60_000;
 export const CLAUDE_RESET_FLEET_GAP_MILLISECONDS = 60_000;
+export const CLAUDE_RESET_RATE_LIMITED_GAP_MILLISECONDS = 60 * 60_000;
 
 const instantSchema = z.iso.datetime({ offset: true });
 const entrySchema = z.object({
@@ -124,41 +125,62 @@ export function createClaudeResetReader(options: {
     const accounts = options.accounts.filter(
       (account) => account.platform === "Claude",
     );
+    const tracked = accounts.filter(
+      (account) => account.auth.type === "claude_profile",
+    );
+    const eligible = tracked.filter((account) =>
+      verified.has(account.accountAlias),
+    );
+    const priorFor = (account: LoadedAccount): CacheEntry | undefined => {
+      const prior = current[account.accountAlias];
+      return prior?.identity === identity(account) ? prior : undefined;
+    };
+    const rateLimited = tracked.some(
+      (account) => priorFor(account)?.status === "rate_limited",
+    );
     const latestFleetAttempt = Math.max(
       0,
-      ...Object.values(current).map((entry) => Date.parse(entry.lastAttemptAt)),
+      ...tracked
+        .map((account) => priorFor(account)?.lastAttemptAt ?? null)
+        .filter((attempt): attempt is string => attempt !== null)
+        .map((attempt) => Date.parse(attempt)),
     );
-    const due = accounts
-      .filter(
-        (account) =>
-          account.auth.type === "claude_profile" &&
-          verified.has(account.accountAlias),
-      )
+    const due = eligible
       .filter((account) => {
-        const prior = current[account.accountAlias];
+        const prior = priorFor(account);
         return (
-          prior?.identity !== identity(account) ||
+          prior === undefined ||
           nowMilliseconds - Date.parse(prior.lastAttemptAt) >=
             CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS
         );
       })
       .sort((left, right) => {
-        const leftAttempt = current[left.accountAlias];
-        const rightAttempt = current[right.accountAlias];
+        const leftAttempt = priorFor(left);
+        const rightAttempt = priorFor(right);
+        if (rateLimited) {
+          const leftUnconfirmed =
+            leftAttempt?.lastConfirmedAt === null || leftAttempt === undefined;
+          const rightUnconfirmed =
+            rightAttempt?.lastConfirmedAt === null ||
+            rightAttempt === undefined;
+          if (leftUnconfirmed !== rightUnconfirmed) {
+            return leftUnconfirmed ? -1 : 1;
+          }
+        }
         return (
-          (leftAttempt?.identity === identity(left)
-            ? Date.parse(leftAttempt.lastAttemptAt)
-            : Number.NEGATIVE_INFINITY) -
-          (rightAttempt?.identity === identity(right)
-            ? Date.parse(rightAttempt.lastAttemptAt)
-            : Number.NEGATIVE_INFINITY)
+          (leftAttempt === undefined
+            ? Number.NEGATIVE_INFINITY
+            : Date.parse(leftAttempt.lastAttemptAt)) -
+          (rightAttempt === undefined
+            ? Number.NEGATIVE_INFINITY
+            : Date.parse(rightAttempt.lastAttemptAt))
         );
       });
+    const fleetGap = rateLimited
+      ? CLAUDE_RESET_RATE_LIMITED_GAP_MILLISECONDS
+      : CLAUDE_RESET_FLEET_GAP_MILLISECONDS;
     const selected =
-      nowMilliseconds - latestFleetAttempt >=
-      CLAUDE_RESET_FLEET_GAP_MILLISECONDS
-        ? due[0]
-        : undefined;
+      nowMilliseconds - latestFleetAttempt >= fleetGap ? due[0] : undefined;
     if (selected !== undefined) {
       const accountAlias = selected.accountAlias;
       const accountIdentity = identity(selected);

@@ -9,17 +9,15 @@ const usageResponseSchema = z.object({
   cedar_ember: z
     .object({
       eligible: z.boolean(),
-      grants: z
-        .array(
-          z.object({
-            label: z.string().default("Limit reset"),
-            resets_left: z.number().int().nonnegative(),
-            starts_at: z.iso.datetime({ offset: true }).nullable().optional(),
-            ends_at: z.iso.datetime({ offset: true }).nullable().optional(),
-            paused: z.boolean().optional(),
-          }),
-        )
-        .optional(),
+      grants: z.array(
+        z.object({
+          label: z.string().default("Limit reset"),
+          resets_left: z.number().int().nonnegative(),
+          starts_at: z.iso.datetime({ offset: true }).nullable().optional(),
+          ends_at: z.iso.datetime({ offset: true }).nullable().optional(),
+          paused: z.boolean().optional(),
+        }),
+      ),
     })
     .nullable()
     .optional(),
@@ -86,7 +84,7 @@ export async function readClaudeAccountResets(
       return unavailable;
     }
     const nowMilliseconds = (options.now ?? (() => new Date()))().getTime();
-    const offers = (usage.cedar_ember.grants ?? [])
+    const offers = usage.cedar_ember.grants
       .filter(
         (grant) =>
           grant.resets_left > 0 &&
