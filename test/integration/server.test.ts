@@ -193,6 +193,7 @@ describe("HTTP server", () => {
 
   it("serves reset offers and refreshes them on request", async () => {
     let count = 1;
+    let nowMilliseconds = Date.parse("2026-10-15T20:00:00Z");
     const readClaudeResets = vi.fn(() =>
       Promise.resolve([
         {
@@ -206,6 +207,7 @@ describe("HTTP server", () => {
       assets,
       scan: () => Promise.resolve([]),
       readClaudeResets,
+      now: () => new Date(nowMilliseconds),
     });
     try {
       const first = await server.inject({
@@ -241,7 +243,21 @@ describe("HTTP server", () => {
           offers: [{ label: "Full reset", count: 2, expiresAt: null }],
         },
       ]);
-      expect(readClaudeResets).toHaveBeenCalledTimes(2);
+      count = 3;
+      nowMilliseconds += 5 * 60_000 + 1;
+      const afterCache = await server.inject({
+        method: "GET",
+        url: "/api/claude-resets",
+        headers: allowedHeaders,
+      });
+      expect(afterCache.json()).toEqual([
+        {
+          accountAlias: "Claude_Test",
+          status: "ok",
+          offers: [{ label: "Full reset", count: 3, expiresAt: null }],
+        },
+      ]);
+      expect(readClaudeResets).toHaveBeenCalledTimes(3);
     } finally {
       await server.close();
     }

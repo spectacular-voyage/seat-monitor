@@ -1402,9 +1402,10 @@ function renderClaudeResets(accounts) {
       ...offer,
     })),
   );
-  const unavailableCount = latestResetAccounts.filter(
-    (account) => account.status === "unavailable",
-  ).length;
+  const unavailableAccounts = latestResetAccounts.filter(
+    (account) => account.status !== "ok",
+  );
+  const unavailableCount = unavailableAccounts.length;
   if (available.length === 0) {
     claudeResetOffers.append(
       element(
@@ -1413,7 +1414,7 @@ function renderClaudeResets(accounts) {
         accounts === null
           ? "Reset availability could not be checked."
           : unavailableCount > 0
-            ? `Reset availability could not be checked for ${unavailableCount} Claude account${unavailableCount === 1 ? "" : "s"}.`
+            ? `No confirmed reset offers. Availability could not be checked for ${unavailableCount} Claude account${unavailableCount === 1 ? "" : "s"}.`
             : "No available Claude limit resets reported.",
       ),
     );
@@ -1445,6 +1446,24 @@ function renderClaudeResets(accounts) {
         `Could not check ${unavailableCount} other Claude account${unavailableCount === 1 ? "" : "s"}.`,
       ),
     );
+  }
+  for (const account of unavailableAccounts) {
+    const row = element(
+      "article",
+      "claude-reset-offer reset-offer-unavailable",
+    );
+    row.append(
+      element("strong", "reset-offer-account", account.accountAlias),
+      element("span", "reset-offer-label", "Reset status unavailable"),
+      element(
+        "span",
+        "reset-offer-expiration",
+        account.status === "rate_limited"
+          ? "Claude rate limited the check; retrying later"
+          : "Could not verify this account’s reset offers",
+      ),
+    );
+    claudeResetOffers.append(row);
   }
   if (latestAnalyticsPayload !== null) {
     renderFleetCapacity(latestAnalyticsPayload.accounts);

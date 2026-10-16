@@ -443,6 +443,10 @@ button:focus-visible,
   color: #c7f4d5;
 }
 
+.reset-offer-unavailable .reset-offer-expiration {
+  color: #e2bb7b;
+}
+
 .reset-empty {
   margin: 0;
   color: #a7ada8;
