@@ -11,6 +11,7 @@ import Fastify, {
 } from "fastify";
 import { z } from "zod";
 
+import { loadConfiguredAccounts } from "./config/accounts.js";
 import { historyScansSchema } from "./domain/history.js";
 import {
   DEFAULT_SERVER_PORT,
@@ -27,6 +28,10 @@ import {
 } from "./history/service.js";
 import type { HistoryResetEvent } from "./history/types.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
+import {
+  readClaudeAccountResets,
+  type ClaudeAccountResets,
+} from "./services/claude-resets.js";
 import {
   createDefaultScanner,
   type Scanner,
@@ -105,6 +110,7 @@ type DashboardAssetLoader = () => Promise<DashboardAssets>;
 
 export type ServerOptions = {
   scan?: Scanner;
+  readClaudeResets?: () => Promise<ClaudeAccountResets[]>;
   now?: () => Date;
   freshnessMilliseconds?: number;
   host?: string;
@@ -234,6 +240,35 @@ export async function buildServer(
       options.freshnessMilliseconds ?? DEFAULT_FRESHNESS_MILLISECONDS,
     now,
   });
+  const readClaudeResets =
+    options.readClaudeResets ??
+    (options.scan === undefined
+      ? async () => {
+          const verified = new Set(
+            (await cache.readLatest())
+              .filter(
+                (snapshot) =>
+                  snapshot.platform === "Claude" && snapshot.status === "ok",
+              )
+              .map((snapshot) => snapshot.accountAlias),
+          );
+          return Promise.all(
+            loadConfiguredAccounts()
+              .filter((account) => account.platform === "Claude")
+              .map((account) =>
+                verified.has(account.accountAlias)
+                  ? readClaudeAccountResets(account, { now })
+                  : Promise.resolve({
+                      accountAlias: account.accountAlias,
+                      status: "unavailable" as const,
+                      offers: [],
+                    }),
+              ),
+          );
+        }
+      : () => Promise.resolve([]));
+  let resetCache: { at: number; accounts: ClaudeAccountResets[] } | null = null;
+  let resetRead: Promise<ClaudeAccountResets[]> | null = null;
   const scheduler =
     options.scheduler === undefined
       ? null
@@ -353,6 +388,26 @@ export async function buildServer(
     }
     reply.header("Cache-Control", "no-store");
     return toPublicSnapshots(snapshots, now().getTime());
+  });
+  server.get("/api/claude-resets", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const query = refreshQuerySchema.parse(request.query);
+    if (
+      query.refresh !== "true" &&
+      resetCache !== null &&
+      now().getTime() - resetCache.at < DEFAULT_FRESHNESS_MILLISECONDS
+    ) {
+      return resetCache.accounts;
+    }
+    resetRead ??= readClaudeResets()
+      .then((accounts) => {
+        resetCache = { at: now().getTime(), accounts };
+        return accounts;
+      })
+      .finally(() => {
+        resetRead = null;
+      });
+    return resetRead;
   });
   server.get("/api/history/scans", async (request, reply) => {
     reply.header("Cache-Control", "no-store");

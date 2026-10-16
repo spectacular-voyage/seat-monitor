@@ -26,6 +26,7 @@ const generalStrategy = document.querySelector("#general-strategy");
 const fableStrategy = document.querySelector("#fable-strategy");
 const watchStrategy = document.querySelector("#watch-strategy");
 const fleetCapacity = document.querySelector("#fleet-capacity");
+const claudeResetOffers = document.querySelector("#claude-reset-offers");
 const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
@@ -40,6 +41,7 @@ let periodMultiplier = 1;
 let throughputRangeDays = 1;
 let accountHistoryOrder = "session";
 let latestAnalyticsPayload = null;
+let latestResetAccounts = [];
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -1316,6 +1318,7 @@ function accountHistoryId(account) {
 }
 
 function createFleetAccount(account) {
+  const wrapper = element("div", "fleet-account-row");
   const item = element("a", "fleet-account");
   item.href = `#${encodeURIComponent(accountHistoryId(account))}`;
   item.setAttribute(
@@ -1366,7 +1369,86 @@ function createFleetAccount(account) {
     }
     item.append(limits);
   }
-  return item;
+  wrapper.append(item);
+  const resetAccount = latestResetAccounts.find(
+    (candidate) => candidate.accountAlias === account.accountAlias,
+  );
+  const count = resetAccount?.offers.reduce(
+    (total, offer) => total + offer.count,
+    0,
+  );
+  if (account.platform === "Claude" && count > 0) {
+    const badge = element(
+      "a",
+      "reset-badge",
+      `${count} reset${count === 1 ? "" : "s"} available`,
+    );
+    badge.href = `#${encodeURIComponent(`claude-resets-${account.accountAlias}`)}`;
+    badge.setAttribute(
+      "aria-label",
+      `${count} limit reset${count === 1 ? "" : "s"} available for ${account.accountAlias}; view expiration`,
+    );
+    wrapper.append(badge);
+  }
+  return wrapper;
+}
+
+function renderClaudeResets(accounts) {
+  latestResetAccounts = Array.isArray(accounts) ? accounts : [];
+  claudeResetOffers.replaceChildren();
+  const available = latestResetAccounts.flatMap((account) =>
+    account.offers.map((offer) => ({
+      accountAlias: account.accountAlias,
+      ...offer,
+    })),
+  );
+  const unavailableCount = latestResetAccounts.filter(
+    (account) => account.status === "unavailable",
+  ).length;
+  if (available.length === 0) {
+    claudeResetOffers.append(
+      element(
+        "p",
+        "reset-empty",
+        accounts === null
+          ? "Reset availability could not be checked."
+          : unavailableCount > 0
+            ? `Reset availability could not be checked for ${unavailableCount} Claude account${unavailableCount === 1 ? "" : "s"}.`
+            : "No available Claude limit resets reported.",
+      ),
+    );
+  }
+  const linkedAccounts = new Set();
+  for (const offer of available) {
+    const row = element("article", "claude-reset-offer");
+    if (!linkedAccounts.has(offer.accountAlias)) {
+      row.id = `claude-resets-${offer.accountAlias}`;
+      linkedAccounts.add(offer.accountAlias);
+    }
+    row.append(
+      element("strong", "reset-offer-account", offer.accountAlias),
+      element("span", "reset-offer-label", `${offer.count} × ${offer.label}`),
+    );
+    const expiration = element("span", "reset-offer-expiration");
+    expiration.textContent =
+      offer.expiresAt === null
+        ? "Expiry not reported"
+        : `Expires ${formatDateTime(offer.expiresAt)}`;
+    row.append(expiration);
+    claudeResetOffers.append(row);
+  }
+  if (available.length > 0 && unavailableCount > 0) {
+    claudeResetOffers.append(
+      element(
+        "p",
+        "reset-empty",
+        `Could not check ${unavailableCount} other Claude account${unavailableCount === 1 ? "" : "s"}.`,
+      ),
+    );
+  }
+  if (latestAnalyticsPayload !== null) {
+    renderFleetCapacity(latestAnalyticsPayload.accounts);
+  }
 }
 
 function renderFleetCapacity(accounts) {
@@ -1677,6 +1759,7 @@ function renderLiveFallback(snapshots) {
 }
 
 function renderUnavailableShell() {
+  renderClaudeResets(null);
   accountCount.textContent = "—";
   limitCount.textContent = "—";
   limitCount.removeAttribute("aria-label");
@@ -1778,6 +1861,17 @@ async function fetchDashboard(forceRefresh = false) {
     );
     if (!Array.isArray(snapshots)) {
       throw new Error("Quota response was invalid.");
+    }
+    try {
+      renderClaudeResets(
+        await requestJson(
+          forceRefresh
+            ? "/api/claude-resets?refresh=true"
+            : "/api/claude-resets",
+        ),
+      );
+    } catch {
+      renderClaudeResets(null);
     }
     const to = new Date();
     const from = new Date(
