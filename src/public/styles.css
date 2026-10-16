@@ -385,12 +385,12 @@ button:focus-visible,
 }
 
 .fleet-account-row:has(.reset-badge) .fleet-account {
-  padding-bottom: 38px;
+  min-height: 68px;
 }
 
 .reset-badge {
   position: absolute;
-  bottom: 9px;
+  top: 33px;
   left: 8px;
   padding: 3px 8px;
   border: 1px solid rgb(143 211 171 / 55%);
@@ -1401,6 +1401,11 @@ noscript {
   .fleet-account {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+
+  .fleet-account-row:has(.reset-badge) .capacity-limits,
+  .fleet-account-row:has(.reset-badge) .fleet-empty {
+    margin-top: 22px;
   }
 
   .claude-reset-offer {
