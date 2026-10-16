@@ -300,7 +300,7 @@ describe("HTTP server", () => {
     ]);
     expect(
       responses.every(
-        (response) => response.headers["cache-control"] === undefined,
+        (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
   });
