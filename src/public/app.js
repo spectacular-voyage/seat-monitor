@@ -26,7 +26,7 @@ const generalStrategy = document.querySelector("#general-strategy");
 const fableStrategy = document.querySelector("#fable-strategy");
 const watchStrategy = document.querySelector("#watch-strategy");
 const fleetCapacity = document.querySelector("#fleet-capacity");
-const claudeResetOffers = document.querySelector("#claude-reset-offers");
+const resetOffersContainer = document.querySelector("#reset-offers");
 const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
 const rangeControls = document.querySelector("#range-controls");
@@ -1377,14 +1377,14 @@ function createFleetAccount(account) {
     (total, offer) => total + offer.count,
     0,
   );
-  if (account.platform === "Claude" && count > 0) {
+  if (count > 0) {
     const current = resetAccount.status === "ok";
     const badge = element(
       "a",
       `reset-badge ${current ? "" : "reset-badge-stale"}`,
       `${count} reset${count === 1 ? "" : "s"} ${current ? "available" : "last seen"}`,
     );
-    badge.href = `#${encodeURIComponent(`claude-resets-${account.accountAlias}`)}`;
+    badge.href = `#${encodeURIComponent(`account-resets-${account.platform}-${account.accountAlias}`)}`;
     badge.setAttribute(
       "aria-label",
       `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}; view expiration`,
@@ -1394,17 +1394,18 @@ function createFleetAccount(account) {
   return wrapper;
 }
 
-function renderClaudeResets(accounts) {
+function renderResetOffers(accounts) {
   latestResetAccounts = Array.isArray(accounts)
     ? accounts
     : latestResetAccounts.map((account) => ({
         ...account,
         status: "unavailable",
       }));
-  claudeResetOffers.replaceChildren();
+  resetOffersContainer.replaceChildren();
   const available = latestResetAccounts.flatMap((account) =>
     account.offers.map((offer) => ({
       accountAlias: account.accountAlias,
+      platform: account.platform,
       status: account.status,
       lastConfirmedAt: account.lastConfirmedAt ?? null,
       ...offer,
@@ -1415,24 +1416,25 @@ function renderClaudeResets(accounts) {
   );
   const unavailableCount = unavailableAccounts.length;
   if (available.length === 0) {
-    claudeResetOffers.append(
+    resetOffersContainer.append(
       element(
         "p",
         "reset-empty",
         accounts === null
           ? "Reset availability could not be checked."
           : unavailableCount > 0
-            ? `No confirmed reset offers. Availability could not be checked for ${unavailableCount} Claude account${unavailableCount === 1 ? "" : "s"}.`
-            : "No available Claude limit resets reported.",
+            ? `No confirmed reset offers. Availability could not be checked for ${unavailableCount} account${unavailableCount === 1 ? "" : "s"}.`
+            : "No available account limit resets reported.",
       ),
     );
   }
   const linkedAccounts = new Set();
   for (const offer of available) {
     const row = element("article", "claude-reset-offer");
-    if (!linkedAccounts.has(offer.accountAlias)) {
-      row.id = `claude-resets-${offer.accountAlias}`;
-      linkedAccounts.add(offer.accountAlias);
+    const key = `${offer.platform}-${offer.accountAlias}`;
+    if (!linkedAccounts.has(key)) {
+      row.id = `account-resets-${key}`;
+      linkedAccounts.add(key);
     }
     row.append(
       element("strong", "reset-offer-account", offer.accountAlias),
@@ -1451,14 +1453,14 @@ function renderClaudeResets(accounts) {
       row.classList.add("reset-offer-unavailable");
     }
     row.append(expiration);
-    claudeResetOffers.append(row);
+    resetOffersContainer.append(row);
   }
   if (available.length > 0 && unavailableCount > 0) {
-    claudeResetOffers.append(
+    resetOffersContainer.append(
       element(
         "p",
         "reset-empty",
-        `Could not check ${unavailableCount} other Claude account${unavailableCount === 1 ? "" : "s"}.`,
+        `Could not check ${unavailableCount} other account${unavailableCount === 1 ? "" : "s"}.`,
       ),
     );
   }
@@ -1476,13 +1478,13 @@ function renderClaudeResets(accounts) {
         "span",
         "reset-offer-expiration",
         account.status === "rate_limited"
-          ? "Claude rate limited the check; retrying later"
+          ? "Provider rate limited the check; retrying later"
           : account.status === "pending"
             ? "Waiting for its scheduled check"
             : "Could not verify this account’s reset offers",
       ),
     );
-    claudeResetOffers.append(row);
+    resetOffersContainer.append(row);
   }
   if (latestAnalyticsPayload !== null) {
     renderFleetCapacity(latestAnalyticsPayload.accounts);
@@ -1797,7 +1799,7 @@ function renderLiveFallback(snapshots) {
 }
 
 function renderUnavailableShell() {
-  renderClaudeResets(null);
+  renderResetOffers(null);
   accountCount.textContent = "—";
   limitCount.textContent = "—";
   limitCount.removeAttribute("aria-label");
@@ -1900,11 +1902,24 @@ async function fetchDashboard(forceRefresh = false) {
     if (!Array.isArray(snapshots)) {
       throw new Error("Quota response was invalid.");
     }
-    try {
-      renderClaudeResets(await requestJson("/api/claude-resets"));
-    } catch {
-      renderClaudeResets(null);
-    }
+    const resetResponses = await Promise.allSettled([
+      requestJson("/api/claude-resets"),
+      requestJson("/api/codex-resets"),
+    ]);
+    const providers = ["Claude", "Codex"];
+    const resetAccounts = resetResponses.flatMap((result, index) =>
+      result.status === "fulfilled" && Array.isArray(result.value)
+        ? result.value
+        : latestResetAccounts
+            .filter((account) => account.platform === providers[index])
+            .map((account) => ({ ...account, status: "unavailable" })),
+    );
+    renderResetOffers(
+      resetResponses.every((result) => result.status === "rejected") &&
+        resetAccounts.length === 0
+        ? null
+        : resetAccounts,
+    );
     const to = new Date();
     const from = new Date(
       to.getTime() -

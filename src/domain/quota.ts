@@ -48,6 +48,14 @@ export const quotaErrorSchema = z
   })
   .strict();
 
+export const resetOfferSchema = z
+  .object({
+    label: z.string().min(1),
+    count: z.number().int().positive(),
+    expiresAt: isoInstantSchema.nullable(),
+  })
+  .strict();
+
 const snapshotBaseShape = {
   accountAlias: z.string().min(1),
   platform: platformSchema,
@@ -60,6 +68,7 @@ export const quotaSuccessSchema = z
     status: z.literal("ok"),
     plan: z.string().min(1).nullable(),
     limits: z.array(quotaLimitSchema).min(1),
+    resetOffers: z.array(resetOfferSchema).nullable().optional(),
   })
   .strict();
 
@@ -96,5 +105,6 @@ export const publicQuotaArraySchema = z.array(publicQuotaSnapshotSchema);
 export type Platform = z.infer<typeof platformSchema>;
 export type QuotaErrorCode = z.infer<typeof quotaErrorCodeSchema>;
 export type QuotaLimit = z.infer<typeof quotaLimitSchema>;
+export type ResetOffer = z.infer<typeof resetOfferSchema>;
 export type QuotaSnapshot = z.infer<typeof quotaSnapshotSchema>;
 export type PublicQuotaSnapshot = z.infer<typeof publicQuotaSnapshotSchema>;
