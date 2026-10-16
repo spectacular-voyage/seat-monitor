@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
@@ -32,22 +32,45 @@ const fileSchema = z.object({
   accounts: z.record(z.string(), entrySchema),
 });
 type CacheEntry = z.infer<typeof entrySchema>;
+type CacheStore = {
+  load: () => Promise<Record<string, CacheEntry>>;
+  save: (entries: Record<string, CacheEntry>) => Promise<void>;
+};
 
 export type CachedClaudeAccountResets = ClaudeAccountResets & {
   lastConfirmedAt: string | null;
 };
 
-export function defaultClaudeResetCachePath(
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory = homedir(),
-): string {
-  const root =
-    environment.XDG_STATE_HOME ?? join(homeDirectory, ".local", "state");
-  if (!isAbsolute(root)) {
-    throw new TypeError("The reset cache root must be an absolute path.");
-  }
-  return join(root, "seat-monitor", "claude-resets.json");
-}
+const cacheFilePath = join(
+  homedir(),
+  ".local",
+  "state",
+  "seat-monitor",
+  "claude-resets.json",
+);
+
+const fileStore: CacheStore = {
+  async load() {
+    try {
+      const parsed = fileSchema.parse(
+        JSON.parse(await readFile(cacheFilePath, "utf8")) as unknown,
+      );
+      return parsed.accounts;
+    } catch {
+      return {};
+    }
+  },
+  async save(current) {
+    await mkdir(dirname(cacheFilePath), { recursive: true, mode: 0o700 });
+    const temporary = `${cacheFilePath}.${String(process.pid)}.tmp`;
+    await writeFile(
+      temporary,
+      `${JSON.stringify({ version: 1, accounts: current })}\n`,
+      { mode: 0o600 },
+    );
+    await rename(temporary, cacheFilePath);
+  },
+};
 
 function identity(account: LoadedAccount): string {
   return account.auth.type === "claude_profile"
@@ -76,11 +99,11 @@ export function createClaudeResetReader(options: {
   accounts: readonly LoadedAccount[];
   verifiedAliases: () => Promise<ReadonlySet<string>>;
   now?: () => Date;
-  filePath?: string;
+  storage?: CacheStore;
   readOffer?: (account: LoadedAccount) => Promise<ClaudeAccountResets>;
 }): () => Promise<CachedClaudeAccountResets[]> {
   const now = options.now ?? (() => new Date());
-  const filePath = options.filePath ?? defaultClaudeResetCachePath();
+  const storage = options.storage ?? fileStore;
   const readOffer =
     options.readOffer ??
     ((account: LoadedAccount) => readClaudeAccountResets(account, { now }));
@@ -89,26 +112,8 @@ export function createClaudeResetReader(options: {
 
   async function load(): Promise<Record<string, CacheEntry>> {
     if (entries !== null) return entries;
-    try {
-      const parsed = fileSchema.parse(
-        JSON.parse(await readFile(filePath, "utf8")) as unknown,
-      );
-      entries = parsed.accounts;
-    } catch {
-      entries = {};
-    }
+    entries = await storage.load();
     return entries;
-  }
-
-  async function save(current: Record<string, CacheEntry>): Promise<void> {
-    await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-    const temporary = `${filePath}.${String(process.pid)}.tmp`;
-    await writeFile(
-      temporary,
-      `${JSON.stringify({ version: 1, accounts: current })}\n`,
-      { mode: 0o600 },
-    );
-    await rename(temporary, filePath);
   }
 
   async function read(): Promise<CachedClaudeAccountResets[]> {
@@ -164,7 +169,7 @@ export function createClaudeResetReader(options: {
           return visible(accountAlias, updated, nowMilliseconds);
         }),
     );
-    if (attempted.size > 0) await save(current);
+    if (attempted.size > 0) await storage.save(current);
     return output;
   }
 

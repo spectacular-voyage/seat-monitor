@@ -230,7 +230,7 @@ Open the loopback URL printed at startup. By default, the server scans immediate
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
 - `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration.
-- `GET /api/claude-resets` returns current or last confirmed reset offers for verified Claude profiles. Its per-account cache is stored privately under `$XDG_STATE_HOME/seat-monitor/claude-resets.json` (or `~/.local/state/seat-monitor/claude-resets.json`) and never rechecks an account before 20 minutes, including on manual refresh. It does not include credentials or grant identifiers.
+- `GET /api/claude-resets` returns current or last confirmed reset offers for verified Claude profiles. Its per-account cache is stored privately at `~/.local/state/seat-monitor/claude-resets.json` and never rechecks an account before 20 minutes, including on manual refresh. It does not include credentials or grant identifiers.
 
 Both historical routes accept validated time ranges and return `Cache-Control: no-store`. They never trigger provider requests themselves; the dashboard reads them after `/api/quota` has completed a current scan.
 
