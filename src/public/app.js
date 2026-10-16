@@ -1477,7 +1477,9 @@ function renderClaudeResets(accounts) {
         "reset-offer-expiration",
         account.status === "rate_limited"
           ? "Claude rate limited the check; retrying later"
-          : "Could not verify this account’s reset offers",
+          : account.status === "pending"
+            ? "Waiting for its scheduled check"
+            : "Could not verify this account’s reset offers",
       ),
     );
     claudeResetOffers.append(row);
