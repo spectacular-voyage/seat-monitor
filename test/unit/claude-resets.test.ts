@@ -89,7 +89,7 @@ describe("Claude reset offers", () => {
     }
   });
 
-  it("distinguishes a rate-limited offer check from a confirmed empty offer list", async () => {
+  it("distinguishes HTTP 429 and 529 from a confirmed empty offer list", async () => {
     const directory = await mkdtemp(join(tmpdir(), "seat-monitor-resets-"));
     try {
       await writeFile(
@@ -119,6 +119,22 @@ describe("Claude reset offers", () => {
         accountAlias: "Claude_Test",
         status: "rate_limited",
         offers: [],
+        httpStatus: 429,
+      });
+      const overloaded = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json(
+              { error: { type: "overloaded_error" } },
+              { status: 529 },
+            ),
+          ),
+      });
+      expect(overloaded).toEqual({
+        accountAlias: "Claude_Test",
+        status: "overloaded",
+        offers: [],
+        httpStatus: 529,
       });
     } finally {
       await rm(directory, { recursive: true, force: true });

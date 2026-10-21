@@ -19,7 +19,8 @@ const entrySchema = z.object({
   identity: z.string(),
   lastAttemptAt: instantSchema,
   lastConfirmedAt: instantSchema.nullable(),
-  status: z.enum(["ok", "rate_limited", "unavailable"]),
+  status: z.enum(["ok", "rate_limited", "overloaded", "unavailable"]),
+  httpStatus: z.number().int().min(100).max(599).nullable().optional(),
   offers: z.array(
     z.object({
       label: z.string(),
@@ -88,6 +89,9 @@ function visible(
   return {
     accountAlias,
     status: entry.status,
+    ...(entry.httpStatus === undefined || entry.httpStatus === null
+      ? {}
+      : { httpStatus: entry.httpStatus }),
     lastConfirmedAt: entry.lastConfirmedAt,
     offers: entry.offers.filter(
       (offer) =>
@@ -136,7 +140,9 @@ export function createClaudeResetReader(options: {
       return prior?.identity === identity(account) ? prior : undefined;
     };
     const rateLimited = tracked.some(
-      (account) => priorFor(account)?.status === "rate_limited",
+      (account) =>
+        priorFor(account)?.status === "rate_limited" ||
+        priorFor(account)?.status === "overloaded",
     );
     const latestFleetAttempt = Math.max(
       0,
@@ -196,6 +202,7 @@ export function createClaudeResetReader(options: {
               ? (prior.lastConfirmedAt ?? null)
               : null,
         status: result.status,
+        httpStatus: result.httpStatus ?? null,
         offers:
           result.status === "ok"
             ? result.offers
