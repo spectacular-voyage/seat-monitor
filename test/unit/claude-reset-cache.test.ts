@@ -186,14 +186,20 @@ describe("Claude reset cache", () => {
     let secondReads = 0;
     const readOffer = vi.fn((candidate: LoadedAccount) => {
       if (candidate.accountAlias === second.accountAlias) secondReads += 1;
-      return Promise.resolve({
-        accountAlias: candidate.accountAlias,
-        status:
-          candidate.accountAlias === second.accountAlias && secondReads === 1
-            ? ("rate_limited" as const)
-            : ("ok" as const),
-        offers: [],
-      });
+      return Promise.resolve(
+        candidate.accountAlias === second.accountAlias && secondReads === 1
+          ? {
+              accountAlias: candidate.accountAlias,
+              status: "overloaded" as const,
+              offers: [],
+              httpStatus: 529,
+            }
+          : {
+              accountAlias: candidate.accountAlias,
+              status: "ok" as const,
+              offers: [],
+            },
+      );
     });
     const options = {
       accounts: [account, second, third],
@@ -218,7 +224,13 @@ describe("Claude reset cache", () => {
     const read = createClaudeResetReader(options);
     await read();
     current = initial + 60_000;
-    expect((await read())[1]?.status).toBe("rate_limited");
+    expect((await read())[1]).toEqual({
+      accountAlias: second.accountAlias,
+      status: "overloaded",
+      httpStatus: 529,
+      offers: [],
+      lastConfirmedAt: null,
+    });
     expect(readOffer).toHaveBeenCalledTimes(2);
 
     const afterRestart = createClaudeResetReader(options);

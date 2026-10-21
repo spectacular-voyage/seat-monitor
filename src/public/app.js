@@ -9,6 +9,7 @@ const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const ACCOUNT_SERIES_COLOR_COUNT = 8;
 const DEFAULT_USAGE_CHART_HEIGHT = 176;
 const CODEX_USAGE_CHART_HEIGHT = 100;
+const RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const VENDOR_RATE_COLOR_CLASSES = {
   Claude: "throughput-color-claude",
   Codex: "throughput-color-codex",
@@ -1377,7 +1378,12 @@ function createFleetAccount(account) {
     (total, offer) => total + offer.count,
     0,
   );
-  if (count > 0) {
+  const lastConfirmedAt = resetAccount?.lastConfirmedAt ?? null;
+  const recentlyConfirmed =
+    lastConfirmedAt !== null &&
+    Date.now() - Date.parse(lastConfirmedAt) <
+      RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS;
+  if (count > 0 && recentlyConfirmed) {
     const current = resetAccount.status === "ok";
     const badge = element(
       "a",
@@ -1394,6 +1400,21 @@ function createFleetAccount(account) {
   return wrapper;
 }
 
+function resetCheckIssue(account) {
+  if (account.status === "rate_limited") {
+    return "Provider rate limited the check (HTTP 429); reset probes are limited to one per hour";
+  }
+  if (account.status === "overloaded") {
+    return "Provider is overloaded (HTTP 529); reset probes are limited to one per hour";
+  }
+  if (account.status === "pending") {
+    return "Waiting for its scheduled check";
+  }
+  return account.httpStatus === undefined || account.httpStatus === null
+    ? "Could not verify this account’s reset offers"
+    : `Provider returned HTTP ${account.httpStatus}; reset availability is unknown`;
+}
+
 function renderResetOffers(accounts) {
   latestResetAccounts = Array.isArray(accounts)
     ? accounts
@@ -1408,6 +1429,12 @@ function renderResetOffers(accounts) {
       platform: account.platform,
       status: account.status,
       lastConfirmedAt: account.lastConfirmedAt ?? null,
+      stale:
+        account.lastConfirmedAt !== null &&
+        account.lastConfirmedAt !== undefined &&
+        Date.now() - Date.parse(account.lastConfirmedAt) >=
+          RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS,
+      issue: account.status === "ok" ? null : resetCheckIssue(account),
       ...offer,
     })),
   );
@@ -1445,11 +1472,11 @@ function renderResetOffers(accounts) {
       offer.expiresAt === null
         ? "Expiry not reported"
         : `Expires ${formatDateTime(offer.expiresAt)}`;
-    expiration.textContent =
-      offer.status === "ok"
-        ? expirationText
-        : `${expirationText} · Last confirmed ${offer.lastConfirmedAt === null ? "previously" : formatDateTime(offer.lastConfirmedAt)}; latest check ${offer.status === "rate_limited" ? "rate limited" : "unavailable"}`;
-    if (offer.status !== "ok") {
+    const current = offer.status === "ok" && !offer.stale;
+    expiration.textContent = current
+      ? expirationText
+      : `${expirationText} · Last confirmed ${offer.lastConfirmedAt === null ? "previously" : formatDateTime(offer.lastConfirmedAt)}; ${offer.issue ?? "not rechecked recently"}. This offer may have been used.`;
+    if (!current) {
       row.classList.add("reset-offer-unavailable");
     }
     row.append(expiration);
@@ -1474,15 +1501,7 @@ function renderResetOffers(accounts) {
     row.append(
       element("strong", "reset-offer-account", account.accountAlias),
       element("span", "reset-offer-label", "Reset status unavailable"),
-      element(
-        "span",
-        "reset-offer-expiration",
-        account.status === "rate_limited"
-          ? "Provider rate limited the check; reset probes are limited to one per hour"
-          : account.status === "pending"
-            ? "Waiting for its scheduled check"
-            : "Could not verify this account’s reset offers",
-      ),
+      element("span", "reset-offer-expiration", resetCheckIssue(account)),
     );
     resetOffersContainer.append(row);
   }

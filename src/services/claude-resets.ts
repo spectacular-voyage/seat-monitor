@@ -35,8 +35,9 @@ export type ClaudeResetOffer = {
 
 export type ClaudeAccountResets = {
   accountAlias: string;
-  status: "ok" | "rate_limited" | "unavailable";
+  status: "ok" | "rate_limited" | "overloaded" | "unavailable";
   offers: ClaudeResetOffer[];
+  httpStatus?: number;
 };
 
 export async function readClaudeAccountResets(
@@ -74,10 +75,13 @@ export async function readClaudeAccountResets(
       },
     );
     if (response.status === 429) {
-      return { ...unavailable, status: "rate_limited" };
+      return { ...unavailable, status: "rate_limited", httpStatus: 429 };
+    }
+    if (response.status === 529) {
+      return { ...unavailable, status: "overloaded", httpStatus: 529 };
     }
     if (!response.ok) {
-      return unavailable;
+      return { ...unavailable, httpStatus: response.status };
     }
     const usage = usageResponseSchema.parse(await response.json());
     if (usage.cedar_ember?.eligible !== true) {
