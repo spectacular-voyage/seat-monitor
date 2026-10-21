@@ -78,10 +78,13 @@ describe("Claude reset offers", () => {
       });
       expect(fetch).toHaveBeenCalledOnce();
       expect(requestedUrl).toBe(
-        "https://api.anthropic.com/api/oauth/usage?cedar_ember=1",
+        "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       );
       expect(new Headers(requestedHeaders).get("User-Agent")).toBe(
         "claude-cli/2.1.296 (external, cli)",
+      );
+      expect(new Headers(requestedHeaders).get("Content-Type")).toBe(
+        "application/json",
       );
       expect(JSON.stringify(result)).not.toContain("private-token");
     } finally {
