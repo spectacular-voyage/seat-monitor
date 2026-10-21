@@ -63,12 +63,13 @@ export async function readClaudeAccountResets(
       ) as unknown,
     );
     const response = await (options.fetch ?? fetch)(
-      "https://api.anthropic.com/api/oauth/usage?cedar_ember=1",
+      "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       {
         headers: {
           Authorization: `Bearer ${credentials.claudeAiOauth.accessToken}`,
           "anthropic-beta": "oauth-2025-04-20",
           "User-Agent": "claude-cli/2.1.296 (external, cli)",
+          "Content-Type": "application/json",
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(5_000),
