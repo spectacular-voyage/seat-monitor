@@ -13,6 +13,7 @@ import {
 export const CLAUDE_RESET_CHECK_INTERVAL_MILLISECONDS = 20 * 60_000;
 export const CLAUDE_RESET_FLEET_GAP_MILLISECONDS = 60_000;
 export const CLAUDE_RESET_RATE_LIMITED_GAP_MILLISECONDS = 60 * 60_000;
+export const CLAUDE_RESET_QUIET_PROBE_MILLISECONDS = 15 * 60_000;
 
 const instantSchema = z.iso.datetime({ offset: true });
 const entrySchema = z.object({
@@ -21,6 +22,18 @@ const entrySchema = z.object({
   lastConfirmedAt: instantSchema.nullable(),
   status: z.enum(["ok", "rate_limited", "overloaded", "unavailable"]),
   httpStatus: z.number().int().min(100).max(599).nullable().optional(),
+  reason: z
+    .enum([
+      "surface",
+      "cli_version",
+      "ineligible",
+      "missing_reset_block",
+      "invalid_response",
+      "credential_unavailable",
+      "network_error",
+    ])
+    .nullable()
+    .optional(),
   offers: z.array(
     z.object({
       label: z.string(),
@@ -42,6 +55,7 @@ type CacheStore = {
 export type CachedClaudeAccountResets = Omit<ClaudeAccountResets, "status"> & {
   status: ClaudeAccountResets["status"] | "pending";
   lastConfirmedAt: string | null;
+  quietUntil?: string;
 };
 
 const cacheFilePath = join(
@@ -92,6 +106,9 @@ function visible(
     ...(entry.httpStatus === undefined || entry.httpStatus === null
       ? {}
       : { httpStatus: entry.httpStatus }),
+    ...(entry.reason === undefined || entry.reason === null
+      ? {}
+      : { reason: entry.reason }),
     lastConfirmedAt: entry.lastConfirmedAt,
     offers: entry.offers.filter(
       (offer) =>
@@ -107,7 +124,19 @@ export function createClaudeResetReader(options: {
   now?: () => Date;
   storage?: CacheStore;
   readOffer?: (account: LoadedAccount) => Promise<ClaudeAccountResets>;
+  quietProbeAccountAlias?: string;
+  onQuietAccountChange?: (accountAlias: string | null) => void;
 }): () => Promise<CachedClaudeAccountResets[]> {
+  if (
+    options.quietProbeAccountAlias !== undefined &&
+    !options.accounts.some(
+      (account) =>
+        account.accountAlias === options.quietProbeAccountAlias &&
+        account.auth.type === "claude_profile",
+    )
+  ) {
+    throw new RangeError("Claude reset quiet probe account is not configured.");
+  }
   const now = options.now ?? (() => new Date());
   const storage = options.storage ?? fileStore;
   const readOffer =
@@ -115,6 +144,19 @@ export function createClaudeResetReader(options: {
     ((account: LoadedAccount) => readClaudeAccountResets(account, { now }));
   let entries: Record<string, CacheEntry> | null = null;
   let inFlight: Promise<CachedClaudeAccountResets[]> | null = null;
+  let quietStartedAt: number | null = null;
+  let quietProbeCompleted = false;
+  let quietTimer: NodeJS.Timeout | null = null;
+
+  function finishQuietProbe(): void {
+    if (quietTimer !== null) {
+      clearTimeout(quietTimer);
+      quietTimer = null;
+    }
+    quietStartedAt = null;
+    quietProbeCompleted = true;
+    options.onQuietAccountChange?.(null);
+  }
 
   async function load(): Promise<Record<string, CacheEntry>> {
     if (entries !== null) return entries;
@@ -172,16 +214,92 @@ export function createClaudeResetReader(options: {
             : Date.parse(rightAttempt.lastAttemptAt))
         );
       });
+    const quietAccount =
+      options.quietProbeAccountAlias === undefined
+        ? undefined
+        : due.find(
+            (account) =>
+              account.accountAlias === options.quietProbeAccountAlias,
+          );
     const fleetGap = rateLimited
       ? CLAUDE_RESET_RATE_LIMITED_GAP_MILLISECONDS
       : CLAUDE_RESET_FLEET_GAP_MILLISECONDS;
     const selected =
-      nowMilliseconds - latestFleetAttempt >= fleetGap ? due[0] : undefined;
+      nowMilliseconds - latestFleetAttempt >= fleetGap
+        ? quietAccount !== undefined && !quietProbeCompleted
+          ? quietAccount
+          : due[0]
+        : undefined;
+    if (quietStartedAt !== null && selected === undefined) {
+      finishQuietProbe();
+    }
+    const visibleAccounts = (): CachedClaudeAccountResets[] =>
+      accounts.map((account): CachedClaudeAccountResets => {
+        const accountAlias = account.accountAlias;
+        if (
+          !verified.has(accountAlias) ||
+          account.auth.type !== "claude_profile"
+        ) {
+          return {
+            accountAlias,
+            status: "unavailable",
+            offers: [],
+            lastConfirmedAt: null,
+          };
+        }
+        const prior = current[accountAlias];
+        const result =
+          prior?.identity === identity(account)
+            ? visible(accountAlias, prior, nowMilliseconds)
+            : {
+                accountAlias,
+                status: "pending" as const,
+                offers: [],
+                lastConfirmedAt: null,
+              };
+        return quietStartedAt !== null &&
+          accountAlias === options.quietProbeAccountAlias
+          ? {
+              ...result,
+              quietUntil: new Date(
+                quietStartedAt + CLAUDE_RESET_QUIET_PROBE_MILLISECONDS,
+              ).toISOString(),
+            }
+          : result;
+      });
     if (selected !== undefined) {
+      if (
+        selected.accountAlias === options.quietProbeAccountAlias &&
+        !quietProbeCompleted
+      ) {
+        if (quietStartedAt === null) {
+          quietStartedAt = nowMilliseconds;
+          options.onQuietAccountChange?.(selected.accountAlias);
+          quietTimer = setTimeout(() => {
+            void readPublic().catch(() => {
+              finishQuietProbe();
+            });
+          }, CLAUDE_RESET_QUIET_PROBE_MILLISECONDS);
+          quietTimer.unref();
+        }
+        if (
+          nowMilliseconds - quietStartedAt <
+          CLAUDE_RESET_QUIET_PROBE_MILLISECONDS
+        ) {
+          return visibleAccounts();
+        }
+      }
       const accountAlias = selected.accountAlias;
       const accountIdentity = identity(selected);
       const prior = current[accountAlias];
-      const result = await readOffer(selected);
+      let result: ClaudeAccountResets;
+      try {
+        result = await readOffer(selected);
+      } finally {
+        if (quietStartedAt !== null) {
+          finishQuietProbe();
+        }
+      }
       current[accountAlias] = {
         identity: accountIdentity,
         lastAttemptAt: new Date(nowMilliseconds).toISOString(),
@@ -193,6 +311,7 @@ export function createClaudeResetReader(options: {
               : null,
         status: result.status,
         httpStatus: result.httpStatus ?? null,
+        reason: result.reason ?? null,
         offers:
           result.status === "ok"
             ? result.offers
@@ -202,35 +321,14 @@ export function createClaudeResetReader(options: {
       };
       await storage.save(current);
     }
-    return accounts.map((account): CachedClaudeAccountResets => {
-      const accountAlias = account.accountAlias;
-      if (
-        !verified.has(accountAlias) ||
-        account.auth.type !== "claude_profile"
-      ) {
-        return {
-          accountAlias,
-          status: "unavailable",
-          offers: [],
-          lastConfirmedAt: null,
-        };
-      }
-      const prior = current[accountAlias];
-      return prior?.identity === identity(account)
-        ? visible(accountAlias, prior, nowMilliseconds)
-        : {
-            accountAlias,
-            status: "pending",
-            offers: [],
-            lastConfirmedAt: null,
-          };
-    });
+    return visibleAccounts();
   }
 
-  return () => {
+  const readPublic = () => {
     inFlight ??= read().finally(() => {
       inFlight = null;
     });
     return inFlight;
   };
+  return readPublic;
 }

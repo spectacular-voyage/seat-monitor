@@ -28,6 +28,7 @@ export type ScannerOptions = {
   timeoutMilliseconds?: number;
   timeoutMillisecondsByPlatform?: Partial<Readonly<Record<Platform, number>>>;
   now?: () => Date;
+  pausedAccountAlias?: () => string | null;
 };
 
 async function mapWithConcurrency<T, R>(
@@ -62,9 +63,14 @@ async function mapWithConcurrency<T, R>(
 export function createScanner(options: ScannerOptions): Scanner {
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
   const now = options.now ?? (() => new Date());
+  const previous = new Map<string, QuotaSnapshot>();
 
   return async () =>
     mapWithConcurrency(options.accounts, concurrency, async (account) => {
+      if (options.pausedAccountAlias?.() === account.accountAlias) {
+        const retained = previous.get(account.accountAlias);
+        if (retained !== undefined) return retained;
+      }
       if (
         account.auth.type !== "codex_profile" &&
         account.auth.type !== "claude_profile" &&
@@ -98,6 +104,7 @@ export function createScanner(options: ScannerOptions): Scanner {
             "Provider returned an account identity mismatch.",
           );
         }
+        previous.set(account.accountAlias, snapshot);
         return snapshot;
       } catch {
         return createFailureSnapshot(
@@ -110,9 +117,14 @@ export function createScanner(options: ScannerOptions): Scanner {
     });
 }
 
-export function createDefaultScanner(): Scanner {
+export function createDefaultScanner(
+  options: {
+    pausedAccountAlias?: () => string | null;
+  } = {},
+): Scanner {
   return createScanner({
     accounts: loadConfiguredAccounts(),
+    ...options,
     providers: {
       Claude: createClaudeProvider(),
       Codex: createCodexProvider(),

@@ -134,6 +134,7 @@ export type ServerOptions = {
     instanceId: string;
     startedAt: string;
   };
+  quietProbeAccountAlias?: string;
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
@@ -218,7 +219,12 @@ export async function buildServer(
   );
 
   const now = options.now ?? (() => new Date());
-  const baseScan = options.scan ?? createDefaultScanner();
+  let pausedResetAccountAlias: string | null = null;
+  const baseScan =
+    options.scan ??
+    createDefaultScanner({
+      pausedAccountAlias: () => pausedResetAccountAlias,
+    });
   const scan =
     options.history === undefined
       ? baseScan
@@ -227,6 +233,7 @@ export async function buildServer(
           history: options.history,
           source: "server",
           now,
+          excludedAccountAlias: () => pausedResetAccountAlias,
         });
   const dashboardAssetLoader =
     options.dashboardAssetLoader ?? loadDashboardAssets;
@@ -260,6 +267,14 @@ export async function buildServer(
                 .map((snapshot) => snapshot.accountAlias),
             ),
           now,
+          ...(options.quietProbeAccountAlias === undefined
+            ? {}
+            : {
+                quietProbeAccountAlias: options.quietProbeAccountAlias,
+                onQuietAccountChange: (accountAlias: string | null) => {
+                  pausedResetAccountAlias = accountAlias;
+                },
+              }),
         })
       : () => Promise.resolve([]));
   const readCodexResets =
@@ -599,6 +614,12 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
       scanOnStartup: settings.scanOnStartup,
     },
     analytics: settings.dashboard,
+    ...(process.env.SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT === undefined
+      ? {}
+      : {
+          quietProbeAccountAlias:
+            process.env.SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT,
+        }),
     ...(instanceId === undefined
       ? {}
       : { lifecycle: { instanceId, startedAt } }),

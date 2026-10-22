@@ -81,7 +81,7 @@ describe("Claude reset offers", () => {
         "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       );
       expect(new Headers(requestedHeaders).get("User-Agent")).toBe(
-        "claude-code/2.1",
+        "claude-cli/2.1.296 (external, cli)",
       );
       expect(new Headers(requestedHeaders).get("Content-Type")).toBe(
         "application/json",
@@ -177,12 +177,19 @@ describe("Claude reset offers", () => {
         accountAlias: "Claude_Test",
         status: "unavailable",
         offers: [],
+        httpStatus: 200,
+        reason: "surface",
       });
       const missingGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(Response.json({ cedar_ember: { eligible: true } })),
       });
       expect(missingGrants.status).toBe("unavailable");
+      expect(missingGrants.reason).toBe("invalid_response");
+      const missingBlock = await readClaudeAccountResets(account, {
+        fetch: () => Promise.resolve(Response.json({ cedar_ember: null })),
+      });
+      expect(missingBlock.reason).toBe("missing_reset_block");
       const emptyGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(

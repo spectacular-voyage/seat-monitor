@@ -1401,6 +1401,9 @@ function createFleetAccount(account) {
 }
 
 function resetCheckIssue(account) {
+  if (account.quietUntil) {
+    return `Quota scans paused for this account; reset check scheduled for ${formatDateTime(account.quietUntil)}`;
+  }
   if (account.status === "rate_limited") {
     return "Provider rate limited the check (HTTP 429); reset probes are limited to one per hour";
   }
@@ -1409,6 +1412,27 @@ function resetCheckIssue(account) {
   }
   if (account.status === "pending") {
     return "Waiting for its scheduled check";
+  }
+  if (account.reason === "surface") {
+    return "Provider rejected the reset check for this client surface";
+  }
+  if (account.reason === "cli_version") {
+    return "Provider rejected the reset check for this Claude CLI version";
+  }
+  if (account.reason === "ineligible") {
+    return "Provider marked the reset check ineligible; offer availability is unknown";
+  }
+  if (account.reason === "missing_reset_block") {
+    return "Provider omitted the reset-offer data";
+  }
+  if (account.reason === "invalid_response") {
+    return "Provider reset-offer data could not be read";
+  }
+  if (account.reason === "credential_unavailable") {
+    return "Claude profile credentials could not be read";
+  }
+  if (account.reason === "network_error") {
+    return "Reset-offer request failed before a response was received";
   }
   return account.httpStatus === undefined || account.httpStatus === null
     ? "Could not verify this account’s reset offers"
