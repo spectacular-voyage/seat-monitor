@@ -163,16 +163,6 @@ export function createClaudeResetReader(options: {
       .sort((left, right) => {
         const leftAttempt = priorFor(left);
         const rightAttempt = priorFor(right);
-        if (rateLimited) {
-          const leftUnconfirmed =
-            leftAttempt?.lastConfirmedAt === null || leftAttempt === undefined;
-          const rightUnconfirmed =
-            rightAttempt?.lastConfirmedAt === null ||
-            rightAttempt === undefined;
-          if (leftUnconfirmed !== rightUnconfirmed) {
-            return leftUnconfirmed ? -1 : 1;
-          }
-        }
         return (
           (leftAttempt === undefined
             ? Number.NEGATIVE_INFINITY
