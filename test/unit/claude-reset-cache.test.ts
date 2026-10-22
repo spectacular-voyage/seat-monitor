@@ -414,6 +414,44 @@ describe("Claude reset cache", () => {
     }
   });
 
+  it("re-arms an early timer so the quiet account always resumes", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.parse("2026-10-15T20:00:00Z");
+      let current = startedAt;
+      const changes: (string | null)[] = [];
+      const readOffer = vi.fn(() =>
+        Promise.resolve({
+          accountAlias: account.accountAlias,
+          status: "ok" as const,
+          offers: [],
+        }),
+      );
+      const read = createClaudeResetReader({
+        accounts: [account],
+        verifiedAliases: () => Promise.resolve(new Set([account.accountAlias])),
+        now: () => new Date(current),
+        storage: {
+          load: () => Promise.resolve({}),
+          save: () => Promise.resolve(),
+        },
+        readOffer,
+        quietProbeAccountAlias: account.accountAlias,
+        onQuietAccountChange: (alias) => changes.push(alias),
+      });
+      await read();
+      current = startedAt + 15 * 60_000 - 1;
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(readOffer).not.toHaveBeenCalled();
+      current += 1;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(readOffer).toHaveBeenCalledOnce();
+      expect(changes).toEqual([account.accountAlias, null]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels the pause if the account is no longer verified", async () => {
     let verified = true;
     const changes: (string | null)[] = [];

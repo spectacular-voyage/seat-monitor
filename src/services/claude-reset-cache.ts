@@ -158,6 +158,16 @@ export function createClaudeResetReader(options: {
     options.onQuietAccountChange?.(null);
   }
 
+  function armQuietTimer(delayMilliseconds: number): void {
+    quietTimer = setTimeout(() => {
+      quietTimer = null;
+      void readPublic().catch(() => {
+        finishQuietProbe();
+      });
+    }, delayMilliseconds);
+    quietTimer.unref();
+  }
+
   async function load(): Promise<Record<string, CacheEntry>> {
     if (entries !== null) return entries;
     entries = await storage.load();
@@ -275,17 +285,18 @@ export function createClaudeResetReader(options: {
         if (quietStartedAt === null) {
           quietStartedAt = nowMilliseconds;
           options.onQuietAccountChange?.(selected.accountAlias);
-          quietTimer = setTimeout(() => {
-            void readPublic().catch(() => {
-              finishQuietProbe();
-            });
-          }, CLAUDE_RESET_QUIET_PROBE_MILLISECONDS);
-          quietTimer.unref();
+          armQuietTimer(CLAUDE_RESET_QUIET_PROBE_MILLISECONDS);
         }
         if (
           nowMilliseconds - quietStartedAt <
           CLAUDE_RESET_QUIET_PROBE_MILLISECONDS
         ) {
+          if (quietTimer === null) {
+            armQuietTimer(
+              CLAUDE_RESET_QUIET_PROBE_MILLISECONDS -
+                (nowMilliseconds - quietStartedAt),
+            );
+          }
           return visibleAccounts();
         }
       }
