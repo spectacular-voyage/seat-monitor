@@ -68,7 +68,7 @@ export async function readClaudeAccountResets(
         headers: {
           Authorization: `Bearer ${credentials.claudeAiOauth.accessToken}`,
           "anthropic-beta": "oauth-2025-04-20",
-          "User-Agent": "claude-cli/2.1.296 (external, cli)",
+          "User-Agent": "claude-code/2.1",
           "Content-Type": "application/json",
           Accept: "application/json",
         },

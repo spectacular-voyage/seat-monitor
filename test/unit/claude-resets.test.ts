@@ -81,7 +81,7 @@ describe("Claude reset offers", () => {
         "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       );
       expect(new Headers(requestedHeaders).get("User-Agent")).toBe(
-        "claude-cli/2.1.296 (external, cli)",
+        "claude-code/2.1",
       );
       expect(new Headers(requestedHeaders).get("Content-Type")).toBe(
         "application/json",
