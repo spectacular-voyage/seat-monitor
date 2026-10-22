@@ -1420,7 +1420,9 @@ function resetCheckIssue(account) {
     return "Provider rejected the reset check for this Claude CLI version";
   }
   if (account.reason === "ineligible") {
-    return "Provider marked the reset check ineligible; offer availability is unknown";
+    return account.ineligibleReason
+      ? `Provider reported reset ineligibility: ${account.ineligibleReason}; offer availability is unconfirmed`
+      : "Provider marked the reset check ineligible without a reason; offer availability is unconfirmed";
   }
   if (account.reason === "missing_reset_block") {
     return "Provider omitted the reset-offer data";

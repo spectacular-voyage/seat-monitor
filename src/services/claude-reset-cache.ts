@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import type { LoadedAccount } from "../config/accounts.js";
 import {
+  claudeResetIneligibleReasonSchema,
   readClaudeAccountResets,
   type ClaudeAccountResets,
 } from "./claude-resets.js";
@@ -22,6 +23,7 @@ const entrySchema = z.object({
   lastConfirmedAt: instantSchema.nullable(),
   status: z.enum(["ok", "rate_limited", "overloaded", "unavailable"]),
   httpStatus: z.number().int().min(100).max(599).nullable().optional(),
+  ineligibleReason: claudeResetIneligibleReasonSchema.nullable().optional(),
   reason: z
     .enum([
       "surface",
@@ -109,6 +111,9 @@ function visible(
     ...(entry.reason === undefined || entry.reason === null
       ? {}
       : { reason: entry.reason }),
+    ...(entry.ineligibleReason === undefined
+      ? {}
+      : { ineligibleReason: entry.ineligibleReason }),
     lastConfirmedAt: entry.lastConfirmedAt,
     offers: entry.offers.filter(
       (offer) =>
@@ -323,6 +328,9 @@ export function createClaudeResetReader(options: {
         status: result.status,
         httpStatus: result.httpStatus ?? null,
         reason: result.reason ?? null,
+        ...(result.ineligibleReason === undefined
+          ? {}
+          : { ineligibleReason: result.ineligibleReason }),
         offers:
           result.status === "ok"
             ? result.offers

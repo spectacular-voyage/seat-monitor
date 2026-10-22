@@ -179,7 +179,32 @@ describe("Claude reset offers", () => {
         offers: [],
         httpStatus: 200,
         reason: "surface",
+        ineligibleReason: "surface",
       });
+      for (const [reportedReason, retainedReason] of [
+        ["not_enrolled", "not_enrolled"],
+        [null, null],
+        ["private response with an email@example.com", null],
+      ]) {
+        const ineligible = await readClaudeAccountResets(account, {
+          fetch: () =>
+            Promise.resolve(
+              Response.json({
+                cedar_ember: {
+                  eligible: false,
+                  ineligible_reason: reportedReason,
+                  grants: [],
+                },
+              }),
+            ),
+        });
+        expect(ineligible).toMatchObject({
+          status: "unavailable",
+          reason: "ineligible",
+          ineligibleReason: retainedReason,
+        });
+        expect(JSON.stringify(ineligible)).not.toContain("email@example.com");
+      }
       const missingGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(Response.json({ cedar_ember: { eligible: true } })),

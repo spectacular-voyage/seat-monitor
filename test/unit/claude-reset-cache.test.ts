@@ -382,6 +382,7 @@ describe("Claude reset cache", () => {
           accountAlias: account.accountAlias,
           status: "unavailable" as const,
           reason: "surface" as const,
+          ineligibleReason: "surface",
           offers: [],
         }),
       );
@@ -407,6 +408,7 @@ describe("Claude reset cache", () => {
       expect((await read())[0]).toMatchObject({
         status: "unavailable",
         reason: "surface",
+        ineligibleReason: "surface",
         lastConfirmedAt: null,
       });
     } finally {

@@ -28,6 +28,10 @@ const credentialsSchema = z.object({
   claudeAiOauth: z.object({ accessToken: z.string().min(1) }),
 });
 
+export const claudeResetIneligibleReasonSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_-]{0,63}$/u);
+
 export type ClaudeResetOffer = {
   label: string;
   count: number;
@@ -39,6 +43,7 @@ export type ClaudeAccountResets = {
   status: "ok" | "rate_limited" | "overloaded" | "unavailable";
   offers: ClaudeResetOffer[];
   httpStatus?: number;
+  ineligibleReason?: string | null;
   reason?:
     | "surface"
     | "cli_version"
@@ -114,9 +119,12 @@ export async function readClaudeAccountResets(
     }
     if (!usage.cedar_ember.eligible) {
       const reportedReason = usage.cedar_ember.ineligible_reason;
+      const safeReason =
+        claudeResetIneligibleReasonSchema.safeParse(reportedReason);
       return {
         ...unavailable,
         httpStatus: response.status,
+        ineligibleReason: safeReason.success ? safeReason.data : null,
         reason:
           reportedReason === "surface" || reportedReason === "cli_version"
             ? reportedReason
