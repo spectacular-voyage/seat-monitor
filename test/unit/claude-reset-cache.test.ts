@@ -159,7 +159,7 @@ describe("Claude reset cache", () => {
     );
   });
 
-  it("slows to one probe per hour after a rate limit and tries never-confirmed accounts first", async () => {
+  it("slows to one probe per hour after a rate limit", async () => {
     const second: LoadedAccount = {
       ...account,
       accountAlias: "Claude_Second",
@@ -247,13 +247,67 @@ describe("Claude reset cache", () => {
     expect(readOffer).toHaveBeenCalledTimes(3);
 
     current = initial + 121 * 60_000;
-    expect((await afterRestart())[1]?.status).toBe("ok");
-    expect(readOffer.mock.calls[3]?.[0].accountAlias).toBe(second.accountAlias);
-
-    current = initial + 122 * 60_000;
-    await afterRestart();
-    expect(readOffer.mock.calls[4]?.[0].accountAlias).toBe(
+    expect((await afterRestart())[0]?.status).toBe("ok");
+    expect(readOffer.mock.calls[3]?.[0].accountAlias).toBe(
       account.accountAlias,
     );
+
+    current = initial + 181 * 60_000;
+    await afterRestart();
+    expect(readOffer.mock.calls[4]?.[0].accountAlias).toBe(second.accountAlias);
+  });
+
+  it("revisits confirmed accounts while another account stays rate limited", async () => {
+    const second: LoadedAccount = {
+      ...account,
+      accountAlias: "Claude_Second",
+      auth: {
+        type: "claude_profile",
+        profile: "second",
+        expectedEmail: "second@example.com",
+        claudeConfigDir: "/unused/second-profile",
+      },
+    };
+    const initial = Date.parse("2026-10-15T20:00:00Z");
+    let current = initial;
+    let stored = {};
+    const readOffer = vi.fn((candidate: LoadedAccount) =>
+      Promise.resolve({
+        accountAlias: candidate.accountAlias,
+        status:
+          candidate.accountAlias === account.accountAlias
+            ? ("ok" as const)
+            : ("rate_limited" as const),
+        offers: [],
+      }),
+    );
+    const read = createClaudeResetReader({
+      accounts: [account, second],
+      verifiedAliases: () =>
+        Promise.resolve(new Set([account.accountAlias, second.accountAlias])),
+      now: () => new Date(current),
+      storage: {
+        load: () => Promise.resolve(structuredClone(stored)),
+        save: (entries: typeof stored) => {
+          stored = structuredClone(entries);
+          return Promise.resolve();
+        },
+      },
+      readOffer,
+    });
+
+    await read();
+    current += 60_000;
+    await read();
+    current += 60 * 60_000;
+    await read();
+
+    expect(
+      readOffer.mock.calls.map(([candidate]) => candidate.accountAlias),
+    ).toEqual([
+      account.accountAlias,
+      second.accountAlias,
+      account.accountAlias,
+    ]);
   });
 });
