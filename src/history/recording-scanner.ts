@@ -7,11 +7,21 @@ export function createRecordingScanner(options: {
   history: HistoryService;
   source: ScanSource;
   now?: () => Date;
+  excludedAccountAlias?: () => string | null;
 }): Scanner {
   const now = options.now ?? (() => new Date());
   return async () => {
+    const excludedAccountAlias = options.excludedAccountAlias?.() ?? null;
     const snapshots = await options.scan();
-    options.history.recordScan(options.source, snapshots, now());
+    options.history.recordScan(
+      options.source,
+      excludedAccountAlias === null
+        ? snapshots
+        : snapshots.filter(
+            (snapshot) => snapshot.accountAlias !== excludedAccountAlias,
+          ),
+      now(),
+    );
     return snapshots;
   };
 }

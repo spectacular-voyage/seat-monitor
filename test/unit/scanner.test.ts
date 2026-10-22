@@ -164,4 +164,30 @@ describe("account scanner", () => {
     ]);
     expect(JSON.stringify(snapshots)).not.toContain("secret provider response");
   });
+
+  it("retains the original observation while one account is paused", async () => {
+    let paused: string | null = null;
+    const seen: string[] = [];
+    const provider: QuotaProvider = {
+      scan(loadedAccount) {
+        seen.push(loadedAccount.accountAlias);
+        return Promise.resolve(
+          success(loadedAccount.accountAlias, loadedAccount.platform),
+        );
+      },
+    };
+    const scan = createScanner({
+      accounts: [claudeAccount("Claude"), account("Codex")],
+      providers: { Claude: provider, Codex: provider },
+      pausedAccountAlias: () => paused,
+    });
+    const first = await scan();
+    paused = "Claude";
+    const second = await scan();
+    expect(second[0]).toEqual(first[0]);
+    expect(seen).toEqual(["Claude", "Codex", "Codex"]);
+    paused = null;
+    await scan();
+    expect(seen.at(-2)).toBe("Claude");
+  });
 });

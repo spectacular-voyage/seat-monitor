@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   publicQuotaArraySchema,
@@ -225,6 +228,60 @@ describe("HTTP server", () => {
       expect(readClaudeResets).toHaveBeenCalledOnce();
     } finally {
       await server.close();
+    }
+  });
+
+  it("accepts one configured quiet-probe profile without contacting the provider before verification", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-quiet-"));
+    const priorConfig = process.env.SEAT_MONITOR_CONFIG;
+    const priorProfiles = process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR;
+    try {
+      const configPath = join(directory, "accounts.json");
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          accounts: [
+            {
+              accountAlias: "Claude_Quiet",
+              platform: "Claude",
+              auth: {
+                type: "claude_profile",
+                profile: "quiet",
+                expectedEmail: "quiet@example.com",
+              },
+            },
+          ],
+        }),
+      );
+      process.env.SEAT_MONITOR_CONFIG = configPath;
+      process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR = directory;
+      const server = await buildServer({
+        assets,
+        quietProbeAccountAlias: "Claude_Quiet",
+      });
+      try {
+        const response = await server.inject({
+          method: "GET",
+          url: "/api/claude-resets",
+          headers: allowedHeaders,
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual([
+          expect.objectContaining({
+            accountAlias: "Claude_Quiet",
+            status: "unavailable",
+          }),
+        ]);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      if (priorConfig === undefined) delete process.env.SEAT_MONITOR_CONFIG;
+      else process.env.SEAT_MONITOR_CONFIG = priorConfig;
+      if (priorProfiles === undefined)
+        delete process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR;
+      else process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR = priorProfiles;
+      await rm(directory, { recursive: true, force: true });
     }
   });
 

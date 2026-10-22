@@ -9,6 +9,7 @@ const usageResponseSchema = z.object({
   cedar_ember: z
     .object({
       eligible: z.boolean(),
+      ineligible_reason: z.string().nullable().optional(),
       grants: z.array(
         z.object({
           label: z.string().default("Limit reset"),
@@ -38,6 +39,14 @@ export type ClaudeAccountResets = {
   status: "ok" | "rate_limited" | "overloaded" | "unavailable";
   offers: ClaudeResetOffer[];
   httpStatus?: number;
+  reason?:
+    | "surface"
+    | "cli_version"
+    | "ineligible"
+    | "missing_reset_block"
+    | "invalid_response"
+    | "credential_unavailable"
+    | "network_error";
 };
 
 export async function readClaudeAccountResets(
@@ -53,8 +62,9 @@ export async function readClaudeAccountResets(
     return unavailable;
   }
 
+  let credentials: z.infer<typeof credentialsSchema>;
   try {
-    const credentials = credentialsSchema.parse(
+    credentials = credentialsSchema.parse(
       JSON.parse(
         await readFile(
           join(account.auth.claudeConfigDir, ".credentials.json"),
@@ -62,31 +72,56 @@ export async function readClaudeAccountResets(
         ),
       ) as unknown,
     );
-    const response = await (options.fetch ?? fetch)(
+  } catch {
+    return { ...unavailable, reason: "credential_unavailable" };
+  }
+
+  let response: Response;
+  try {
+    response = await (options.fetch ?? fetch)(
       "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       {
         headers: {
           Authorization: `Bearer ${credentials.claudeAiOauth.accessToken}`,
           "anthropic-beta": "oauth-2025-04-20",
-          "User-Agent": "claude-code/2.1",
+          "User-Agent": "claude-cli/2.1.296 (external, cli)",
           "Content-Type": "application/json",
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(5_000),
       },
     );
-    if (response.status === 429) {
-      return { ...unavailable, status: "rate_limited", httpStatus: 429 };
-    }
-    if (response.status === 529) {
-      return { ...unavailable, status: "overloaded", httpStatus: 529 };
-    }
-    if (!response.ok) {
-      return { ...unavailable, httpStatus: response.status };
-    }
+  } catch {
+    return { ...unavailable, reason: "network_error" };
+  }
+  if (response.status === 429) {
+    return { ...unavailable, status: "rate_limited", httpStatus: 429 };
+  }
+  if (response.status === 529) {
+    return { ...unavailable, status: "overloaded", httpStatus: 529 };
+  }
+  if (!response.ok) {
+    return { ...unavailable, httpStatus: response.status };
+  }
+  try {
     const usage = usageResponseSchema.parse(await response.json());
-    if (usage.cedar_ember?.eligible !== true) {
-      return unavailable;
+    if (usage.cedar_ember === null || usage.cedar_ember === undefined) {
+      return {
+        ...unavailable,
+        httpStatus: response.status,
+        reason: "missing_reset_block",
+      };
+    }
+    if (!usage.cedar_ember.eligible) {
+      const reportedReason = usage.cedar_ember.ineligible_reason;
+      return {
+        ...unavailable,
+        httpStatus: response.status,
+        reason:
+          reportedReason === "surface" || reportedReason === "cli_version"
+            ? reportedReason
+            : "ineligible",
+      };
     }
     const nowMilliseconds = (options.now ?? (() => new Date()))().getTime();
     const offers = usage.cedar_ember.grants
@@ -108,6 +143,10 @@ export async function readClaudeAccountResets(
       }));
     return { accountAlias: account.accountAlias, status: "ok", offers };
   } catch {
-    return unavailable;
+    return {
+      ...unavailable,
+      httpStatus: response.status,
+      reason: "invalid_response",
+    };
   }
 }

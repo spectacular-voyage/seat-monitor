@@ -54,4 +54,34 @@ describe("recording scanner", () => {
     await expect(scanner()).resolves.toEqual([]);
     expect(history.health).toBe("degraded");
   });
+
+  it("omits a paused account from recorded history while retaining it in the response", async () => {
+    const snapshots: QuotaSnapshot[] = [
+      {
+        accountAlias: "Claude",
+        platform: "Claude",
+        status: "ok",
+        plan: null,
+        limits: [],
+        observedAt: "2026-10-22T00:00:00.000Z",
+      },
+    ];
+    const recordScan = vi.fn();
+    const store = {
+      recordScan,
+      maintain: vi.fn(),
+      listScans: vi.fn(),
+      readSeries: vi.fn(),
+      listResetEvents: vi.fn(),
+      close: vi.fn(),
+    } satisfies HistoryStore;
+    const scanner = createRecordingScanner({
+      scan: () => Promise.resolve(snapshots),
+      history: new HistoryService(store),
+      source: "server",
+      excludedAccountAlias: () => "Claude",
+    });
+    await expect(scanner()).resolves.toBe(snapshots);
+    expect(recordScan).toHaveBeenCalledWith("server", [], expect.any(Date));
+  });
 });

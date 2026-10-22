@@ -310,4 +310,182 @@ describe("Claude reset cache", () => {
       account.accountAlias,
     ]);
   });
+
+  it("quiets one account for 15 minutes before its single probe", async () => {
+    const second: LoadedAccount = {
+      ...account,
+      accountAlias: "Claude_Second",
+      auth: {
+        type: "claude_profile",
+        profile: "second",
+        expectedEmail: "second@example.com",
+        claudeConfigDir: "/unused/second-profile",
+      },
+    };
+    let current = Date.parse("2026-10-15T20:00:00Z");
+    let stored = {};
+    const changes: (string | null)[] = [];
+    const readOffer = vi.fn((candidate: LoadedAccount) =>
+      Promise.resolve({
+        accountAlias: candidate.accountAlias,
+        status: "rate_limited" as const,
+        httpStatus: 429,
+        offers: [],
+      }),
+    );
+    const read = createClaudeResetReader({
+      accounts: [account, second],
+      verifiedAliases: () =>
+        Promise.resolve(new Set([account.accountAlias, second.accountAlias])),
+      now: () => new Date(current),
+      storage: {
+        load: () => Promise.resolve(structuredClone(stored)),
+        save: (entries: typeof stored) => {
+          stored = structuredClone(entries);
+          return Promise.resolve();
+        },
+      },
+      readOffer,
+      quietProbeAccountAlias: account.accountAlias,
+      onQuietAccountChange: (alias) => changes.push(alias),
+    });
+
+    const initial = await read();
+    expect(initial.map((item) => item.status)).toEqual(["pending", "pending"]);
+    expect(initial[0]?.quietUntil).toBe("2026-10-15T20:15:00.000Z");
+    expect(changes).toEqual([account.accountAlias]);
+    current += 14 * 60_000;
+    await read();
+    expect(readOffer).not.toHaveBeenCalled();
+    current += 60_000;
+    const result = await read();
+    expect(readOffer).toHaveBeenCalledOnce();
+    expect(readOffer.mock.calls[0]?.[0].accountAlias).toBe(
+      account.accountAlias,
+    );
+    expect(result[0]).toMatchObject({
+      status: "rate_limited",
+      httpStatus: 429,
+    });
+    expect(changes).toEqual([account.accountAlias, null]);
+    current += 60_000;
+    await read();
+    expect(readOffer).toHaveBeenCalledOnce();
+  });
+
+  it("runs the quiet probe when its timer elapses without another dashboard read", async () => {
+    vi.useFakeTimers();
+    try {
+      let current = Date.parse("2026-10-15T20:00:00Z");
+      const readOffer = vi.fn(() =>
+        Promise.resolve({
+          accountAlias: account.accountAlias,
+          status: "unavailable" as const,
+          reason: "surface" as const,
+          offers: [],
+        }),
+      );
+      let stored = {};
+      const read = createClaudeResetReader({
+        accounts: [account],
+        verifiedAliases: () => Promise.resolve(new Set([account.accountAlias])),
+        now: () => new Date(current),
+        storage: {
+          load: () => Promise.resolve(structuredClone(stored)),
+          save: (entries: typeof stored) => {
+            stored = structuredClone(entries);
+            return Promise.resolve();
+          },
+        },
+        readOffer,
+        quietProbeAccountAlias: account.accountAlias,
+      });
+      await read();
+      current += 15 * 60_000;
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(readOffer).toHaveBeenCalledOnce();
+      expect((await read())[0]).toMatchObject({
+        status: "unavailable",
+        reason: "surface",
+        lastConfirmedAt: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-arms an early timer so the quiet account always resumes", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.parse("2026-10-15T20:00:00Z");
+      let current = startedAt;
+      const changes: (string | null)[] = [];
+      const readOffer = vi.fn(() =>
+        Promise.resolve({
+          accountAlias: account.accountAlias,
+          status: "ok" as const,
+          offers: [],
+        }),
+      );
+      const read = createClaudeResetReader({
+        accounts: [account],
+        verifiedAliases: () => Promise.resolve(new Set([account.accountAlias])),
+        now: () => new Date(current),
+        storage: {
+          load: () => Promise.resolve({}),
+          save: () => Promise.resolve(),
+        },
+        readOffer,
+        quietProbeAccountAlias: account.accountAlias,
+        onQuietAccountChange: (alias) => changes.push(alias),
+      });
+      await read();
+      current = startedAt + 15 * 60_000 - 1;
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(readOffer).not.toHaveBeenCalled();
+      current += 1;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(readOffer).toHaveBeenCalledOnce();
+      expect(changes).toEqual([account.accountAlias, null]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the pause if the account is no longer verified", async () => {
+    let verified = true;
+    const changes: (string | null)[] = [];
+    const readOffer = vi.fn();
+    const read = createClaudeResetReader({
+      accounts: [account],
+      verifiedAliases: () =>
+        Promise.resolve(new Set(verified ? [account.accountAlias] : [])),
+      now: () => new Date("2026-10-15T20:00:00Z"),
+      storage: {
+        load: () => Promise.resolve({}),
+        save: () => Promise.resolve(),
+      },
+      readOffer,
+      quietProbeAccountAlias: account.accountAlias,
+      onQuietAccountChange: (alias) => changes.push(alias),
+    });
+    await read();
+    verified = false;
+    expect((await read())[0]).toMatchObject({
+      status: "unavailable",
+      lastConfirmedAt: null,
+    });
+    expect(changes).toEqual([account.accountAlias, null]);
+    expect(readOffer).not.toHaveBeenCalled();
+  });
+
+  it("rejects a quiet target that is not a configured Claude profile", () => {
+    expect(() =>
+      createClaudeResetReader({
+        accounts: [account],
+        verifiedAliases: () => Promise.resolve(new Set()),
+        quietProbeAccountAlias: "Missing",
+      }),
+    ).toThrow("not configured");
+  });
 });

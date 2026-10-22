@@ -81,7 +81,7 @@ describe("Claude reset offers", () => {
         "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
       );
       expect(new Headers(requestedHeaders).get("User-Agent")).toBe(
-        "claude-code/2.1",
+        "claude-cli/2.1.296 (external, cli)",
       );
       expect(new Headers(requestedHeaders).get("Content-Type")).toBe(
         "application/json",
@@ -177,12 +177,19 @@ describe("Claude reset offers", () => {
         accountAlias: "Claude_Test",
         status: "unavailable",
         offers: [],
+        httpStatus: 200,
+        reason: "surface",
       });
       const missingGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(Response.json({ cedar_ember: { eligible: true } })),
       });
       expect(missingGrants.status).toBe("unavailable");
+      expect(missingGrants.reason).toBe("invalid_response");
+      const missingBlock = await readClaudeAccountResets(account, {
+        fetch: () => Promise.resolve(Response.json({ cedar_ember: null })),
+      });
+      expect(missingBlock.reason).toBe("missing_reset_block");
       const emptyGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(
@@ -194,8 +201,49 @@ describe("Claude reset offers", () => {
         status: "ok",
         offers: [],
       });
+      const networkError = await readClaudeAccountResets(account, {
+        fetch: () => Promise.reject(new Error("private provider response")),
+      });
+      expect(networkError).toEqual({
+        accountAlias: "Claude_Test",
+        status: "unavailable",
+        offers: [],
+        reason: "network_error",
+      });
+      const serverError = await readClaudeAccountResets(account, {
+        fetch: () => Promise.resolve(new Response(null, { status: 503 })),
+      });
+      expect(serverError).toMatchObject({
+        status: "unavailable",
+        httpStatus: 503,
+      });
+      await writeFile(
+        join(directory, ".credentials.json"),
+        "invalid credentials",
+      );
+      const credentialError = await readClaudeAccountResets(account);
+      expect(credentialError.reason).toBe("credential_unavailable");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("does not request offers for a setup-token account", async () => {
+    const setupAccount: LoadedAccount = {
+      accountAlias: "Claude_Setup",
+      platform: "Claude",
+      auth: {
+        type: "claude_setup_token",
+        credentialEnv: "CLAUDE_TOKEN",
+        credential: "token",
+      },
+    };
+    const fetch = vi.fn();
+    expect(await readClaudeAccountResets(setupAccount, { fetch })).toEqual({
+      accountAlias: "Claude_Setup",
+      status: "unavailable",
+      offers: [],
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
