@@ -205,6 +205,42 @@ describe("Claude reset offers", () => {
         });
         expect(JSON.stringify(ineligible)).not.toContain("email@example.com");
       }
+      const noGrant = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json({
+              cedar_ember: {
+                eligible: false,
+                ineligible_reason: "no_grant",
+                grants: [],
+              },
+            }),
+          ),
+      });
+      expect(noGrant).toEqual({
+        accountAlias: "Claude_Test",
+        status: "ok",
+        httpStatus: 200,
+        ineligibleReason: "no_grant",
+        offers: [],
+      });
+      const contradictory = await readClaudeAccountResets(account, {
+        fetch: () =>
+          Promise.resolve(
+            Response.json({
+              cedar_ember: {
+                eligible: false,
+                ineligible_reason: "no_grant",
+                grants: [{ resets_left: 1 }],
+              },
+            }),
+          ),
+      });
+      expect(contradictory).toMatchObject({
+        status: "unavailable",
+        reason: "ineligible",
+        ineligibleReason: "no_grant",
+      });
       const missingGrants = await readClaudeAccountResets(account, {
         fetch: () =>
           Promise.resolve(Response.json({ cedar_ember: { eligible: true } })),

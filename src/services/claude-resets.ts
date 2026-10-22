@@ -119,6 +119,18 @@ export async function readClaudeAccountResets(
     }
     if (!usage.cedar_ember.eligible) {
       const reportedReason = usage.cedar_ember.ineligible_reason;
+      if (
+        reportedReason === "no_grant" &&
+        usage.cedar_ember.grants.every((grant) => grant.resets_left === 0)
+      ) {
+        return {
+          accountAlias: account.accountAlias,
+          status: "ok",
+          httpStatus: response.status,
+          ineligibleReason: "no_grant",
+          offers: [],
+        };
+      }
       const safeReason =
         claudeResetIneligibleReasonSchema.safeParse(reportedReason);
       return {
