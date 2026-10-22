@@ -413,4 +413,41 @@ describe("Claude reset cache", () => {
       vi.useRealTimers();
     }
   });
+
+  it("cancels the pause if the account is no longer verified", async () => {
+    let verified = true;
+    const changes: (string | null)[] = [];
+    const readOffer = vi.fn();
+    const read = createClaudeResetReader({
+      accounts: [account],
+      verifiedAliases: () =>
+        Promise.resolve(new Set(verified ? [account.accountAlias] : [])),
+      now: () => new Date("2026-10-15T20:00:00Z"),
+      storage: {
+        load: () => Promise.resolve({}),
+        save: () => Promise.resolve(),
+      },
+      readOffer,
+      quietProbeAccountAlias: account.accountAlias,
+      onQuietAccountChange: (alias) => changes.push(alias),
+    });
+    await read();
+    verified = false;
+    expect((await read())[0]).toMatchObject({
+      status: "unavailable",
+      lastConfirmedAt: null,
+    });
+    expect(changes).toEqual([account.accountAlias, null]);
+    expect(readOffer).not.toHaveBeenCalled();
+  });
+
+  it("rejects a quiet target that is not a configured Claude profile", () => {
+    expect(() =>
+      createClaudeResetReader({
+        accounts: [account],
+        verifiedAliases: () => Promise.resolve(new Set()),
+        quietProbeAccountAlias: "Missing",
+      }),
+    ).toThrow("not configured");
+  });
 });
