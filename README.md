@@ -16,6 +16,8 @@ The original draft named website roots rather than authenticated quota endpoints
 
 Seat Monitor does not scrape dashboards, parse terminal control sequences, or reuse browser cookies. The dashboard's optional Claude reset-offer check makes a read-only request to Claude's private OAuth usage endpoint using each verified local profile. It requests the `cedar_ember` reset block with Claude Code's `skip_spend=1` query and client headers, and recognizes an explicit `no_grant` response as zero offers while keeping other ineligibility reasons unconfirmed. This endpoint is undocumented and may change; failure appears as unavailable reset status without changing quota scans. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for the original quota sources and mapping decisions.
 
+If `/usage` returns contribution insights without quota windows, Seat Monitor reports `quota_unavailable` with empty limits and keeps current quota and forecasts unknown. [Claude Code's usage documentation](https://code.claude.com/docs/en/costs#plan-usage-breakdown) describes these percentages as overlapping shares of local activity, not consumed or remaining plan quota. They are never quota inputs. Updating the error classification does not recover a missing provider reading.
+
 ## Install
 
 With npm:
@@ -371,7 +373,7 @@ Run the complete quality gate with:
 npm run check
 ```
 
-Provider adapters accept injected clocks and process clients. Fixtures are derived from public provider examples and contain no live account identifiers, credentials, or usage values.
+Provider adapters accept injected clocks and process clients. Fixtures use public provider examples or explicitly supplied identifier-free captures. The Claude 2.1.312 insights-only regression preserves the supplied 678-byte capture (SHA256 `d416bd44048da780154f2911ecb4263dfe283ab0a43e7a2efe131ccb15ce0194`); its local contribution shares are test data, never live quota. Fixtures contain no live account identifiers or credentials.
 
 ## Security
 
