@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
@@ -220,5 +221,45 @@ describe("dashboard assets", () => {
   it("keeps provider-controlled rendering on textContent", () => {
     expect(javascript).toContain("value.textContent = text");
     expect(javascript).not.toContain("innerHTML");
+  });
+
+  describe("a missing current quota reading (SEAT-MON-72, #74)", () => {
+    const toneSource = javascript.slice(
+      javascript.indexOf("function toneForLimit("),
+      javascript.indexOf("function inferredWindowDurationMinutes("),
+    );
+    const toneForLimit = runInNewContext(`${toneSource}; toneForLimit`) as (
+      limit: unknown,
+    ) => string;
+    const limit = (
+      currentUsedPercent: number | null,
+      status = "not_consuming",
+    ) => ({
+      currentUsedPercent,
+      projection: { status },
+    });
+
+    it("is neutral and unknown, never healthy", () => {
+      expect(toneForLimit(limit(null, "insufficient_history"))).toBe("unknown");
+    });
+
+    it("keeps an observed zero as healthy and the thresholds as before (control)", () => {
+      expect(toneForLimit(limit(0))).toBe("healthy");
+      expect(toneForLimit(limit(75))).toBe("warning");
+      expect(toneForLimit(limit(90))).toBe("danger");
+      expect(toneForLimit(limit(10, "exhausts_before_reset"))).toBe("danger");
+    });
+
+    it("draws no meter fill for an unknown reading and styles the unknown tone", () => {
+      const meter = javascript.slice(
+        javascript.indexOf("function createCapacityMeter("),
+        javascript.indexOf("function createCapacityLimit("),
+      );
+      expect(meter).toContain("limit.currentUsedPercent !== null");
+      expect(meter).not.toContain("currentUsedPercent ?? 0");
+      expect(css).toContain(".capacity-fill.unknown");
+      expect(css).toContain(".unknown-text");
+      expect(css).toContain(".current-usage.unknown");
+    });
   });
 });

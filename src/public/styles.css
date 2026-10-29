@@ -549,6 +549,10 @@ button:focus-visible,
   fill: #84cfa1;
 }
 
+.capacity-fill.unknown {
+  fill: #6b736e;
+}
+
 .capacity-fill.warning {
   fill: #d4aa6e;
 }
@@ -1030,6 +1034,10 @@ button:focus-visible,
   color: #9ee0b8;
 }
 
+.current-usage.unknown .usage-value {
+  color: #9aa39e;
+}
+
 .current-usage.warning .usage-value {
   color: #e2bb7b;
 }
@@ -1332,6 +1340,10 @@ button:focus-visible,
 
 .healthy-text {
   color: #8fd3ab;
+}
+
+.unknown-text {
+  color: #9aa39e;
 }
 
 .warning-text {

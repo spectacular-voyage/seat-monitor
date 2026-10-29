@@ -329,6 +329,10 @@ function renderTopWarnings(payload) {
 }
 
 function toneForLimit(limit) {
+  // A missing CURRENT reading (for example quota_unavailable) is neither healthy nor a zero: it is neutral and unknown (SEAT-MON-72, #74).
+  if (limit.currentUsedPercent === null) {
+    return "unknown";
+  }
   if (
     limit.projection.status === "already_exhausted" ||
     limit.projection.status === "exhausts_before_reset" ||
@@ -1218,7 +1222,8 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
 }
 
 function createCapacityMeter(limit) {
-  const used = limit.currentUsedPercent ?? 0;
+  const known = limit.currentUsedPercent !== null;
+  const used = known ? limit.currentUsedPercent : 0;
   const svg = svgElement("svg", {
     viewBox: "0 0 100 8",
     role: "img",
@@ -1235,14 +1240,19 @@ function createCapacityMeter(limit) {
       rx: 2,
       class: "capacity-track",
     }),
-    svgElement("rect", {
-      x: 0,
-      y: 0,
-      width: used,
-      height: 8,
-      rx: 2,
-      class: `capacity-fill ${toneForLimit(limit)}`,
-    }),
+    // An unknown reading draws no fill at all: an empty meter must never read as a healthy zero.
+    ...(known
+      ? [
+          svgElement("rect", {
+            x: 0,
+            y: 0,
+            width: used,
+            height: 8,
+            rx: 2,
+            class: `capacity-fill ${toneForLimit(limit)}`,
+          }),
+        ]
+      : []),
   );
   return svg;
 }
