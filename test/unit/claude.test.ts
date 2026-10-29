@@ -267,13 +267,16 @@ describe("Claude provider", () => {
     );
   });
 
-  it("reports quota_unavailable, never ok or zero, for a usage-advice report", async () => {
+  it.each([
+    "claude-usage-advice-only.txt",
+    "claude-usage-insights-only-2.1.312.txt",
+  ])("reports quota_unavailable, never ok or zero, for %s", async (fixture) => {
     const authFixture = await readFile(
       new URL("../fixtures/claude-auth-status.json", import.meta.url),
       "utf8",
     );
     const adviceFixture = await readFile(
-      new URL("../fixtures/claude-usage-advice-only.txt", import.meta.url),
+      new URL(`../fixtures/${fixture}`, import.meta.url),
       "utf8",
     );
     const profileAccount: LoadedAccount = {
@@ -307,6 +310,10 @@ describe("Claude provider", () => {
       throw new TypeError("Expected an error snapshot.");
     }
     expect(snapshot.error.code).toBe("quota_unavailable");
+    expect(snapshot.error.message).toBe(
+      "Claude /usage did not supply session or week quota windows; the quota is unknown.",
+    );
+    expect(snapshot.plan).toBeNull();
     expect(snapshot.limits).toEqual([]);
     expect(JSON.stringify(snapshot)).not.toContain("usedPercent");
   });

@@ -65,9 +65,12 @@ describe("Claude usage parser", () => {
     ).toBe(true);
   });
 
-  it("reports the usage-advice report as unavailable, never as a quota reading", async () => {
+  it.each([
+    "claude-usage-advice-only.txt",
+    "claude-usage-insights-only-2.1.312.txt",
+  ])("reports %s as unavailable, never as a quota reading", async (fixture) => {
     const output = await readFile(
-      new URL("../fixtures/claude-usage-advice-only.txt", import.meta.url),
+      new URL(`../fixtures/${fixture}`, import.meta.url),
       "utf8",
     );
     expect(() =>
