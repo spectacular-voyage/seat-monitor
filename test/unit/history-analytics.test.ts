@@ -4,6 +4,7 @@ import {
   quotaSuccessSchema,
   type QuotaSnapshot,
 } from "../../src/domain/quota.js";
+import { buildCliForecast } from "../../src/history/cli-forecast.js";
 import {
   buildHistoryAnalytics,
   projectExhaustion,
@@ -466,6 +467,100 @@ describe("historical quota analytics", () => {
       }),
     );
     expect(session?.projection.status).toBe("exhausts_before_reset");
+  });
+
+  describe("a latest quota_unavailable snapshot (SEAT-MON-72, #74)", () => {
+    const unavailable: QuotaSnapshot = {
+      accountAlias: "claude-ops@example.com",
+      platform: "Claude",
+      status: "error",
+      plan: null,
+      limits: [],
+      observedAt: new Date(nowMilliseconds).toISOString(),
+      error: {
+        code: "quota_unavailable",
+        message: "Claude /usage did not supply quota windows.",
+      },
+    };
+    const analyze = (
+      snapshots: QuotaSnapshot[],
+      history: HistoryLimitSeries[],
+    ) =>
+      buildHistoryAnalytics({
+        snapshots,
+        series: history,
+        resetEvents: [],
+        historyHealth: "ready",
+        nowMilliseconds,
+        fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+        toMilliseconds: nowMilliseconds,
+        requestedResolution: "raw",
+        timeZone: "America/Los_Angeles",
+      });
+
+    it("keeps earlier points as history but makes the current reading, headroom, projection and risk UNKNOWN", () => {
+      const rising = series("base.session", [60, 75, 90], resetAfter(300));
+      const analytics = analyze([unavailable], [rising]);
+      const session = analytics.accounts[0]?.limits.find(
+        (limit) => limit.key === "base.session",
+      );
+      expect(session?.points.map((candidate) => candidate.usedPercent)).toEqual(
+        [60, 75, 90],
+      );
+      expect(session?.currentUsedPercent).toBeNull();
+      expect(session?.headroomPercent).toBeNull();
+      expect(session?.projection.status).toBe("insufficient_history");
+      expect(session?.projection.projectedExhaustionAt).toBeNull();
+
+      const forecast = buildCliForecast(analytics);
+      const limit = forecast.accounts[0]?.limits.find(
+        (candidate) => candidate.key === "base.session",
+      );
+      expect(forecast.accounts[0]?.status).toBe("error");
+      expect(limit?.usedPercent).toBeNull();
+      expect(limit?.projectionStatus).toBe("insufficient_history");
+      expect(forecast.riskRanking).toEqual([]);
+    });
+
+    it("never turns earlier flat zero readings into a current 0% not_consuming", () => {
+      const flatZero = series("base.session", [0, 0, 0, 0], resetAfter(300));
+      const session = analyze([unavailable], [flatZero]).accounts[0]?.limits[0];
+      expect(session?.currentUsedPercent).toBeNull();
+      expect(session?.headroomPercent).toBeNull();
+      expect(session?.projection.status).not.toBe("not_consuming");
+    });
+
+    it("has no limits to show when there is no history at all", () => {
+      const analytics = analyze([unavailable], []);
+      expect(analytics.accounts[0]?.limits).toEqual([]);
+      expect(buildCliForecast(analytics).riskRanking).toEqual([]);
+    });
+
+    it("keeps a genuinely observed zero as 0% (control)", () => {
+      const observedZero = quotaSuccessSchema.parse({
+        accountAlias: "claude-ops@example.com",
+        platform: "Claude",
+        status: "ok",
+        plan: "max",
+        limits: [
+          {
+            key: "base.session",
+            label: "Current Session",
+            scope: "window",
+            availability: "available",
+            usedPercent: 0,
+            windowDurationMinutes: 300,
+            resetAt: resetAfter(300),
+          },
+        ],
+        observedAt: new Date(nowMilliseconds).toISOString(),
+      });
+      const flatZero = series("base.session", [0, 0, 0, 0], resetAfter(300));
+      const session = analyze([observedZero], [flatZero]).accounts[0]
+        ?.limits[0];
+      expect(session?.currentUsedPercent).toBe(0);
+      expect(session?.headroomPercent).toBe(100);
+    });
   });
 
   it("treats Fable as nested capacity without converting its percentage", () => {

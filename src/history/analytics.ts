@@ -960,6 +960,11 @@ export function buildHistoryAnalytics(options: {
             snapshot.accountAlias.toLocaleLowerCase("en-US") &&
           series.platform === snapshot.platform,
       );
+      // A latest quota_unavailable snapshot means the CURRENT reading is unknown (SEAT-MON-72, #74): history stays chart history, but the
+      // current percentage, headroom, projection and risk must not be rebuilt from an older success.
+      const currentUnavailable =
+        snapshot.status === "error" &&
+        snapshot.error.code === "quota_unavailable";
       const limitKeys =
         reportRows.length > 0
           ? reportRows.map((row) => row.key)
@@ -1046,14 +1051,16 @@ export function buildHistoryAnalytics(options: {
             parentKey: row?.parentKey ?? (isFable ? "base.weekly" : null),
             availability:
               row?.support ?? history?.limit.availability ?? "unsupported",
-            currentUsedPercent:
-              row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null,
-            headroomPercent:
-              row?.headroomPercent ??
-              (points.at(-1)?.usedPercent === null ||
-              points.at(-1)?.usedPercent === undefined
-                ? null
-                : 100 - (points.at(-1)?.usedPercent ?? 100)),
+            currentUsedPercent: currentUnavailable
+              ? null
+              : (row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null),
+            headroomPercent: currentUnavailable
+              ? null
+              : (row?.headroomPercent ??
+                (points.at(-1)?.usedPercent === null ||
+                points.at(-1)?.usedPercent === undefined
+                  ? null
+                  : 100 - (points.at(-1)?.usedPercent ?? 100))),
             windowDurationMinutes,
             resetAt: reset.resetAt,
             resetSource: reset.resetSource,
@@ -1067,7 +1074,9 @@ export function buildHistoryAnalytics(options: {
               : [...providerMarkers, ...inferredMarkers(points)].sort(
                   (left, right) => Date.parse(left.at) - Date.parse(right.at),
                 ),
-            projection: projectExhaustion(projectionPoints, projectionResetAt),
+            projection: currentUnavailable
+              ? projectExhaustion([], null)
+              : projectExhaustion(projectionPoints, projectionResetAt),
           },
         ];
       });
