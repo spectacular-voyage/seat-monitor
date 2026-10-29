@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { quotaSuccessSchema, type QuotaLimit } from "../domain/quota.js";
-import { parseClaudeUsageOutput } from "./claude-usage.js";
+import {
+  ClaudeUsageUnavailableError,
+  parseClaudeUsageOutput,
+} from "./claude-usage.js";
 import { createFailureSnapshot } from "./failure.js";
 import {
   minimalChildEnvironment,
@@ -265,6 +268,14 @@ export function createClaudeProvider(
             account,
             "unsupported",
             "Claude CLI is not installed or is not on PATH.",
+            observedAt,
+          );
+        }
+        if (error instanceof ClaudeUsageUnavailableError) {
+          return createFailureSnapshot(
+            account,
+            "quota_unavailable",
+            "Claude /usage did not supply session or week quota windows; the quota is unknown.",
             observedAt,
           );
         }

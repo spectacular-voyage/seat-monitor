@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  ClaudeUsageUnavailableError,
   parseClaudeResetAt,
   parseClaudeUsageOutput,
 } from "../../src/services/claude-usage.js";
@@ -64,10 +65,28 @@ describe("Claude usage parser", () => {
     ).toBe(true);
   });
 
-  it("rejects output without a session window", () => {
+  it("reports the usage-advice report as unavailable, never as a quota reading", async () => {
+    const output = await readFile(
+      new URL("../fixtures/claude-usage-advice-only.txt", import.meta.url),
+      "utf8",
+    );
+    expect(() =>
+      parseClaudeUsageOutput(output, Date.parse("2026-08-30T00:30:00.000Z")),
+    ).toThrow(ClaudeUsageUnavailableError);
+  });
+
+  it("reports empty or cost-only output as unavailable", () => {
+    for (const output of ["", "Total cost: $0.0000"]) {
+      expect(() =>
+        parseClaudeUsageOutput(output, Date.parse("2026-08-30T00:30:00.000Z")),
+      ).toThrow(ClaudeUsageUnavailableError);
+    }
+  });
+
+  it("still rejects a partial report that has a week window but no session window", () => {
     expect(() =>
       parseClaudeUsageOutput(
-        "Total cost: $0.0000",
+        "Current week (all models): 12% used",
         Date.parse("2026-08-30T00:30:00.000Z"),
       ),
     ).toThrow("session window");

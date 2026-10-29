@@ -267,6 +267,50 @@ describe("Claude provider", () => {
     );
   });
 
+  it("reports quota_unavailable, never ok or zero, for a usage-advice report", async () => {
+    const authFixture = await readFile(
+      new URL("../fixtures/claude-auth-status.json", import.meta.url),
+      "utf8",
+    );
+    const adviceFixture = await readFile(
+      new URL("../fixtures/claude-usage-advice-only.txt", import.meta.url),
+      "utf8",
+    );
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-profile@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "profile",
+        expectedEmail: "profile@example.com",
+        claudeConfigDir: "/profiles/profile",
+      },
+    };
+    const provider = createClaudeProvider({
+      profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(false),
+      run: (options) =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: options.args[0] === "auth" ? authFixture : adviceFixture,
+          stderr: "",
+        }),
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-10-28T23:52:00.000Z"),
+      timeoutMilliseconds: 8_000,
+    });
+
+    expect(snapshot.status).toBe("error");
+    if (snapshot.status !== "error") {
+      throw new TypeError("Expected an error snapshot.");
+    }
+    expect(snapshot.error.code).toBe("quota_unavailable");
+    expect(snapshot.limits).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain("usedPercent");
+  });
+
   it("preserves an enterprise-managed MCP configuration", async () => {
     const authFixture = await readFile(
       new URL("../fixtures/claude-auth-status.json", import.meta.url),
