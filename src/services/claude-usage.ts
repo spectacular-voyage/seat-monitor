@@ -184,6 +184,17 @@ function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+/**
+ * The native /usage output was readable but supplies none of the quota windows this monitor reads (for example the
+ * usage-advice report that lists request and MCP shares). The quota is UNKNOWN, not zero and not an invalid response.
+ */
+export class ClaudeUsageUnavailableError extends Error {
+  constructor() {
+    super("Claude usage output carries no session or week quota windows.");
+    this.name = "ClaudeUsageUnavailableError";
+  }
+}
+
 export function parseClaudeUsageOutput(
   output: string,
   nowMilliseconds: number,
@@ -219,7 +230,12 @@ export function parseClaudeUsageOutput(
     });
   }
 
+  if (limits.length === 0) {
+    // No quota window line of either supported format: the command no longer supplies them. Advice percentages are never read as quota.
+    throw new ClaudeUsageUnavailableError();
+  }
   if (!limits.some((limit) => limit.key === "base.session")) {
+    // Some windows but no session window is a malformed or partial report, not an absence: it stays an invalid response.
     throw new TypeError("Claude usage output is missing the session window.");
   }
   if (!limits.some((limit) => limit.key === "fable.weekly")) {

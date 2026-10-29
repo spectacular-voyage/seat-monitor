@@ -38,6 +38,8 @@ export const quotaErrorCodeSchema = z.enum([
   "timeout",
   "network",
   "invalid_response",
+  // The provider answered, but its output carries no session or week quota windows: quota is UNKNOWN, never 0% and never ok.
+  "quota_unavailable",
   "unsupported",
 ]);
 

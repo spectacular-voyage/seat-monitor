@@ -2,6 +2,7 @@ import {
   LONGEST_QUOTA_PERIOD_MINUTES,
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
+  toneForLimit,
 } from "./capacity-order.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
@@ -326,20 +327,6 @@ function renderTopWarnings(payload) {
     );
   }
   topWarnings.replaceChildren(...warnings);
-}
-
-function toneForLimit(limit) {
-  if (
-    limit.projection.status === "already_exhausted" ||
-    limit.projection.status === "exhausts_before_reset" ||
-    (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 90)
-  ) {
-    return "danger";
-  }
-  if (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 75) {
-    return "warning";
-  }
-  return "healthy";
 }
 
 function inferredWindowDurationMinutes(limit) {
@@ -1218,7 +1205,8 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
 }
 
 function createCapacityMeter(limit) {
-  const used = limit.currentUsedPercent ?? 0;
+  const known = limit.currentUsedPercent !== null;
+  const used = known ? limit.currentUsedPercent : 0;
   const svg = svgElement("svg", {
     viewBox: "0 0 100 8",
     role: "img",
@@ -1235,14 +1223,19 @@ function createCapacityMeter(limit) {
       rx: 2,
       class: "capacity-track",
     }),
-    svgElement("rect", {
-      x: 0,
-      y: 0,
-      width: used,
-      height: 8,
-      rx: 2,
-      class: `capacity-fill ${toneForLimit(limit)}`,
-    }),
+    // An unknown reading draws no fill at all: an empty meter must never read as a healthy zero.
+    ...(known
+      ? [
+          svgElement("rect", {
+            x: 0,
+            y: 0,
+            width: used,
+            height: 8,
+            rx: 2,
+            class: `capacity-fill ${toneForLimit(limit)}`,
+          }),
+        ]
+      : []),
   );
   return svg;
 }

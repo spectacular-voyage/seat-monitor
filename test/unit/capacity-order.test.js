@@ -4,6 +4,7 @@ import {
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
   sessionUtilizationPercent,
+  toneForLimit,
   weeklyResetTimestamp,
 } from "../../src/public/capacity-order.js";
 
@@ -99,5 +100,23 @@ describe("Per-account history ordering", () => {
         .sort(compareAccountsBySessionUtilization)
         .map(({ platform, accountAlias }) => `${platform}:${accountAlias}`),
     ).toEqual(["Claude:alpha", "Claude:zeta", "Codex:beta"]);
+  });
+});
+
+describe("toneForLimit (SEAT-MON-72, #74)", () => {
+  const limit = (currentUsedPercent, status = "not_consuming") => ({
+    currentUsedPercent,
+    projection: { status },
+  });
+
+  it("is neutral and unknown for a missing current reading, never healthy", () => {
+    expect(toneForLimit(limit(null, "insufficient_history"))).toBe("unknown");
+  });
+
+  it("keeps an observed zero healthy and the thresholds as before (control)", () => {
+    expect(toneForLimit(limit(0))).toBe("healthy");
+    expect(toneForLimit(limit(75))).toBe("warning");
+    expect(toneForLimit(limit(90))).toBe("danger");
+    expect(toneForLimit(limit(10, "exhausts_before_reset"))).toBe("danger");
   });
 });

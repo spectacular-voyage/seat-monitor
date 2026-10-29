@@ -81,7 +81,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
     expect(javascript).toContain(
-      'compareFleetAccountsByWeeklyReset,\n} from "./capacity-order.js"',
+      'compareFleetAccountsByWeeklyReset,\n  toneForLimit,\n} from "./capacity-order.js"',
     );
     expect(javascript).toContain("compareAccountsBySessionUtilization");
     expect(javascript).toContain(
@@ -220,5 +220,19 @@ describe("dashboard assets", () => {
   it("keeps provider-controlled rendering on textContent", () => {
     expect(javascript).toContain("value.textContent = text");
     expect(javascript).not.toContain("innerHTML");
+  });
+
+  describe("a missing current quota reading (SEAT-MON-72, #74)", () => {
+    it("draws no meter fill for an unknown reading and styles the unknown tone", () => {
+      const meter = javascript.slice(
+        javascript.indexOf("function createCapacityMeter("),
+        javascript.indexOf("function createCapacityLimit("),
+      );
+      expect(meter).toContain("limit.currentUsedPercent !== null");
+      expect(meter).not.toContain("currentUsedPercent ?? 0");
+      expect(css).toContain(".capacity-fill.unknown");
+      expect(css).toContain(".unknown-text");
+      expect(css).toContain(".current-usage.unknown");
+    });
   });
 });
