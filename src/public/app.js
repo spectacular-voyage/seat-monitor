@@ -2,6 +2,7 @@ import {
   LONGEST_QUOTA_PERIOD_MINUTES,
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
+  toneForLimit,
 } from "./capacity-order.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
@@ -326,24 +327,6 @@ function renderTopWarnings(payload) {
     );
   }
   topWarnings.replaceChildren(...warnings);
-}
-
-function toneForLimit(limit) {
-  // A missing CURRENT reading (for example quota_unavailable) is neither healthy nor a zero: it is neutral and unknown (SEAT-MON-72, #74).
-  if (limit.currentUsedPercent === null) {
-    return "unknown";
-  }
-  if (
-    limit.projection.status === "already_exhausted" ||
-    limit.projection.status === "exhausts_before_reset" ||
-    (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 90)
-  ) {
-    return "danger";
-  }
-  if (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 75) {
-    return "warning";
-  }
-  return "healthy";
 }
 
 function inferredWindowDurationMinutes(limit) {
