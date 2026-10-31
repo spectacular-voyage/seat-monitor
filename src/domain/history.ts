@@ -26,6 +26,7 @@ export const historySeriesPointSchema = z
 export const projectionSchema = z
   .object({
     status: z.enum([
+      "not_applicable",
       "insufficient_history",
       "not_consuming",
       "already_exhausted",
@@ -54,6 +55,7 @@ export const resetMarkerSchema = z
 
 export const analyticsLimitSchema = z
   .object({
+    applicability: z.literal("not_applicable").optional(),
     key: z.string().min(1),
     label: z.string().min(1),
     depth: z.union([z.literal(0), z.literal(1)]),

@@ -217,6 +217,13 @@ export function createClaudeProvider(
         }
 
         let limits = unsupportedClaudeLimits;
+        const nativePlan = authStatus.subscriptionType?.toLowerCase() ?? null;
+        const declaredPlan = "plan" in account ? account.plan : undefined;
+        const ultraPlan =
+          nativePlan === "ultra" ||
+          (nativePlan === "max" &&
+            account.auth.type === "claude_profile" &&
+            declaredPlan === "ultra");
         let observedAt = context.now();
         if (readsQuota) {
           const usageArguments = ["--setting-sources", ""];
@@ -242,6 +249,7 @@ export function createClaudeProvider(
           limits = parseClaudeUsageOutput(
             usageResult.stdout,
             observedAt.getTime(),
+            ultraPlan,
           );
         }
 
@@ -249,7 +257,7 @@ export function createClaudeProvider(
           accountAlias: account.accountAlias,
           platform: account.platform,
           status: "ok",
-          plan: authStatus.subscriptionType ?? null,
+          plan: ultraPlan ? "ultra" : (authStatus.subscriptionType ?? null),
           limits,
           observedAt: observedAt.toISOString(),
         });

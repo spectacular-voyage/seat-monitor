@@ -10,6 +10,10 @@ import {
   type QuotaSnapshot,
 } from "../domain/quota.js";
 import type { HistoryConfiguration } from "./config.js";
+import {
+  ensureSessionApplicability,
+  storedApplicability,
+} from "./session-applicability.js";
 import type {
   HistoryLimitSeries,
   HistoryResetEvent,
@@ -42,6 +46,7 @@ type AccountRow = {
 };
 
 type LimitRow = {
+  applicability?: string | null;
   limit_key: string;
   label: string;
   scope: string;
@@ -477,6 +482,7 @@ export class SqliteHistoryStore implements HistoryStore {
     this.#configuration = configuration;
     this.#now = now;
     createSchema(database);
+    ensureSessionApplicability(database);
   }
 
   public recordScan(
@@ -497,8 +503,8 @@ export class SqliteHistoryStore implements HistoryStore {
     const insertLimit = this.#database.prepare(`
       INSERT INTO limit_snapshots(
         account_snapshot_id, limit_key, label, scope, availability,
-        used_percent, window_duration_minutes, reset_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        used_percent, window_duration_minutes, reset_at_ms, applicability
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertReset = this.#database.prepare(`
       INSERT INTO reset_events(
@@ -544,6 +550,7 @@ export class SqliteHistoryStore implements HistoryStore {
               limit.usedPercent,
               limit.windowDurationMinutes,
               limit.resetAt === null ? null : Date.parse(limit.resetAt),
+              limit.applicability ?? null,
             );
             if (limit.resetAt !== null) {
               insertReset.run(
@@ -591,7 +598,7 @@ export class SqliteHistoryStore implements HistoryStore {
     `);
     const readLimits = this.#database.prepare(`
       SELECT limit_key, label, scope, availability, used_percent,
-             window_duration_minutes, reset_at_ms
+             window_duration_minutes, reset_at_ms, applicability
       FROM limit_snapshots WHERE account_snapshot_id = ? ORDER BY id
     `);
 
@@ -625,6 +632,7 @@ export class SqliteHistoryStore implements HistoryStore {
             label: limit.label,
             scope: scope(limit.scope),
             availability: availability(limit.availability),
+            ...storedApplicability(limit.applicability),
             usedPercent: limit.used_percent,
             windowDurationMinutes: limit.window_duration_minutes,
             resetAt: instant(limit.reset_at_ms),

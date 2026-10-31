@@ -10,6 +10,7 @@ export type WindowDurationSource = "api" | "constant" | null;
 export type ResetDisplay = "clock-only" | "weekday-date" | "adaptive";
 
 export type QuotaReportRow = {
+  applicability?: "not_applicable";
   key: string;
   label: string;
   depth: 0 | 1;
@@ -170,7 +171,10 @@ function deriveTopLevelRow(
     resetMilliseconds === null
       ? null
       : Math.ceil((resetMilliseconds - nowMilliseconds) / 60_000);
-  const fallbackConstant = localWindowConstant(snapshot.platform, limit.key);
+  const fallbackConstant =
+    limit.applicability === "not_applicable"
+      ? null
+      : localWindowConstant(snapshot.platform, limit.key);
   const windowDurationMinutes =
     limit.windowDurationMinutes ?? fallbackConstant?.value ?? null;
   const windowDurationSource: WindowDurationSource =
@@ -199,12 +203,18 @@ function deriveTopLevelRow(
 
   return {
     key: limit.key,
-    label: displayLimitLabel(
-      snapshot.platform,
-      limit.key,
-      limit.label,
-      limit.availability === "available" && limit.usedPercent === null,
-    ),
+    ...(limit.applicability === undefined
+      ? {}
+      : { applicability: limit.applicability }),
+    label:
+      limit.applicability === "not_applicable"
+        ? "Session (N/A)"
+        : displayLimitLabel(
+            snapshot.platform,
+            limit.key,
+            limit.label,
+            limit.availability === "available" && limit.usedPercent === null,
+          ),
     depth: 0,
     parentKey: null,
     support: limit.availability,
@@ -294,6 +304,7 @@ function rowSortKey(row: QuotaReportRow): string {
 function groupKey(platform: Platform, row: QuotaReportRow): string | null {
   if (
     row.depth === 1 ||
+    row.applicability === "not_applicable" ||
     row.support !== "available" ||
     isIgnoredDecisionLimit(platform, row)
   ) {

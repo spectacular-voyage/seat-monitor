@@ -23,6 +23,7 @@ function rowLabel(row: QuotaReportRow): string {
 }
 
 function rowStatus(row: QuotaReportRow): string {
+  if (row.applicability === "not_applicable") return "not applicable";
   if (row.support === "unsupported") {
     return "unsupported";
   }

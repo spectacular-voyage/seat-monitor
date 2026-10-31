@@ -87,6 +87,12 @@ Set `SEAT_MONITOR_CONFIG` to an absolute path to use another file. `XDG_CONFIG_H
 
 ### Set up Claude profiles
 
+Claude Ultra can have no five-hour session limit after account verification; weekly all-models and Fable limits still apply. Unverified Ultra can still have a session limit. See [Anthropic's Ultra plan documentation](https://support.claude.com/en/articles/17728952-what-is-the-ultra-plan).
+
+When native authentication reports `ultra`, the monitor recognizes that plan directly. If authentication still reports legacy `max`, an operator who has independently confirmed the account's Ultra plan can add `"plan": "ultra"` at the top level of that account's `claude_profile` definition in `accounts.json`. The declaration is optional, applies only with native `max`, and does not override an unknown or contradictory native plan. Legacy `max` alone is never treated as Ultra. Confirming and editing real account declarations is a separate operator action; this feature does not discover or change them.
+
+For a known Ultra plan, a successful complete native quota report containing valid weekly and Fable percentages and resets, the quota header and closing contribution heading, and no session row yields explicit `applicability: "not_applicable"` on `base.session`. Its usage, duration and reset remain null. Forecast and dashboard views show N/A and use the remaining weekly constraints. A session-bearing report remains limited; missing, truncated, malformed and failed readings retain the conservative unknown/error behavior. Older session history is preserved as history, without reviving a current session percentage, rate, reset or risk for an N/A reading. History databases gain one nullable metadata column; existing observations and rollups are preserved.
+
 List the configured Claude accounts and profile locations:
 
 ```sh

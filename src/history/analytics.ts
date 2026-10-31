@@ -710,7 +710,7 @@ function buildFleetThroughput(
 ): HistoryAnalytics["fleetThroughput"] {
   const selected = accounts.flatMap((account) => {
     const limit = canonicalSessionLimit(account);
-    if (limit === undefined) {
+    if (limit === undefined || limit.applicability === "not_applicable") {
       return [];
     }
     const history = series.find(
@@ -832,12 +832,15 @@ function fableRecommendation(
     if (account.platform !== "Claude" || account.status !== "ok") {
       return [];
     }
-    const constraints = ["base.session", "base.weekly", "fable.weekly"]
+    const windows = ["base.session", "base.weekly", "fable.weekly"]
       .map((key) => account.limits.find((limit) => limit.key === key))
       .filter((limit): limit is AnalyticsLimit => limit !== undefined);
+    const constraints = windows.filter(
+      (limit) => limit.applicability !== "not_applicable",
+    );
     const fable = constraints.find((limit) => limit.key === "fable.weekly");
     if (
-      constraints.length !== 3 ||
+      windows.length !== 3 ||
       fable?.availability !== "available" ||
       constraints.some((limit) => limit.headroomPercent === null)
     ) {
@@ -986,7 +989,9 @@ export function buildHistoryAnalytics(options: {
           snapshot.platform === "Claude" && key.startsWith("fable");
         // A status-ok Claude snapshot whose session window is supported but UNKNOWN (PR 80, #82): the current reading, headroom, projection
         // and reset are unknown too and must not be rebuilt from older history. Chart history and an actually observed 0 stay valid.
+        const sessionNotApplicable = row?.applicability === "not_applicable";
         const sessionUnknown =
+          !sessionNotApplicable &&
           snapshot.platform === "Claude" &&
           key === "base.session" &&
           snapshot.status === "ok" &&
@@ -1000,7 +1005,8 @@ export function buildHistoryAnalytics(options: {
         const projectionResetAt = isFable
           ? (parent?.resetAt ?? null)
           : (row?.resetAt ?? points.at(-1)?.resetAt ?? null);
-        const resetUnknown = sessionUnknown || unauthorized;
+        const resetUnknown =
+          sessionUnknown || sessionNotApplicable || unauthorized;
         const reset: ResolvedReset = resetUnknown
           ? { resetAt: null, resetSource: null }
           : resolveReset({
@@ -1019,13 +1025,15 @@ export function buildHistoryAnalytics(options: {
               nowMilliseconds: options.nowMilliseconds,
               timeZone: options.timeZone,
             });
-        const windowDurationMinutes = isFable
-          ? (parent?.windowDurationMinutes ??
-            history?.points.at(-1)?.windowDurationMinutes ??
-            null)
-          : (row?.windowDurationMinutes ??
-            history?.points.at(-1)?.windowDurationMinutes ??
-            null);
+        const windowDurationMinutes = sessionNotApplicable
+          ? null
+          : isFable
+            ? (parent?.windowDurationMinutes ??
+              history?.points.at(-1)?.windowDurationMinutes ??
+              null)
+            : (row?.windowDurationMinutes ??
+              history?.points.at(-1)?.windowDurationMinutes ??
+              null);
         const periodStartMilliseconds =
           options.periodMultiplier === undefined ||
           windowDurationMinutes === null
@@ -1066,17 +1074,20 @@ export function buildHistoryAnalytics(options: {
         return [
           {
             key,
+            ...(sessionNotApplicable
+              ? { applicability: "not_applicable" as const }
+              : {}),
             label: row?.label ?? history?.limit.label ?? key,
             depth: row?.depth ?? (isFable ? 1 : 0),
             parentKey: row?.parentKey ?? (isFable ? "base.weekly" : null),
             availability:
               row?.support ?? history?.limit.availability ?? "unsupported",
             currentUsedPercent:
-              currentUnavailable || sessionUnknown
+              currentUnavailable || sessionUnknown || sessionNotApplicable
                 ? null
                 : (row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null),
             headroomPercent:
-              currentUnavailable || sessionUnknown
+              currentUnavailable || sessionUnknown || sessionNotApplicable
                 ? null
                 : (row?.headroomPercent ??
                   (points.at(-1)?.usedPercent === null ||
@@ -1096,8 +1107,12 @@ export function buildHistoryAnalytics(options: {
               : [...providerMarkers, ...inferredMarkers(points)].sort(
                   (left, right) => Date.parse(left.at) - Date.parse(right.at),
                 ),
-            projection:
-              currentUnavailable || sessionUnknown
+            projection: sessionNotApplicable
+              ? {
+                  ...projectExhaustion([], null),
+                  status: "not_applicable" as const,
+                }
+              : currentUnavailable || sessionUnknown
                 ? projectExhaustion([], null)
                 : projectExhaustion(projectionPoints, projectionResetAt),
           },

@@ -11,6 +11,7 @@ const isoInstantSchema = z.iso.datetime({ offset: true });
 
 const cliForecastLimitSchema = z
   .object({
+    applicability: z.literal("not_applicable").optional(),
     key: z.string().min(1),
     label: z.string().min(1),
     usedPercent: z.number().min(0).max(100).nullable(),
