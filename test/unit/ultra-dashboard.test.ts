@@ -1,15 +1,14 @@
 import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  createNotApplicableSession,
+  fallbackLimit,
+} from "../../src/public/session-applicability.js";
 import { toPublicSnapshots } from "../../src/presentation/public-dto.js";
 import { parseClaudeUsageOutput } from "../../src/services/claude-usage.js";
 
-const javascript = readFileSync(
-  new URL("../../src/public/app.js", import.meta.url),
-  "utf8",
-);
 const usage = readFileSync(
   new URL("../fixtures/claude-usage-ultra.txt", import.meta.url),
   "utf8",
@@ -18,13 +17,6 @@ const now = Date.parse("2026-08-30T00:30:00.000Z");
 
 // Execute the dashboard's real rendering functions with a minimal DOM. No
 // fetch, browser timer, native provider or live server runs in these tests.
-function dashboardFunction(name: string): string {
-  const start = javascript.indexOf(`function ${name}(`);
-  if (start < 0) throw new Error(`Missing dashboard function: ${name}`);
-  const end = javascript.indexOf("\nfunction ", start + 1);
-  return javascript.slice(start, end < 0 ? undefined : end);
-}
-
 class Element {
   className = "";
   textContent = "";
@@ -49,27 +41,19 @@ function ui(ultra: boolean) {
     ],
     now,
   );
-  return runInNewContext(
-    [
-      ...[
-        "element",
-        "fallbackLimit",
-        "createLimit",
-        "createCapacityLimit",
-        "projectionText",
-      ].map(dashboardFunction),
-      "const limit = fallbackLimit(raw, null);",
-      "({ limit, detail: limit.applicability ? createLimit(limit, 0, 1) : null, capacity: limit.applicability ? createCapacityLimit(limit) : null })",
-    ].join("\n"),
-    {
-      raw: snapshots[0]?.limits[0],
-      DEFAULT_USAGE_CHART_HEIGHT: 176,
-      document: { createElement: (name: string) => new Element(name) },
-    },
-  ) as {
-    limit: { applicability?: string; projection: { status: string } };
-    detail: Element | null;
-    capacity: Element | null;
+  const raw = snapshots[0]?.limits[0];
+  if (raw === undefined) throw new Error("Missing synthetic session");
+  const limit = fallbackLimit(raw, null);
+  const element = (name: string, className: string, text?: string) => {
+    const node = new Element(name);
+    node.className = className;
+    node.textContent = text ?? "";
+    return node;
+  };
+  return {
+    limit,
+    detail: createNotApplicableSession(limit, element),
+    capacity: createNotApplicableSession(limit, element, true),
   };
 }
 
@@ -105,5 +89,7 @@ describe("Ultra dashboard rendering", () => {
     const unknown = ui(false);
     expect(unknown.limit).not.toHaveProperty("applicability");
     expect(unknown.limit.projection.status).toBe("insufficient_history");
+    expect(unknown.detail).toBeNull();
+    expect(unknown.capacity).toBeNull();
   });
 });

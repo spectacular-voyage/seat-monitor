@@ -4,6 +4,10 @@ import {
   compareFleetAccountsByWeeklyReset,
   toneForLimit,
 } from "./capacity-order.js";
+import {
+  createNotApplicableSession,
+  fallbackLimit,
+} from "./session-applicability.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
@@ -1075,18 +1079,8 @@ function createLimit(
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
 ) {
-  if (limit.applicability === "not_applicable") {
-    const section = element("section", "limit");
-    section.append(
-      element("h4", "limit-name", limit.label),
-      element(
-        "p",
-        "limit-reset",
-        "N/A: verified Ultra has no five-hour session limit. Weekly limits still apply.",
-      ),
-    );
-    return section;
-  }
+  const notApplicable = createNotApplicableSession(limit, element);
+  if (notApplicable !== null) return notApplicable;
   const section = element(
     "section",
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
@@ -1258,14 +1252,8 @@ function createCapacityLimit(
   limit,
   { showReset = true, sharedReset = false } = {},
 ) {
-  if (limit.applicability === "not_applicable") {
-    const row = element("div", "capacity-limit");
-    row.append(
-      element("span", "capacity-limit-name", limit.label),
-      element("strong", "capacity-percent", "N/A"),
-    );
-    return row;
-  }
+  const notApplicable = createNotApplicableSession(limit, element, true);
+  if (notApplicable !== null) return notApplicable;
   const row = element(
     "div",
     `capacity-limit ${limit.depth === 1 ? "subcap" : ""}`,
@@ -1771,43 +1759,6 @@ function renderAnalytics(payload) {
   );
   renderRecommendations(payload.recommendations);
   updateCountdowns();
-}
-
-function fallbackLimit(limit, weeklyLimit) {
-  const isFable = limit.key.startsWith("fable");
-  const sessionNotApplicable = limit.applicability === "not_applicable";
-  const effectiveResetAt = isFable
-    ? (weeklyLimit?.resetAt ?? null)
-    : limit.resetAt;
-  return {
-    key: limit.key,
-    ...(sessionNotApplicable ? { applicability: "not_applicable" } : {}),
-    label: sessionNotApplicable ? "Session (N/A)" : limit.label,
-    depth: isFable ? 1 : 0,
-    parentKey: isFable ? "base.weekly" : null,
-    availability: limit.availability,
-    currentUsedPercent: limit.usedPercent,
-    headroomPercent:
-      limit.usedPercent === null ? null : 100 - limit.usedPercent,
-    windowDurationMinutes: limit.windowDurationMinutes,
-    resetAt: effectiveResetAt,
-    resetSource: effectiveResetAt === null ? null : "provider",
-    minutesUntilReset: isFable
-      ? (weeklyLimit?.minutesUntilReset ?? null)
-      : limit.minutesUntilReset,
-    points: [],
-    resetMarkers: [],
-    projection: {
-      status: sessionNotApplicable ? "not_applicable" : "insufficient_history",
-      ratePercentPerHour: null,
-      rateBasis: null,
-      projectedFromUsedPercent: null,
-      projectedExhaustionAt: null,
-      projectedExhaustionRangeEndAt: null,
-      sampleCount: 0,
-      spanMinutes: 0,
-    },
-  };
 }
 
 function renderLiveFallback(snapshots) {
