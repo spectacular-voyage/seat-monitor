@@ -318,6 +318,64 @@ describe("Claude provider", () => {
     expect(JSON.stringify(snapshot)).not.toContain("usedPercent");
   });
 
+  it("reports the weekly figures with the session unknown, as ok and not as an error", async () => {
+    const authFixture = await readFile(
+      new URL("../fixtures/claude-auth-status.json", import.meta.url),
+      "utf8",
+    );
+    const weeklyOnly = await readFile(
+      new URL("../fixtures/claude-usage-weekly-only.txt", import.meta.url),
+      "utf8",
+    );
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-profile@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "profile",
+        expectedEmail: "profile@example.com",
+        claudeConfigDir: "/profiles/profile",
+      },
+    };
+    const provider = createClaudeProvider({
+      profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(false),
+      run: (options) =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: options.args[0] === "auth" ? authFixture : weeklyOnly,
+          stderr: "",
+        }),
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-10-28T23:52:00.000Z"),
+      timeoutMilliseconds: 8_000,
+    });
+
+    expect(snapshot.status).toBe("ok");
+    if (snapshot.status !== "ok") {
+      throw new TypeError("Expected an ok snapshot.");
+    }
+    const session = snapshot.limits.find(
+      (limit) => limit.key === "base.session",
+    );
+    expect(session).toEqual(
+      expect.objectContaining({
+        availability: "unsupported",
+        usedPercent: null,
+        resetAt: null,
+        label: "Current Session (unknown)",
+      }),
+    );
+    expect(
+      snapshot.limits.find((limit) => limit.key === "base.weekly"),
+    ).toEqual(
+      expect.objectContaining({ availability: "available", usedPercent: 61 }),
+    );
+    expect(JSON.stringify(snapshot)).not.toContain("invalid_response");
+  });
+
   it("preserves an enterprise-managed MCP configuration", async () => {
     const authFixture = await readFile(
       new URL("../fixtures/claude-auth-status.json", import.meta.url),
