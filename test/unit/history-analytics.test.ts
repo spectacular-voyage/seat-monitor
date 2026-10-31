@@ -1217,3 +1217,98 @@ describe("an unknown latest Claude session (PR 80, #82)", () => {
     ).toBe(false);
   });
 });
+
+describe("a latest unauthorized snapshot (#84)", () => {
+  const historicalReset = resetAfter(300);
+  const unauthorized: QuotaSnapshot = {
+    accountAlias: "claude-ops@example.com",
+    platform: "Claude",
+    status: "error",
+    plan: null,
+    limits: [],
+    observedAt: new Date(nowMilliseconds).toISOString(),
+    error: { code: "unauthorized", message: "Claude is not logged in." },
+  };
+  const analyze = (snapshot: QuotaSnapshot) =>
+    buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        series("base.session", [60, 75, 90], historicalReset),
+        series("base.weekly", [30, 40, 50], resetAfter(6_700)),
+      ],
+      resetEvents: [resetEvent("base.session", historicalReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+  const limitOf = (
+    analytics: ReturnType<typeof analyze>,
+    key: string,
+  ): (typeof analytics.accounts)[number]["limits"][number] | undefined =>
+    analytics.accounts[0]?.limits.find((limit) => limit.key === key);
+
+  it("keeps the chart points and the error but leaves every current reading, projection and reset UNKNOWN", () => {
+    const analytics = analyze(unauthorized);
+    expect(analytics.accounts[0]?.status).toBe("error");
+    expect(analytics.accounts[0]?.error?.code).toBe("unauthorized");
+    for (const key of ["base.session", "base.weekly"]) {
+      const limit = limitOf(analytics, key);
+      expect(limit?.points.length).toBeGreaterThan(0);
+      expect(limit?.currentUsedPercent).toBeNull();
+      expect(limit?.headroomPercent).toBeNull();
+      expect(limit?.projection.status).toBe("insufficient_history");
+      expect(limit?.projection.ratePercentPerHour).toBeNull();
+      expect(limit?.projection.projectedExhaustionAt).toBeNull();
+      expect(limit?.resetAt).toBeNull();
+      expect(limit?.resetSource).toBeNull();
+      expect(limit?.minutesUntilReset).toBeNull();
+    }
+  });
+
+  it("gives the CLI forecast no rate, exhaustion or risk entry for the account", () => {
+    const forecast = buildCliForecast(analyze(unauthorized));
+    for (const limit of forecast.accounts[0]?.limits ?? []) {
+      expect(limit.usedPercent).toBeNull();
+      expect(limit.ratePercentPerHour).toBeNull();
+      expect(limit.projectedExhaustionAt).toBeNull();
+      expect(limit.projectionStatus).toBe("insufficient_history");
+    }
+    expect(forecast.accounts[0]?.limits.length).toBeGreaterThan(0);
+    expect(forecast.riskRanking).toEqual([]);
+  });
+
+  it("leaves an ok latest snapshot with the same history unchanged (positive control)", () => {
+    const analytics = analyze(claudeSnapshot({ sessionUsed: 90 }));
+    const session = limitOf(analytics, "base.session");
+    expect(session?.currentUsedPercent).not.toBeNull();
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+    expect(session?.resetAt).not.toBeNull();
+    expect(
+      buildCliForecast(analytics).riskRanking.some((entry) =>
+        JSON.stringify(entry).includes("base.session"),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a genuinely observed zero as 0% when the latest snapshot is ok (control)", () => {
+    const session = limitOf(
+      analyze(claudeSnapshot({ sessionUsed: 0 })),
+      "base.session",
+    );
+    expect(session?.currentUsedPercent).toBe(0);
+    expect(session?.headroomPercent).toBe(100);
+  });
+
+  it("still preserves the historical projection boundary after a non-authentication scan error (control)", () => {
+    const timeout: QuotaSnapshot = {
+      ...unauthorized,
+      error: { code: "timeout", message: "Claude usage check timed out." },
+    };
+    const session = limitOf(analyze(timeout), "base.session");
+    expect(session?.resetAt).toBe(historicalReset);
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+  });
+});

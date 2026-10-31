@@ -962,9 +962,14 @@ export function buildHistoryAnalytics(options: {
       );
       // A latest quota_unavailable snapshot means the CURRENT reading is unknown (SEAT-MON-72, #74): history stays chart history, but the
       // current percentage, headroom, projection and risk must not be rebuilt from an older success.
+      // A latest UNAUTHORIZED snapshot (#84) is the same: the failed authentication supplied no current measurement, so an older success
+      // must not be revived as a current-looking reading, projection, risk rank or reset. Chart history stays.
+      const unauthorized =
+        snapshot.status === "error" && snapshot.error.code === "unauthorized";
       const currentUnavailable =
-        snapshot.status === "error" &&
-        snapshot.error.code === "quota_unavailable";
+        (snapshot.status === "error" &&
+          snapshot.error.code === "quota_unavailable") ||
+        unauthorized;
       const limitKeys =
         reportRows.length > 0
           ? reportRows.map((row) => row.key)
@@ -995,7 +1000,8 @@ export function buildHistoryAnalytics(options: {
         const projectionResetAt = isFable
           ? (parent?.resetAt ?? null)
           : (row?.resetAt ?? points.at(-1)?.resetAt ?? null);
-        const reset: ResolvedReset = sessionUnknown
+        const resetUnknown = sessionUnknown || unauthorized;
+        const reset: ResolvedReset = resetUnknown
           ? { resetAt: null, resetSource: null }
           : resolveReset({
               currentResetAt: isFable
