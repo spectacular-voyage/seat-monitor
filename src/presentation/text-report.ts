@@ -26,6 +26,9 @@ function rowStatus(row: QuotaReportRow): string {
   if (row.support === "unsupported") {
     return "unsupported";
   }
+  if (row.key === "base.session" && row.consumedPercent === null) {
+    return "unknown";
+  }
   if (row.constantSuspect) {
     return "CONSTANT-SUSPECT";
   }
