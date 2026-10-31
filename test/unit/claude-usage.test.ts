@@ -86,12 +86,75 @@ describe("Claude usage parser", () => {
     }
   });
 
-  it("still rejects a partial report that has a week window but no session window", () => {
-    expect(() =>
-      parseClaudeUsageOutput(
-        "Current week (all models): 12% used",
-        Date.parse("2026-08-30T00:30:00.000Z"),
-      ),
-    ).toThrow("session window");
+  it("returns the weekly windows with the session explicitly unknown when /usage omits the session line", async () => {
+    const output = await readFile(
+      new URL("../fixtures/claude-usage-weekly-only.txt", import.meta.url),
+      "utf8",
+    );
+    const limits = parseClaudeUsageOutput(
+      output,
+      Date.parse("2026-08-30T00:30:00.000Z"),
+    );
+
+    expect(limits).toEqual([
+      {
+        key: "base.session",
+        label: "Current Session (unknown)",
+        scope: "window",
+        availability: "unsupported",
+        usedPercent: null,
+        windowDurationMinutes: null,
+        resetAt: null,
+      },
+      expect.objectContaining({
+        key: "base.weekly",
+        availability: "available",
+        usedPercent: 61,
+        resetAt: "2026-09-03T17:00:00.000Z",
+      }),
+      expect.objectContaining({
+        key: "fable.weekly",
+        availability: "available",
+        usedPercent: 72,
+        resetAt: "2026-09-03T17:00:00.000Z",
+      }),
+    ]);
+    expect(
+      limits.find((limit) => limit.key === "base.session")?.usedPercent,
+    ).toBeNull();
+  });
+
+  it("keeps a full report unchanged, with a real session reading and no unknown window", async () => {
+    const output = await readFile(
+      new URL("../fixtures/claude-usage.txt", import.meta.url),
+      "utf8",
+    );
+    const limits = parseClaudeUsageOutput(
+      output,
+      Date.parse("2026-08-30T00:30:00.000Z"),
+    );
+    expect(limits.map((limit) => limit.key)).toEqual([
+      "base.session",
+      "base.weekly",
+      "fable.weekly",
+    ]);
+    expect(limits[0]).toMatchObject({
+      availability: "available",
+      usedPercent: 8,
+      label: "Current Session",
+    });
+    expect(JSON.stringify(limits)).not.toContain("unknown");
+  });
+
+  it("still fails on output with no recognizable window", () => {
+    for (const output of [
+      "",
+      "Total cost: $0.0000",
+      "\u0000garbage \ufffd not a usage report",
+    ]) {
+      expect(() =>
+        parseClaudeUsageOutput(output, Date.parse("2026-08-30T00:30:00.000Z")),
+      ).toThrow(ClaudeUsageUnavailableError);
+    }
   });
 });
