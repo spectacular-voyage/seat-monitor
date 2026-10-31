@@ -1108,3 +1108,112 @@ describe("historical quota analytics", () => {
     ]);
   });
 });
+
+describe("an unknown latest Claude session (PR 80, #82)", () => {
+  const historicalReset = resetAfter(300);
+  const withSession = (
+    snapshot: QuotaSnapshot,
+    session: { usedPercent: number | null },
+  ): QuotaSnapshot => {
+    if (snapshot.status !== "ok") {
+      throw new TypeError("Expected a successful quota fixture.");
+    }
+    return quotaSuccessSchema.parse({
+      ...snapshot,
+      limits: snapshot.limits.map((limit) =>
+        limit.key === "base.session"
+          ? {
+              ...limit,
+              usedPercent: session.usedPercent,
+              resetAt: session.usedPercent === null ? null : limit.resetAt,
+            }
+          : limit,
+      ),
+    });
+  };
+  const analyze = (snapshot: QuotaSnapshot) =>
+    buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        series("base.session", [60, 75, 90], historicalReset),
+        series("base.weekly", [30, 40, 50], resetAfter(6_700)),
+      ],
+      resetEvents: [resetEvent("base.session", historicalReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+  const limitOf = (
+    analytics: ReturnType<typeof analyze>,
+    key: string,
+  ): (typeof analytics.accounts)[number]["limits"][number] | undefined =>
+    analytics.accounts[0]?.limits.find((limit) => limit.key === key);
+
+  it("leaves the session reading, headroom, forecast and reset UNKNOWN while chart history and the weekly forecast stay", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: null }),
+    );
+    const session = limitOf(analytics, "base.session");
+    const weekly = limitOf(analytics, "base.weekly");
+
+    expect(session?.points.map((candidate) => candidate.usedPercent)).toEqual([
+      60, 75, 90,
+    ]);
+    expect(session?.currentUsedPercent).toBeNull();
+    expect(session?.headroomPercent).toBeNull();
+    expect(session?.projection.status).toBe("insufficient_history");
+    expect(session?.projection.ratePercentPerHour).toBeNull();
+    expect(session?.projection.projectedExhaustionAt).toBeNull();
+    expect(session?.resetAt).toBeNull();
+    expect(session?.resetSource).toBeNull();
+    expect(session?.minutesUntilReset).toBeNull();
+
+    expect(weekly?.currentUsedPercent).toBe(89);
+    expect(weekly?.projection.status).not.toBe("insufficient_history");
+    expect(weekly?.resetAt).not.toBeNull();
+  });
+
+  it("gives a known session the normal forecast and reset from the same history (positive control)", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: 90 }),
+    );
+    const session = limitOf(analytics, "base.session");
+
+    expect(session?.currentUsedPercent).toBe(90);
+    expect(session?.headroomPercent).toBe(10);
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+    expect(session?.projection.projectedExhaustionAt).not.toBeNull();
+    expect(session?.resetAt).not.toBeNull();
+  });
+
+  it("treats an actually observed zero session as a valid current reading, not unknown", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: 0 }),
+    );
+    const session = limitOf(analytics, "base.session");
+
+    expect(session?.currentUsedPercent).toBe(0);
+    expect(session?.headroomPercent).toBe(100);
+    expect(session?.resetAt).not.toBeNull();
+  });
+
+  it("does not turn an unknown session into a CLI forecast risk or exhaustion estimate", () => {
+    const forecast = buildCliForecast(
+      analyze(withSession(claudeSnapshot(), { usedPercent: null })),
+    );
+    const limit = forecast.accounts[0]?.limits.find(
+      (candidate) => candidate.key === "base.session",
+    );
+
+    expect(limit?.usedPercent).toBeNull();
+    expect(limit?.projectionStatus).toBe("insufficient_history");
+    expect(
+      forecast.riskRanking.some((entry) =>
+        JSON.stringify(entry).includes("base.session"),
+      ),
+    ).toBe(false);
+  });
+});

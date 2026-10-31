@@ -979,6 +979,14 @@ export function buildHistoryAnalytics(options: {
         }
         const isFable =
           snapshot.platform === "Claude" && key.startsWith("fable");
+        // A status-ok Claude snapshot whose session window is supported but UNKNOWN (PR 80, #82): the current reading, headroom, projection
+        // and reset are unknown too and must not be rebuilt from older history. Chart history and an actually observed 0 stay valid.
+        const sessionUnknown =
+          snapshot.platform === "Claude" &&
+          key === "base.session" &&
+          snapshot.status === "ok" &&
+          row?.support === "available" &&
+          row.consumedPercent === null;
         const parent = reportRows.find(
           (candidate) => candidate.key === "base.weekly",
         );
@@ -987,18 +995,24 @@ export function buildHistoryAnalytics(options: {
         const projectionResetAt = isFable
           ? (parent?.resetAt ?? null)
           : (row?.resetAt ?? points.at(-1)?.resetAt ?? null);
-        const reset = resolveReset({
-          currentResetAt: isFable
-            ? (parent?.resetAt ?? null)
-            : (row?.resetAt ?? null),
-          lastKnown: latestResetEvents.get(
-            seriesKey(snapshot.accountAlias, snapshot.platform, resetLimitKey),
-          ),
-          platform: snapshot.platform,
-          limitKey: resetLimitKey,
-          nowMilliseconds: options.nowMilliseconds,
-          timeZone: options.timeZone,
-        });
+        const reset: ResolvedReset = sessionUnknown
+          ? { resetAt: null, resetSource: null }
+          : resolveReset({
+              currentResetAt: isFable
+                ? (parent?.resetAt ?? null)
+                : (row?.resetAt ?? null),
+              lastKnown: latestResetEvents.get(
+                seriesKey(
+                  snapshot.accountAlias,
+                  snapshot.platform,
+                  resetLimitKey,
+                ),
+              ),
+              platform: snapshot.platform,
+              limitKey: resetLimitKey,
+              nowMilliseconds: options.nowMilliseconds,
+              timeZone: options.timeZone,
+            });
         const windowDurationMinutes = isFable
           ? (parent?.windowDurationMinutes ??
             history?.points.at(-1)?.windowDurationMinutes ??
@@ -1051,16 +1065,18 @@ export function buildHistoryAnalytics(options: {
             parentKey: row?.parentKey ?? (isFable ? "base.weekly" : null),
             availability:
               row?.support ?? history?.limit.availability ?? "unsupported",
-            currentUsedPercent: currentUnavailable
-              ? null
-              : (row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null),
-            headroomPercent: currentUnavailable
-              ? null
-              : (row?.headroomPercent ??
-                (points.at(-1)?.usedPercent === null ||
-                points.at(-1)?.usedPercent === undefined
-                  ? null
-                  : 100 - (points.at(-1)?.usedPercent ?? 100))),
+            currentUsedPercent:
+              currentUnavailable || sessionUnknown
+                ? null
+                : (row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null),
+            headroomPercent:
+              currentUnavailable || sessionUnknown
+                ? null
+                : (row?.headroomPercent ??
+                  (points.at(-1)?.usedPercent === null ||
+                  points.at(-1)?.usedPercent === undefined
+                    ? null
+                    : 100 - (points.at(-1)?.usedPercent ?? 100))),
             windowDurationMinutes,
             resetAt: reset.resetAt,
             resetSource: reset.resetSource,
@@ -1074,9 +1090,10 @@ export function buildHistoryAnalytics(options: {
               : [...providerMarkers, ...inferredMarkers(points)].sort(
                   (left, right) => Date.parse(left.at) - Date.parse(right.at),
                 ),
-            projection: currentUnavailable
-              ? projectExhaustion([], null)
-              : projectExhaustion(projectionPoints, projectionResetAt),
+            projection:
+              currentUnavailable || sessionUnknown
+                ? projectExhaustion([], null)
+                : projectExhaustion(projectionPoints, projectionResetAt),
           },
         ];
       });
