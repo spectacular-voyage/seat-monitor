@@ -90,10 +90,11 @@ function displayLimitLabel(
   platform: Platform,
   key: string,
   label: string,
+  unknown: boolean,
 ): string {
   if (platform === "Claude") {
     if (key === "base.session") {
-      return "Session";
+      return unknown ? "Session (unknown)" : "Session";
     }
     if (key === "base.weekly") {
       return "Week / all models";
@@ -198,7 +199,12 @@ function deriveTopLevelRow(
 
   return {
     key: limit.key,
-    label: displayLimitLabel(snapshot.platform, limit.key, limit.label),
+    label: displayLimitLabel(
+      snapshot.platform,
+      limit.key,
+      limit.label,
+      limit.availability === "available" && limit.usedPercent === null,
+    ),
     depth: 0,
     parentKey: null,
     support: limit.availability,

@@ -362,10 +362,10 @@ describe("Claude provider", () => {
     );
     expect(session).toEqual(
       expect.objectContaining({
-        availability: "unsupported",
+        availability: "available",
         usedPercent: null,
         resetAt: null,
-        label: "Current Session (unknown)",
+        label: "Current Session",
       }),
     );
     expect(

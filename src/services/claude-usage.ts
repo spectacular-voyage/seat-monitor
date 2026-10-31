@@ -195,13 +195,13 @@ export class ClaudeUsageUnavailableError extends Error {
   }
 }
 
-/** The session window when /usage omitted its line: explicitly unknown, carrying no quota value. */
+/** The session window when /usage omitted its line: supported but unknown, carrying no quota value. */
 function unknownSessionLimit(): QuotaLimit {
   return {
     key: "base.session",
-    label: "Current Session (unknown)",
+    label: "Current Session",
     scope: "window",
-    availability: "unsupported",
+    availability: "available",
     usedPercent: null,
     windowDurationMinutes: null,
     resetAt: null,
@@ -248,8 +248,9 @@ export function parseClaudeUsageOutput(
     throw new ClaudeUsageUnavailableError();
   }
   if (!limits.some((limit) => limit.key === "base.session")) {
-    // /usage can return the weekly windows and omit the session line. The session is then UNKNOWN: an explicit absent
-    // window (unsupported, every quota value null), never a fabricated 0%. The weekly figures that did parse stay readable.
+    // /usage can return the weekly windows and omit the session line. The session is then UNKNOWN: a supported window
+    // whose quota values are all null, never a fabricated 0%. It stays "available" so capacity decisions see unknown
+    // headroom and exclude the group instead of treating the window as absent. The weekly figures that did parse stay readable.
     limits.unshift(unknownSessionLimit());
   }
   if (!limits.some((limit) => limit.key === "fable.weekly")) {

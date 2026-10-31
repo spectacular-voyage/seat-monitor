@@ -99,9 +99,9 @@ describe("Claude usage parser", () => {
     expect(limits).toEqual([
       {
         key: "base.session",
-        label: "Current Session (unknown)",
+        label: "Current Session",
         scope: "window",
-        availability: "unsupported",
+        availability: "available",
         usedPercent: null,
         windowDurationMinutes: null,
         resetAt: null,
