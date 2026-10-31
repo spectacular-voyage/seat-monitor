@@ -28,6 +28,7 @@ const assets = {
   html: "<!doctype html><title>Test</title>",
   javascript: "void 0;",
   capacityOrder: "export const order = 1;",
+  sessionApplicability: "export const applicable = true;",
   css: "body {}",
 };
 
@@ -338,6 +339,7 @@ describe("HTTP server", () => {
       html: "<!doctype html><title>Version 1</title>",
       javascript: "window.version = 1;",
       capacityOrder: "export const version = 1;",
+      sessionApplicability: "export const applicableVersion = 1;",
       css: "body { --version: 1; }",
     };
     const dashboardAssetLoader = vi.fn(() => Promise.resolve(currentAssets));
@@ -348,7 +350,13 @@ describe("HTTP server", () => {
     });
 
     const first = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -356,10 +364,17 @@ describe("HTTP server", () => {
       html: "<!doctype html><title>Version 2</title>",
       javascript: "window.version = 2;",
       capacityOrder: "export const version = 2;",
+      sessionApplicability: "export const applicableVersion = 2;",
       css: "body { --version: 2; }",
     };
     const second = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -369,12 +384,14 @@ describe("HTTP server", () => {
       "<!doctype html><title>Version 1</title>",
       "window.version = 1;",
       "export const version = 1;",
+      "export const applicableVersion = 1;",
       "body { --version: 1; }",
     ]);
     expect(second.map((response) => response.body)).toEqual([
       "<!doctype html><title>Version 2</title>",
       "window.version = 2;",
       "export const version = 2;",
+      "export const applicableVersion = 2;",
       "body { --version: 2; }",
     ]);
     expect(
@@ -382,7 +399,27 @@ describe("HTTP server", () => {
         (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
-    expect(dashboardAssetLoader).toHaveBeenCalledTimes(8);
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(10);
+  });
+
+  it("serves the actual shared applicability module imported by the dashboard", async () => {
+    const server = await buildServer({ scan: () => Promise.resolve([]) });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/session-applicability.js",
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/javascript");
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.body).toContain(
+        "export function createNotApplicableSession",
+      );
+      expect(response.body).toContain("export function fallbackLimit");
+    } finally {
+      await server.close();
+    }
   });
 
   it("keeps supplied packaged dashboard assets cached", async () => {
@@ -392,7 +429,13 @@ describe("HTTP server", () => {
     });
 
     const responses = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -402,6 +445,7 @@ describe("HTTP server", () => {
       assets.html,
       assets.javascript,
       assets.capacityOrder,
+      assets.sessionApplicability,
       assets.css,
     ]);
     expect(
