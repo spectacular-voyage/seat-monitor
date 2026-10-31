@@ -40,6 +40,9 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
     error: account.error,
     limits: account.limits.map((limit): CliForecastLimit => ({
       key: limit.key,
+      ...(limit.applicability === undefined
+        ? {}
+        : { applicability: limit.applicability }),
       label: limit.label,
       usedPercent: limit.currentUsedPercent,
       ratePercentPerHour: limit.projection.ratePercentPerHour,

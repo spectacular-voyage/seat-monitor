@@ -10,12 +10,25 @@ export const quotaLimitSchema = z
     label: z.string().min(1),
     scope: z.enum(["global", "model", "window"]),
     availability: z.enum(["available", "unsupported"]),
+    applicability: z.literal("not_applicable").optional(),
     usedPercent: z.number().min(0).max(100).nullable(),
     windowDurationMinutes: z.number().positive().nullable(),
     resetAt: isoInstantSchema.nullable(),
   })
   .strict()
   .superRefine((limit, context) => {
+    if (
+      limit.applicability === "not_applicable" &&
+      (limit.key !== "base.session" ||
+        limit.usedPercent !== null ||
+        limit.windowDurationMinutes !== null ||
+        limit.resetAt !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "N/A sessions cannot contain quota values.",
+      });
+    }
     if (
       limit.availability === "unsupported" &&
       (limit.usedPercent !== null ||

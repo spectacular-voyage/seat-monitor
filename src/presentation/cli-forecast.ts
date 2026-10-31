@@ -35,6 +35,8 @@ function projectionRange(limit: CliForecastLimit): string {
 
 function outlook(limit: CliForecastLimit): string {
   switch (limit.projectionStatus) {
+    case "not_applicable":
+      return "N/A (verified Ultra has no five-hour session limit)";
     case "already_exhausted":
       return `already exhausted at ${projectionRange(limit)}`;
     case "exhausts_before_reset":
@@ -51,6 +53,7 @@ function outlook(limit: CliForecastLimit): string {
 }
 
 function reset(limit: CliForecastLimit): string {
+  if (limit.applicability === "not_applicable") return "no session reset";
   return limit.resetAt === null
     ? "reset unknown"
     : `reset ${limit.resetAt} (${limit.resetSource ?? "unknown source"})`;

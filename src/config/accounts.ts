@@ -33,6 +33,7 @@ const claudeProfileDefinitionSchema = z
   .object({
     ...commonShape,
     platform: z.literal("Claude"),
+    plan: z.literal("ultra").optional(),
     auth: z
       .object({
         type: z.literal("claude_profile"),
@@ -100,6 +101,7 @@ export type LoadedClaudeSetupTokenAccount = LoadedAccountBase & {
 
 export type LoadedClaudeProfileAccount = LoadedAccountBase & {
   platform: "Claude";
+  plan?: "ultra";
   auth: {
     type: "claude_profile";
     profile: string;
@@ -279,6 +281,9 @@ export function loadAccounts(
       return {
         accountAlias: definition.accountAlias,
         platform: "Claude",
+        ...("plan" in definition && definition.plan !== undefined
+          ? { plan: definition.plan }
+          : {}),
         auth: {
           type: "claude_profile",
           profile: definition.auth.profile,

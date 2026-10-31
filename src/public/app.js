@@ -177,6 +177,8 @@ function isSameLocalDay(leftValue, rightValue) {
 function projectionText(projection) {
   const exhaustion = formatExhaustionRange(projection);
   switch (projection.status) {
+    case "not_applicable":
+      return "N/A: no five-hour session limit";
     case "already_exhausted":
       return "Quota is exhausted";
     case "exhausts_before_reset":
@@ -1073,6 +1075,18 @@ function createLimit(
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
 ) {
+  if (limit.applicability === "not_applicable") {
+    const section = element("section", "limit");
+    section.append(
+      element("h4", "limit-name", limit.label),
+      element(
+        "p",
+        "limit-reset",
+        "N/A: verified Ultra has no five-hour session limit. Weekly limits still apply.",
+      ),
+    );
+    return section;
+  }
   const section = element(
     "section",
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
@@ -1244,6 +1258,14 @@ function createCapacityLimit(
   limit,
   { showReset = true, sharedReset = false } = {},
 ) {
+  if (limit.applicability === "not_applicable") {
+    const row = element("div", "capacity-limit");
+    row.append(
+      element("span", "capacity-limit-name", limit.label),
+      element("strong", "capacity-percent", "N/A"),
+    );
+    return row;
+  }
   const row = element(
     "div",
     `capacity-limit ${limit.depth === 1 ? "subcap" : ""}`,
@@ -1753,12 +1775,14 @@ function renderAnalytics(payload) {
 
 function fallbackLimit(limit, weeklyLimit) {
   const isFable = limit.key.startsWith("fable");
+  const sessionNotApplicable = limit.applicability === "not_applicable";
   const effectiveResetAt = isFable
     ? (weeklyLimit?.resetAt ?? null)
     : limit.resetAt;
   return {
     key: limit.key,
-    label: limit.label,
+    ...(sessionNotApplicable ? { applicability: "not_applicable" } : {}),
+    label: sessionNotApplicable ? "Session (N/A)" : limit.label,
     depth: isFable ? 1 : 0,
     parentKey: isFable ? "base.weekly" : null,
     availability: limit.availability,
@@ -1774,7 +1798,7 @@ function fallbackLimit(limit, weeklyLimit) {
     points: [],
     resetMarkers: [],
     projection: {
-      status: "insufficient_history",
+      status: sessionNotApplicable ? "not_applicable" : "insufficient_history",
       ratePercentPerHour: null,
       rateBasis: null,
       projectedFromUsedPercent: null,

@@ -1,4 +1,5 @@
 import type { QuotaLimit } from "../domain/quota.js";
+import { verifiedUltraSession } from "./claude-ultra.js";
 
 const monthIndexes: Readonly<Record<string, number>> = {
   Jan: 0,
@@ -211,6 +212,7 @@ function unknownSessionLimit(): QuotaLimit {
 export function parseClaudeUsageOutput(
   output: string,
   nowMilliseconds: number,
+  ultraPlan = false,
 ): QuotaLimit[] {
   const limits: QuotaLimit[] = [];
 
@@ -248,10 +250,14 @@ export function parseClaudeUsageOutput(
     throw new ClaudeUsageUnavailableError();
   }
   if (!limits.some((limit) => limit.key === "base.session")) {
-    // /usage can return the weekly windows and omit the session line. The session is then UNKNOWN: a supported window
-    // whose quota values are all null, never a fabricated 0%. It stays "available" so capacity decisions see unknown
-    // headroom and exclude the group instead of treating the window as absent. The weekly figures that did parse stay readable.
-    limits.unshift(unknownSessionLimit());
+    // Omission alone remains UNKNOWN. Only an independently known Ultra plan plus
+    // a complete quota section establishes N/A; neither state fabricates 0%.
+    limits.unshift({
+      ...unknownSessionLimit(),
+      ...(verifiedUltraSession(output, limits, ultraPlan)
+        ? { applicability: "not_applicable" as const }
+        : {}),
+    });
   }
   if (!limits.some((limit) => limit.key === "fable.weekly")) {
     limits.push({
