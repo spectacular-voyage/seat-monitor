@@ -212,6 +212,26 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
   return measured.slice(epochStart);
 }
 
+function observedDropAtOrAfter(
+  points: readonly HistorySeriesPoint[],
+  atMilliseconds: number,
+): boolean {
+  const measured = points
+    .filter((point): point is MeasuredPoint => point.usedPercent !== null)
+    .sort(
+      (left, right) =>
+        Date.parse(left.observedAt) - Date.parse(right.observedAt),
+    );
+  return measured.some((current, index) => {
+    const previous = measured[index - 1];
+    return (
+      previous !== undefined &&
+      Date.parse(current.observedAt) >= atMilliseconds &&
+      previous.usedPercent - current.usedPercent >= MATERIAL_DROP_PERCENT
+    );
+  });
+}
+
 function monotonicUsage(points: readonly MeasuredPoint[]): MeasuredPoint[] {
   let maximum = 0;
   return points.map((point) => {
@@ -420,15 +440,11 @@ export function projectExhaustion(
       ? reportedResetMilliseconds
       : null;
   const resetIsPast = pastResetMilliseconds !== null;
-  const epochStartMilliseconds = Date.parse(first.observedAt);
+  // Direct evidence only: a material usage drop observed at or after the reset, read from the whole measured series. The epoch boundary is not evidence, because
+  // epoch filtering by reset metadata can start a later epoch with no drop at all.
   const resetConfirmed =
     pastResetMilliseconds !== null &&
-    epochStartMilliseconds >= pastResetMilliseconds &&
-    points.some(
-      (point) =>
-        point.usedPercent !== null &&
-        Date.parse(point.observedAt) < epochStartMilliseconds,
-    );
+    observedDropAtOrAfter(points, pastResetMilliseconds);
   // A future reset is the only reset that can arrive before exhaustion; a confirmed past one has already happened and an unconfirmed one is not relief.
   const resetMilliseconds =
     reportedResetMilliseconds !== null &&

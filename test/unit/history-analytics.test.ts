@@ -1360,6 +1360,48 @@ describe("a reset in the past is relief only once usage was seen to drop (seat-m
     expect(result.sampleCount).toBe(3);
   });
 
+  it("does not read a later epoch created by changed or null reset metadata as a usage drop", () => {
+    // The 08:00 sample carries no resetAt, so epoch filtering drops it and the epoch starts after the reset with usage only rising: no drop was observed.
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const noDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 70, null),
+        point("2026-11-01T08:15:00.000Z", 80, resetAt),
+        point("2026-11-01T08:30:00.000Z", 85, resetAt),
+        point("2026-11-01T08:45:00.000Z", 90, resetAt),
+      ],
+      resetAt,
+    );
+    // Beside it: the same shape with an actual drop after the reset is confirmed.
+    const actualDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 90, null),
+        point("2026-11-01T08:15:00.000Z", 5, resetAt),
+        point("2026-11-01T08:30:00.000Z", 10, resetAt),
+        point("2026-11-01T08:45:00.000Z", 15, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(noDrop.status).toBe("reset_unconfirmed");
+    expect(actualDrop.status).toBe("exhaustion_projected");
+  });
+
+  it("does not count a drop that happened before the reset as confirmation", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const result = projectExhaustion(
+      [
+        point("2026-11-01T07:00:00.000Z", 90, resetAt),
+        point("2026-11-01T07:20:00.000Z", 5, resetAt),
+        point("2026-11-01T07:50:00.000Z", 20, resetAt),
+        point("2026-11-01T08:20:00.000Z", 35, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("reset_unconfirmed");
+  });
+
   it("keeps a future reset as relief or a warning exactly as before", () => {
     const resetAt = "2026-11-01T13:10:00.000Z";
     const farReset = projectExhaustion(
