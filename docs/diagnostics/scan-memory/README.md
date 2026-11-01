@@ -101,7 +101,8 @@ native cached observations until a new HTTP read succeeds; their age is explicit
   protocol failure and parent termination clean up the group. Slots wait for
   child close and Linux group exit. Surviving groups/pipes are logged without argv
   or secrets. Windows retains direct-child cleanup; Linux is the verified target.
-- Output buffers stop at the existing bound, including Codex stderr. Private
+- Output buffers stop at the existing bound; Codex stderr is drained without
+  retention or rejecting otherwise valid quota responses. Private
   Claude probe working directories avoid project context. A 32-zone formatter
   cache avoids repeated native ICU allocation.
 
@@ -139,6 +140,11 @@ no remaining children, and peak combined RSS at or below 500,000,000 B. It repor
 stale observations separately. `--interval-seconds 0` explicitly tests immediate
 manual refreshes. The server logs `scan-memory` after each scan and distinguishes
 `claude-usage-cached` from heavyweight `claude-usage-fallback`.
+The checker starts monitoring before waiting for any in-flight scan, then forces
+another scan. Thus the window always includes a complete scan; it may also
+conservatively include the tail of an earlier scan. A cached provider observation
+is not evidence of a skipped account: every full scan still verifies identity and
+attempts the HTTP quota read, preserving actual observation ages on throttling.
 
 The final cgroup's first peak contained 116,285,440 B anonymous, 837,308,416 B file
 and 5,152,768 B kernel memory. Native executable/file cache still counts toward
@@ -155,3 +161,16 @@ parity, bounded bodies, timeout, identity mismatch, Ultra/Fable semantics,
 cache identity/age, and rejected authorization. Existing history, CLI and dashboard
 tests remain. The original installed service is restored after diagnosis; Ops
 retains package and service deployment ownership.
+
+## Independent review
+
+Claude reviewed the provider, cleanup and memory-gate diff. Two confirmed issues
+were fixed: joining an already-running scan could miss its early peak, and verbose
+Codex stderr could reject otherwise valid quota. A real native `/usage` probe in
+a fresh temporary cwd exited successfully without a trust prompt, adding no
+project keys or directories and leaving `.claude.json` at 92,230 bytes. Snapshot
+freshness uses scan completion time, so old quota observations do not cause a
+rescan loop. Stale provider caches remain intentionally visible with their original
+timestamp, matching native fallback semantics. The review confirmed no blocking
+bug; undocumented endpoint compatibility and native fallback memory remain the
+documented rollout limitations.

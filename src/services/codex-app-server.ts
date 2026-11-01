@@ -98,11 +98,9 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
         finishWithError(new ProcessOutputError());
       }
     });
-    child.stderr.on("data", (chunk: Buffer) => {
-      outputBytes += chunk.byteLength;
-      if (outputBytes > MAX_OUTPUT_BYTES)
-        finishWithError(new ProcessOutputError());
-    });
+    // Drain diagnostics without retaining them or charging them against the
+    // protocol response limit. Verbose logging must not invalidate quota.
+    child.stderr.resume();
 
     lines.on("line", (line) => {
       if (settled) return;

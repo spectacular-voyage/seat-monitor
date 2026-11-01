@@ -164,18 +164,9 @@ describe.skipIf(process.platform !== "linux")(
 );
 
 describe("Codex transport limits", () => {
-  it("rejects a missing executable after close", async () => {
-    await expect(
-      readCodexAppServer({
-        command: "/definitely/missing/codex",
-        environment: {},
-        timeoutMilliseconds: 1_000,
-      }),
-    ).rejects.toBeInstanceOf(ProcessSpawnError);
-  });
-  it("bounds stderr as well as stdout", async () => {
+  it("rejects an oversized protocol response", async () => {
     const fake = await executable(
-      'process.stderr.write("x".repeat(1100000)); setInterval(() => {}, 1000);',
+      'process.stdout.write("x".repeat(1100000)); setInterval(() => {}, 1000);',
     );
     try {
       await expect(
@@ -185,6 +176,34 @@ describe("Codex transport limits", () => {
           timeoutMilliseconds: 1_000,
         }),
       ).rejects.toBeInstanceOf(ProcessOutputError);
+    } finally {
+      await fake.cleanup();
+    }
+  });
+  it("rejects a missing executable after close", async () => {
+    await expect(
+      readCodexAppServer({
+        command: "/definitely/missing/codex",
+        environment: {},
+        timeoutMilliseconds: 1_000,
+      }),
+    ).rejects.toBeInstanceOf(ProcessSpawnError);
+  });
+  it("drains verbose stderr without rejecting a valid quota response", async () => {
+    const fake = await executable(
+      'process.stderr.write("x".repeat(1100000));' + responder,
+    );
+    try {
+      await expect(
+        readCodexAppServer({
+          command: fake.command,
+          environment: process.env,
+          timeoutMilliseconds: 1_000,
+        }),
+      ).resolves.toEqual({
+        accountResult: { account: "ok" },
+        rateLimitsResult: { limits: "ok" },
+      });
     } finally {
       await fake.cleanup();
     }

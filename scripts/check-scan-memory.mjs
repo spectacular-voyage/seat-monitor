@@ -59,6 +59,10 @@ for (let scan = 1; scan <= scans; scan += 1) {
   let completedIdentity;
   let memory;
   try {
+    // Wait for any scan already in flight while monitoring. The following
+    // forced refresh then starts (or joins) a scan entirely inside this window.
+    // Include the wait conservatively in the reported peak, not in a blind spot.
+    await get("/api/quota");
     snapshots = await get("/api/quota?refresh=true");
     completedIdentity = await get("/api/server/status");
   } finally {
