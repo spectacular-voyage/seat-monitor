@@ -96,7 +96,7 @@ describe("account scanner", () => {
   });
 
   it.each([
-    [undefined, 4],
+    [undefined, 1],
     [1, 1],
     [2, 2],
     [16, 10],

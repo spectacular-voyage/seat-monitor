@@ -35,7 +35,7 @@ describe("server settings", () => {
       allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
-      scanConcurrency: 4,
+      scanConcurrency: 1,
       port: 3_000,
       useDefaultPortFallback: true,
       history: {
@@ -81,7 +81,7 @@ describe("server settings", () => {
       allowedHosts: [],
       scanIntervalSeconds: 120,
       scanOnStartup: true,
-      scanConcurrency: 4,
+      scanConcurrency: 1,
       port: 4_000,
       useDefaultPortFallback: false,
       history: {
@@ -232,13 +232,13 @@ describe("server settings", () => {
 });
 
 describe("scan concurrency setting (SEATMON-PROBE-RAM-1)", () => {
-  it("defaults to 4 and honours a valid file value and a valid environment override", () => {
+  it("defaults to 1 and honours a valid file value and a valid environment override", () => {
     const filePath = join(directory(), "settings.json");
 
     expect(
       readServerSettings({}, join(directory(), "missing.json")),
     ).toMatchObject({
-      scanConcurrency: 4,
+      scanConcurrency: 1,
     });
 
     writeFileSync(filePath, JSON.stringify({ scanConcurrency: 6 }));
@@ -247,7 +247,7 @@ describe("scan concurrency setting (SEATMON-PROBE-RAM-1)", () => {
       readServerSettings({ SEAT_MONITOR_SCAN_CONCURRENCY: "2" }, filePath)
         .scanConcurrency,
     ).toBe(2);
-    expect(readScanConcurrency({})).toBe(4);
+    expect(readScanConcurrency({})).toBe(1);
     expect(readScanConcurrency({ SEAT_MONITOR_SCAN_CONCURRENCY: "16" })).toBe(
       16,
     );
@@ -278,7 +278,7 @@ describe("scan concurrency setting (SEATMON-PROBE-RAM-1)", () => {
 });
 
 describe("effective scan concurrency without the other server settings", () => {
-  it("takes the environment first, then the file value, then 4, ignoring unrelated keys", () => {
+  it("takes the environment first, then the file value, then 1, ignoring unrelated keys", () => {
     const filePath = join(directory(), "settings.json");
     writeFileSync(
       filePath,
@@ -294,7 +294,7 @@ describe("effective scan concurrency without the other server settings", () => {
     ).toBe(9);
     expect(
       readEffectiveScanConcurrency({}, join(directory(), "none.json")),
-    ).toBe(4);
+    ).toBe(1);
   });
 
   it("refuses a bad file value, bad JSON, a bad environment value and a relative path", () => {

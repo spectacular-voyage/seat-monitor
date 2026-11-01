@@ -272,7 +272,7 @@ Copy the packaged `settings.example.json` or create a private file with this sha
 {
   "scanIntervalSeconds": 60,
   "scanOnStartup": true,
-  "scanConcurrency": 4,
+  "scanConcurrency": 1,
   "port": 3000,
   "history": {
     "rawRetentionHours": 6,
@@ -291,7 +291,7 @@ Environment variables override the settings file:
 
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
-- `SEAT_MONITOR_SCAN_CONCURRENCY`, an integer from 1 through 16 (default 4)
+- `SEAT_MONITOR_SCAN_CONCURRENCY`, an integer from 1 through 16 (default 1)
 - `SEAT_MONITOR_PORT`
 - `SEAT_MONITOR_HOST`, as `127.0.0.1` (default), `localhost`, or `0.0.0.0`
 - `SEAT_MONITOR_ALLOWED_HOSTS`, as comma-separated server IPv4 addresses or hostnames without ports
@@ -353,7 +353,61 @@ The server:
 - recomputes reset countdowns when each API response is serialized; and
 - redacts framework and provider errors.
 
-Account checks run in parallel with a default concurrency of four, settable from 1 through 16 with `scanConcurrency` or `SEAT_MONITOR_SCAN_CONCURRENCY` (each in-flight check is a separate CLI child process, so the setting bounds how many run at once per server or CLI process; it is not a hard memory limit, and each child's memory is not bounded by it). The CLI resolves the environment variable first, then the `scanConcurrency` key of the selected settings file, and ignores every other settings key. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
+Account checks run sequentially by default, with concurrency settable from 1 through 16 using `scanConcurrency` or `SEAT_MONITOR_SCAN_CONCURRENCY` (each in-flight check is a separate CLI child process, so the setting bounds how many run at once per server or CLI process; it is not a hard memory limit, and each child's memory is not bounded by it). The CLI resolves the environment variable first, then the `scanConcurrency` key of the selected settings file, and ignores every other settings key. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude profile, CLI identity verification runs before a lightweight authenticated HTTP quota read. The native `/usage` command remains a compatibility fallback for unsupported schemas, unavailable caches, and other HTTP failures. A throttled HTTP read can reuse the latest identity-matched observation with its original timestamp; it never stamps an old reading as fresh.
+
+Claude profile scans use the same isolated login and expected-email verification as
+before. The HTTP quota reader uses the installed CLI version in its User-Agent,
+rejects redirects, bounds responses to 1 MB, and applies the provider deadline.
+It maps the provider's normalized `limits` array, preserving Fable utilization and
+verified Ultra session applicability. It does not use local usage advice or
+`weekly_scoped_shares` as quota. The endpoint is undocumented: unknown layouts
+fall back to the native CLI rather than guessing.
+
+On HTTP 429/529, the reader can use its bounded last-success cache (64 profiles)
+or the CLI's identity-matched persisted usage cache. The original observation time
+is retained, so old readings display **STALE** and do not become newly dated historical
+observations. Authorization errors never use this HTTP cache. Native compatibility
+fallback remains logged as `claude-usage-fallback` and can exceed the measured
+memory budget. No provider credentials or account identifiers appear in these
+memory/fallback logs.
+
+### Scan memory acceptance check
+
+On Linux, each completed server scan writes a `scan-memory` JSON line to stderr
+(the systemd journal). It reports the sampled peak **sum of server and descendant
+RSS**, per-PID RSS peaks and kernel high-water marks, concurrent child count,
+remaining children, and a 500,000,000-byte (500 decimal MB) budget. Process
+arguments, credentials and account identifiers are excluded. Sampling is every
+10 ms, includes children spawned by native worker threads, and continues tracking
+observed descendants if they are reparented. Very short-lived processes or spikes
+between samples can be missed. The per-PID high-water marks are not added together:
+they can occur at different times, and the server's is a lifetime high-water mark.
+
+When the server has a readable, dedicated cgroup v2, the log also reports sampled
+`memory.current` and its anonymous/file/kernel breakdown at the cgroup peak.
+Cgroup accounting includes filesystem cache and kernel memory; it is not the same
+quantity as combined RSS. Do not compare a historical systemd `MemoryPeak` directly
+with a single scan's sampled RSS peak.
+
+Run the acceptance gate against a locally running candidate server, using the same
+account configuration as the server:
+
+```sh
+npm run check:scan-memory -- --url http://127.0.0.1:3000 --scans 3 --interval-seconds 60
+```
+
+The default is one full scan with a 500 MB budget; `--budget-mb` can state a different test budget. Repeated scans wait 60 seconds after completion, matching the normal scheduler; `--interval-seconds 0` explicitly stress-tests immediate refreshes. Reports include duration and the count of observations older than five minutes.
+The command prints each full report and exits nonzero for a budget breach,
+remaining children, unavailable measurements, missing accounts, or any account
+failure. It forces full scans, including when the cache is fresh. This is a live
+acceptance check requiring configured provider credentials, separate from the
+credential-free unit tests that verify the measurement and failure paths.
+Larger explicit concurrency settings remain supported, but require their own
+memory check. Serial scans take longer; per-provider deadlines and quota parsing
+are unchanged.
+
+See [the Galactica measurements](docs/diagnostics/scan-memory/README.md) for the
+before/after results: the HTTP-first reader passes the 500 MB combined-RSS gate. This is not a 500 MB cgroup ceiling: filesystem cache and native fallback can exceed that figure.
 
 An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. Remote authentication and TLS are not implemented; network exposure is intended only for a trusted LAN.
 

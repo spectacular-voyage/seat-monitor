@@ -73,7 +73,7 @@ describe("Claude provider", () => {
         stderr: "",
       });
     };
-    const provider = createClaudeProvider({ run });
+    const provider = createClaudeProvider({ readHttpUsage: null, run });
 
     const snapshot = await provider.scan(account, {
       now: () => new Date("2026-08-26T18:00:00.000Z"),
@@ -104,7 +104,7 @@ describe("Claude provider", () => {
         stdout: "",
         stderr: "secret-token provider detail",
       });
-    const provider = createClaudeProvider({ run });
+    const provider = createClaudeProvider({ readHttpUsage: null, run });
 
     const snapshot = await provider.scan(account, {
       now: () => new Date("2026-08-26T18:00:00.000Z"),
@@ -146,6 +146,7 @@ describe("Claude provider", () => {
       });
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       run,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(false),
@@ -196,6 +197,7 @@ describe("Claude provider", () => {
     };
     const argumentLists: string[][] = [];
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       run: (options) => {
         argumentLists.push([...options.args]);
@@ -241,6 +243,7 @@ describe("Claude provider", () => {
       },
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       run: () =>
         Promise.resolve({
@@ -290,6 +293,7 @@ describe("Claude provider", () => {
       },
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(false),
       run: (options) =>
@@ -338,6 +342,7 @@ describe("Claude provider", () => {
       },
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(false),
       run: (options) =>
@@ -397,6 +402,7 @@ describe("Claude provider", () => {
     };
     const argumentLists: string[][] = [];
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(true),
       run: (options) => {
@@ -434,6 +440,7 @@ describe("Claude provider", () => {
     };
     let runCalled = false;
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(false),
       run: () => {
         runCalled = true;

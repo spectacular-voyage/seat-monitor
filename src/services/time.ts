@@ -1,3 +1,4 @@
+import { zonedFormatter } from "./zoned-formatter.js";
 export function minutesUntilReset(
   resetAt: string | null,
   nowMilliseconds: number,
@@ -42,16 +43,7 @@ function zonedParts(
   timeZone: string,
 ): ZonedDateParts {
   const values = new Map<string, number>(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    })
+    zonedFormatter(timeZone)
       .formatToParts(new Date(instantMilliseconds))
       .filter((part) => part.type !== "literal")
       .map((part) => [part.type, Number(part.value)]),
