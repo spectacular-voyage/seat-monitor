@@ -95,6 +95,38 @@ describe("account scanner", () => {
     expect(maximumActive).toBe(3);
   });
 
+  it.each([
+    [undefined, 4],
+    [1, 1],
+    [2, 2],
+    [16, 10],
+  ])(
+    "overlaps at most the configured concurrency (%j gives %j of 10 accounts)",
+    async (configured, expected) => {
+      let active = 0;
+      let maximumActive = 0;
+      const provider: QuotaProvider = {
+        async scan(loadedAccount) {
+          active += 1;
+          maximumActive = Math.max(maximumActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          return success(loadedAccount.accountAlias);
+        },
+      };
+      const scan = createScanner({
+        accounts: Array.from({ length: 10 }, (_, index) =>
+          account(`Account_${String(index)}`),
+        ),
+        providers: { Claude: provider, Codex: provider },
+        ...(configured === undefined ? {} : { concurrency: configured }),
+      });
+
+      expect(await scan()).toHaveLength(10);
+      expect(maximumActive).toBe(expected);
+    },
+  );
+
   it("uses a longer Claude deadline while preserving the Codex bound", async () => {
     const received = new Map<string, number>();
     const provider: QuotaProvider = {

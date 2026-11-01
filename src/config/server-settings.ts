@@ -14,9 +14,18 @@ export const DEFAULT_SCAN_INTERVAL_SECONDS = 60;
 export const MINIMUM_SCAN_INTERVAL_SECONDS = 30;
 export const MAXIMUM_SCAN_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_SERVER_PORT = 3_000;
+export const DEFAULT_SCAN_CONCURRENCY = 4;
+export const MINIMUM_SCAN_CONCURRENCY = 1;
+export const MAXIMUM_SCAN_CONCURRENCY = 16;
 
 const retentionDaysSchema = z.number().int().min(1).max(3_650);
 const retentionHoursSchema = z.number().int().min(1).max(87_600);
+
+const scanConcurrencySchema = z
+  .number()
+  .int()
+  .min(MINIMUM_SCAN_CONCURRENCY)
+  .max(MAXIMUM_SCAN_CONCURRENCY);
 
 const settingsFileSchema = z
   .object({
@@ -27,6 +36,7 @@ const settingsFileSchema = z
       .max(MAXIMUM_SCAN_INTERVAL_SECONDS)
       .optional(),
     scanOnStartup: z.boolean().optional(),
+    scanConcurrency: scanConcurrencySchema.optional(),
     port: z.number().int().min(1).max(65_535).optional(),
     host: serverHostSchema.optional(),
     allowedHosts: z.array(allowedHostSchema).optional(),
@@ -54,6 +64,7 @@ export type ServerSettings = {
   allowedHosts: string[];
   scanIntervalSeconds: number;
   scanOnStartup: boolean;
+  scanConcurrency: number;
   port: number;
   useDefaultPortFallback: boolean;
   history: {
@@ -111,6 +122,54 @@ function booleanEnvironment(
   throw new ServerSettingsError(`${name} must be true or false.`);
 }
 
+/** The bound on simultaneous account probes (each is a child process). The environment overrides the file value; both are refused outside 1 to 16. */
+export function readScanConcurrency(
+  environment: NodeJS.ProcessEnv = process.env,
+  fileValue: number = DEFAULT_SCAN_CONCURRENCY,
+): number {
+  return integerEnvironment(
+    environment.SEAT_MONITOR_SCAN_CONCURRENCY,
+    fileValue,
+    {
+      name: "SEAT_MONITOR_SCAN_CONCURRENCY",
+      minimum: MINIMUM_SCAN_CONCURRENCY,
+      maximum: MAXIMUM_SCAN_CONCURRENCY,
+    },
+  );
+}
+
+/**
+ * The effective concurrency for callers that do not need the rest of the server settings (the CLI): the environment wins, then the selected settings file's
+ * `scanConcurrency`, then the default. Only that one key is read and validated, so unrelated host, port or history settings never block a scan. A missing
+ * file is the default; an unreadable or non-JSON file, or an out-of-range value, is refused.
+ */
+export function readEffectiveScanConcurrency(
+  environment: NodeJS.ProcessEnv = process.env,
+  filePath = defaultServerSettingsPath(environment),
+): number {
+  if (!isAbsolute(filePath)) {
+    throw new ServerSettingsError("The server settings path must be absolute.");
+  }
+  let fileValue = DEFAULT_SCAN_CONCURRENCY;
+  const payload = readSettingsPayload(filePath);
+  const configured =
+    typeof payload === "object" &&
+    payload !== null &&
+    "scanConcurrency" in payload
+      ? payload.scanConcurrency
+      : undefined;
+  if (configured !== undefined) {
+    const parsed = scanConcurrencySchema.safeParse(configured);
+    if (!parsed.success) {
+      throw new ServerSettingsError(
+        `scanConcurrency must be an integer from ${String(MINIMUM_SCAN_CONCURRENCY)} to ${String(MAXIMUM_SCAN_CONCURRENCY)}: ${filePath}.`,
+      );
+    }
+    fileValue = parsed.data;
+  }
+  return readScanConcurrency(environment, fileValue);
+}
+
 export function defaultServerSettingsPath(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -131,28 +190,34 @@ export function defaultServerSettingsPath(
   return join(configRoot, "seat-monitor", "settings.json");
 }
 
-function readSettingsFile(
-  filePath: string,
-): z.infer<typeof settingsFileSchema> {
+/** The one place the settings file is read: the parsed JSON, or `undefined` for a missing file. Unreadable or non-JSON files are refused. */
+function readSettingsPayload(filePath: string): unknown {
   let source: string;
   try {
     source = readFileSync(filePath, "utf8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return {};
+      return undefined;
     }
     throw new ServerSettingsError(
       `Server settings could not be read at ${filePath}.`,
     );
   }
-
-  let payload: unknown;
   try {
-    payload = JSON.parse(source);
+    return JSON.parse(source) as unknown;
   } catch {
     throw new ServerSettingsError(
       `Server settings are not valid JSON: ${filePath}.`,
     );
+  }
+}
+
+function readSettingsFile(
+  filePath: string,
+): z.infer<typeof settingsFileSchema> {
+  const payload = readSettingsPayload(filePath);
+  if (payload === undefined) {
+    return {};
   }
   const parsed = settingsFileSchema.safeParse(payload);
   if (!parsed.success) {
@@ -249,6 +314,7 @@ export function readServerSettings(
       file.scanOnStartup ?? true,
       "SEAT_MONITOR_SCAN_ON_STARTUP",
     ),
+    scanConcurrency: readScanConcurrency(environment, file.scanConcurrency),
     port: integerEnvironment(
       environment.SEAT_MONITOR_PORT,
       file.port ?? DEFAULT_SERVER_PORT,

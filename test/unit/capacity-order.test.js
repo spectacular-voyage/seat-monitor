@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
+  READING_STALE_AFTER_SECONDS,
+  readingIsStale,
   sessionUtilizationPercent,
   toneForLimit,
   weeklyResetTimestamp,
@@ -118,5 +120,27 @@ describe("toneForLimit (SEAT-MON-72, #74)", () => {
     expect(toneForLimit(limit(75))).toBe("warning");
     expect(toneForLimit(limit(90))).toBe("danger");
     expect(toneForLimit(limit(10, "exhausts_before_reset"))).toBe("danger");
+  });
+});
+
+describe("reading STALE threshold (seat-monitor probe RAM, 300 s)", () => {
+  const observedAt = "2026-11-01T08:00:00.000Z";
+  const at = (seconds) => Date.parse(observedAt) + seconds * 1_000;
+
+  it("is 300 seconds", () => {
+    expect(READING_STALE_AFTER_SECONDS).toBe(300);
+  });
+
+  it("flags a reading older than 300 s and not one at or under it", () => {
+    expect(readingIsStale(observedAt, at(301))).toBe(true);
+    expect(readingIsStale(observedAt, at(3_600))).toBe(true);
+    expect(readingIsStale(observedAt, at(300))).toBe(false);
+    expect(readingIsStale(observedAt, at(299))).toBe(false);
+    expect(readingIsStale(observedAt, at(0))).toBe(false);
+  });
+
+  it("does not flag a reading it cannot place in time", () => {
+    expect(readingIsStale("not a date", at(600))).toBe(false);
+    expect(readingIsStale(observedAt, Number.NaN)).toBe(false);
   });
 });

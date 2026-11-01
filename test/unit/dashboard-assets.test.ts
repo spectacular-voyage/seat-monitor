@@ -81,7 +81,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
     expect(javascript).toContain(
-      'compareFleetAccountsByWeeklyReset,\n  toneForLimit,\n} from "./capacity-order.js"',
+      'compareFleetAccountsByWeeklyReset,\n  readingIsStale,\n  toneForLimit,\n} from "./capacity-order.js"',
     );
     expect(javascript).toContain("compareAccountsBySessionUtilization");
     expect(javascript).toContain(
@@ -215,6 +215,16 @@ describe("dashboard assets", () => {
     expect(css).not.toContain("stroke-dasharray: 5 4");
     expect(css).not.toContain("border-top: 2px dashed #d8ac76");
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
+  });
+
+  it("marks a reading older than 300 s STALE in the account card and the fleet row", () => {
+    expect(javascript).toContain("readingIsStale");
+    expect(javascript).toContain('element("span", "pill stale", "STALE")');
+    expect(javascript.match(/= staleReadingPill\(account\)/gu)).toHaveLength(2);
+    expect(css).toContain(".pill.stale");
+    expect(capacityOrderJavascript).toContain(
+      "export const READING_STALE_AFTER_SECONDS = 300;",
+    );
   });
 
   it("keeps provider-controlled rendering on textContent", () => {

@@ -2,6 +2,7 @@ import {
   LONGEST_QUOTA_PERIOD_MINUTES,
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
+  readingIsStale,
   toneForLimit,
 } from "./capacity-order.js";
 import {
@@ -1344,6 +1345,10 @@ function createFleetAccount(account) {
     ),
   );
   header.append(identity);
+  const staleFleetPill = staleReadingPill(account);
+  if (staleFleetPill !== null) {
+    header.append(staleFleetPill);
+  }
   if (account.status === "error") {
     header.append(element("span", "danger-text", "Check failed"));
   }
@@ -1555,6 +1560,14 @@ function renderFleetCapacity(accounts) {
   }
 }
 
+// STALE when the account's reading is older than 300 s at the time the server generated this payload (server clock, not the browser's).
+function staleReadingPill(account) {
+  const generatedAt = Date.parse(latestAnalyticsPayload?.generatedAt ?? "");
+  return readingIsStale(account.observedAt, generatedAt)
+    ? element("span", "pill stale", "STALE")
+    : null;
+}
+
 function createAccountCard(account, rangeStart, rangeEnd) {
   const providerClass =
     account.platform === "Claude"
@@ -1581,6 +1594,10 @@ function createAccountCard(account, rangeStart, rangeEnd) {
     ),
   );
   header.append(identity);
+  const staleCardPill = staleReadingPill(account);
+  if (staleCardPill !== null) {
+    header.append(staleCardPill);
+  }
   if (account.status === "error") {
     header.append(element("span", "pill danger", "Check failed"));
   }
