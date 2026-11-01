@@ -189,6 +189,8 @@ function projectionText(projection) {
       return `Projected empty ${exhaustion}`;
     case "reset_before_exhaustion":
       return "Reset is expected before exhaustion";
+    case "reset_unconfirmed":
+      return `Projected empty ${exhaustion} (reset time passed, not confirmed)`;
     case "exhaustion_projected":
       return `Projected empty ${exhaustion}`;
     case "not_consuming":
@@ -441,7 +443,8 @@ function projectionLineEnd(limit, projectionAt) {
   }
   if (
     limit.projection.status === "exhausts_before_reset" ||
-    limit.projection.status === "exhaustion_projected"
+    limit.projection.status === "exhaustion_projected" ||
+    limit.projection.status === "reset_unconfirmed"
   ) {
     return projectionAt;
   }

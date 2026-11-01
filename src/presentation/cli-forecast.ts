@@ -43,6 +43,8 @@ function outlook(limit: CliForecastLimit): string {
       return `exhausts before reset at ${projectionRange(limit)}${limit.minutesToExhaustion === null ? "" : ` (${String(limit.minutesToExhaustion)}m)`}`;
     case "reset_before_exhaustion":
       return `reset before projected exhaustion at ${projectionRange(limit)}`;
+    case "reset_unconfirmed":
+      return `reset time passed without an observed usage drop, so no relief is counted; exhaustion projected at ${projectionRange(limit)}${limit.minutesToExhaustion === null ? "" : ` (${String(limit.minutesToExhaustion)}m)`}`;
     case "exhaustion_projected":
       return `exhaustion projected at ${projectionRange(limit)}${limit.minutesToExhaustion === null ? "" : ` (${String(limit.minutesToExhaustion)}m)`}`;
     case "not_consuming":

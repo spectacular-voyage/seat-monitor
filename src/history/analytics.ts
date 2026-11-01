@@ -409,8 +409,33 @@ export function projectExhaustion(
     selected.rate,
   );
   const projectedExhaustionAt = new Date(exhaustionMilliseconds).toISOString();
-  const resetMilliseconds =
+  const reportedResetMilliseconds =
     effectiveResetAt === null ? null : Date.parse(effectiveResetAt);
+  // Instants only (UTC epoch milliseconds), never wall-clock strings, so a DST fallback hour cannot shift the comparison. A reset that is not later
+  // than the latest observation has already passed: relief is counted only once usage was actually seen to drop after it.
+  const pastResetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    reportedResetMilliseconds <= latestMilliseconds
+      ? reportedResetMilliseconds
+      : null;
+  const resetIsPast = pastResetMilliseconds !== null;
+  const epochStartMilliseconds = Date.parse(first.observedAt);
+  const resetConfirmed =
+    pastResetMilliseconds !== null &&
+    epochStartMilliseconds >= pastResetMilliseconds &&
+    points.some(
+      (point) =>
+        point.usedPercent !== null &&
+        Date.parse(point.observedAt) < epochStartMilliseconds,
+    );
+  // A future reset is the only reset that can arrive before exhaustion; a confirmed past one has already happened and an unconfirmed one is not relief.
+  const resetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    !resetIsPast
+      ? reportedResetMilliseconds
+      : null;
   const baselineExhaustionMilliseconds =
     epochRate > 0
       ? projectedAt(latestMilliseconds, latest.usedPercent, epochRate)
@@ -424,7 +449,9 @@ export function projectExhaustion(
   return {
     status:
       resetMilliseconds === null
-        ? "exhaustion_projected"
+        ? resetIsPast && !resetConfirmed
+          ? "reset_unconfirmed"
+          : "exhaustion_projected"
         : exhaustionMilliseconds < resetMilliseconds
           ? "exhausts_before_reset"
           : "reset_before_exhaustion",
