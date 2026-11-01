@@ -155,6 +155,31 @@ describe("CLI", () => {
     },
   );
 
+  it("refuses an out-of-range SEAT_MONITOR_SCAN_CONCURRENCY with exit 2 before scanning", async () => {
+    const stdout = writer();
+    const stderr = writer();
+    const previous = process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
+    process.env.SEAT_MONITOR_SCAN_CONCURRENCY = "17";
+    try {
+      const exitCode = await runCli([], {
+        stdout: stdout.sink,
+        stderr: stderr.sink,
+      });
+
+      expect(exitCode).toBe(2);
+      expect(stdout.read()).toBe("");
+      expect(stderr.read()).toBe(
+        "SEAT_MONITOR_SCAN_CONCURRENCY must be an integer from 1 to 16.\n",
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
+      } else {
+        process.env.SEAT_MONITOR_SCAN_CONCURRENCY = previous;
+      }
+    }
+  });
+
   it("defaults to a log-free aligned text report", async () => {
     const stdout = writer();
     const stderr = writer();

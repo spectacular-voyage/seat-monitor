@@ -113,6 +113,7 @@ type DashboardAssetLoader = () => Promise<DashboardAssets>;
 
 export type ServerOptions = {
   scan?: Scanner;
+  scanConcurrency?: number;
   readClaudeResets?: () => Promise<ClaudeAccountResets[]>;
   readCodexResets?: () => Promise<CachedCodexResetOffers[]>;
   now?: () => Date;
@@ -230,6 +231,9 @@ export async function buildServer(
     options.scan ??
     createDefaultScanner({
       pausedAccountAlias: () => pausedResetAccountAlias,
+      ...(options.scanConcurrency === undefined
+        ? {}
+        : { concurrency: options.scanConcurrency }),
     });
   const scan =
     options.history === undefined
@@ -616,6 +620,7 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
   const server = await buildServer({
     ...selectedConfiguration,
     allowedHosts: settings.allowedHosts,
+    scanConcurrency: settings.scanConcurrency,
     reloadDashboardAssets: import.meta.url.endsWith("/server.ts"),
     history: createDefaultHistoryService(
       process.env,

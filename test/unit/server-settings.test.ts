@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   defaultServerSettingsPath,
+  readScanConcurrency,
   readServerSettings,
   ServerSettingsError,
 } from "../../src/config/server-settings.js";
@@ -33,6 +34,7 @@ describe("server settings", () => {
       allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
+      scanConcurrency: 4,
       port: 3_000,
       useDefaultPortFallback: true,
       history: {
@@ -78,6 +80,7 @@ describe("server settings", () => {
       allowedHosts: [],
       scanIntervalSeconds: 120,
       scanOnStartup: true,
+      scanConcurrency: 4,
       port: 4_000,
       useDefaultPortFallback: false,
       history: {
@@ -224,5 +227,51 @@ describe("server settings", () => {
         filePath,
       ).history.rawRetentionHours,
     ).toBe(8);
+  });
+});
+
+describe("scan concurrency setting (SEATMON-PROBE-RAM-1)", () => {
+  it("defaults to 4 and honours a valid file value and a valid environment override", () => {
+    const filePath = join(directory(), "settings.json");
+
+    expect(
+      readServerSettings({}, join(directory(), "missing.json")),
+    ).toMatchObject({
+      scanConcurrency: 4,
+    });
+
+    writeFileSync(filePath, JSON.stringify({ scanConcurrency: 6 }));
+    expect(readServerSettings({}, filePath).scanConcurrency).toBe(6);
+    expect(
+      readServerSettings({ SEAT_MONITOR_SCAN_CONCURRENCY: "2" }, filePath)
+        .scanConcurrency,
+    ).toBe(2);
+    expect(readScanConcurrency({})).toBe(4);
+    expect(readScanConcurrency({ SEAT_MONITOR_SCAN_CONCURRENCY: "16" })).toBe(
+      16,
+    );
+    expect(readScanConcurrency({ SEAT_MONITOR_SCAN_CONCURRENCY: "1" })).toBe(1);
+  });
+
+  it.each(["0", "17", "2.5", "many", ""])(
+    "refuses the environment value %j",
+    (value) => {
+      expect(() =>
+        readServerSettings(
+          { SEAT_MONITOR_SCAN_CONCURRENCY: value },
+          join(directory(), "missing.json"),
+        ),
+      ).toThrow(ServerSettingsError);
+      expect(() =>
+        readScanConcurrency({ SEAT_MONITOR_SCAN_CONCURRENCY: value }),
+      ).toThrow(ServerSettingsError);
+    },
+  );
+
+  it.each([0, 17, 2.5, "4", null])("refuses the file value %j", (value) => {
+    const filePath = join(directory(), "settings.json");
+    writeFileSync(filePath, JSON.stringify({ scanConcurrency: value }));
+
+    expect(() => readServerSettings({}, filePath)).toThrow(ServerSettingsError);
   });
 });

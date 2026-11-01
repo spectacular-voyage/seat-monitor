@@ -8,6 +8,10 @@ import {
   AccountConfigurationError,
   defaultAccountsConfigPath,
 } from "./config/accounts.js";
+import {
+  readScanConcurrency,
+  ServerSettingsError,
+} from "./config/server-settings.js";
 import { cliQuotaSchema } from "./domain/cli-forecast.js";
 import { isMainModule } from "./entry-point.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
@@ -182,7 +186,9 @@ export async function runCli(
   let history: HistoryService | null;
   let ownedHistory: HistoryService | null = null;
   try {
-    const baseScan = dependencies.scan ?? createDefaultScanner();
+    const baseScan =
+      dependencies.scan ??
+      createDefaultScanner({ concurrency: readScanConcurrency(process.env) });
     history =
       dependencies.history ??
       (dependencies.scan === undefined ||
@@ -204,7 +210,8 @@ export async function runCli(
           });
   } catch (error) {
     const message =
-      error instanceof AccountConfigurationError
+      error instanceof AccountConfigurationError ||
+      error instanceof ServerSettingsError
         ? error.message
         : "Account configuration is invalid.";
     stderr.write(`${message}\n`);

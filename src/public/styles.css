@@ -909,6 +909,12 @@ button:focus-visible,
   background: rgb(77 153 107 / 12%);
 }
 
+.pill.stale {
+  border-color: rgb(226 187 123 / 55%);
+  color: #f0d9ae;
+  background: #46331d;
+}
+
 .pill.danger {
   border-color: rgb(212 100 91 / 35%);
   color: #f4aaa4;

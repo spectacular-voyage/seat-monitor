@@ -14,6 +14,9 @@ export const DEFAULT_SCAN_INTERVAL_SECONDS = 60;
 export const MINIMUM_SCAN_INTERVAL_SECONDS = 30;
 export const MAXIMUM_SCAN_INTERVAL_SECONDS = 3_600;
 export const DEFAULT_SERVER_PORT = 3_000;
+export const DEFAULT_SCAN_CONCURRENCY = 4;
+export const MINIMUM_SCAN_CONCURRENCY = 1;
+export const MAXIMUM_SCAN_CONCURRENCY = 16;
 
 const retentionDaysSchema = z.number().int().min(1).max(3_650);
 const retentionHoursSchema = z.number().int().min(1).max(87_600);
@@ -27,6 +30,12 @@ const settingsFileSchema = z
       .max(MAXIMUM_SCAN_INTERVAL_SECONDS)
       .optional(),
     scanOnStartup: z.boolean().optional(),
+    scanConcurrency: z
+      .number()
+      .int()
+      .min(MINIMUM_SCAN_CONCURRENCY)
+      .max(MAXIMUM_SCAN_CONCURRENCY)
+      .optional(),
     port: z.number().int().min(1).max(65_535).optional(),
     host: serverHostSchema.optional(),
     allowedHosts: z.array(allowedHostSchema).optional(),
@@ -54,6 +63,7 @@ export type ServerSettings = {
   allowedHosts: string[];
   scanIntervalSeconds: number;
   scanOnStartup: boolean;
+  scanConcurrency: number;
   port: number;
   useDefaultPortFallback: boolean;
   history: {
@@ -109,6 +119,22 @@ function booleanEnvironment(
     return false;
   }
   throw new ServerSettingsError(`${name} must be true or false.`);
+}
+
+/** The bound on simultaneous account probes (each is a child process). The environment overrides the file value; both are refused outside 1 to 16. */
+export function readScanConcurrency(
+  environment: NodeJS.ProcessEnv = process.env,
+  fileValue: number = DEFAULT_SCAN_CONCURRENCY,
+): number {
+  return integerEnvironment(
+    environment.SEAT_MONITOR_SCAN_CONCURRENCY,
+    fileValue,
+    {
+      name: "SEAT_MONITOR_SCAN_CONCURRENCY",
+      minimum: MINIMUM_SCAN_CONCURRENCY,
+      maximum: MAXIMUM_SCAN_CONCURRENCY,
+    },
+  );
 }
 
 export function defaultServerSettingsPath(
@@ -249,6 +275,7 @@ export function readServerSettings(
       file.scanOnStartup ?? true,
       "SEAT_MONITOR_SCAN_ON_STARTUP",
     ),
+    scanConcurrency: readScanConcurrency(environment, file.scanConcurrency),
     port: integerEnvironment(
       environment.SEAT_MONITOR_PORT,
       file.port ?? DEFAULT_SERVER_PORT,

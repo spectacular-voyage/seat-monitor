@@ -104,6 +104,7 @@ describe("HTTP server", () => {
       allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
+      scanConcurrency: 4,
       port: 3_000,
       useDefaultPortFallback: true,
       history: {

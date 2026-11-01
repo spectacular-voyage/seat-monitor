@@ -1,4 +1,15 @@
 export const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
+// A reading older than this (now - observedAt) is shown as STALE: the ruled maximum acceptable reading age.
+export const READING_STALE_AFTER_SECONDS = 300;
+
+export function readingIsStale(observedAt, nowMilliseconds) {
+  const observed = Date.parse(observedAt);
+  return (
+    Number.isFinite(observed) &&
+    Number.isFinite(nowMilliseconds) &&
+    nowMilliseconds - observed > READING_STALE_AFTER_SECONDS * 1_000
+  );
+}
 
 function compareAccountIdentity(left, right) {
   return (
