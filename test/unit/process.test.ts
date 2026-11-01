@@ -87,10 +87,11 @@ describe.skipIf(process.platform !== "linux")("provider descendants", () => {
           await expect(result).rejects.toBeInstanceOf(
             mode === "timeout" ? ProcessTimeoutError : ProcessOutputError,
           );
-        const pid = (await readFile(pidFile, "utf8")).trim();
+        const pid = Number(await readFile(pidFile, "utf8"));
+        expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
         let status = "";
         try {
-          status = await readFile(`/proc/${pid}/status`, "utf8");
+          status = await readFile(`/proc/${String(pid)}/status`, "utf8");
         } catch {
           /* Reaped. */
         }
