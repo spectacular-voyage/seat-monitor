@@ -10,6 +10,11 @@ import {
   ClaudeUsageUnavailableError,
   parseClaudeUsageOutput,
 } from "./claude-usage.js";
+import {
+  createClaudeHttpUsageReader,
+  ClaudeUsageHttpError,
+  type ReadClaudeHttpUsage,
+} from "./claude-usage-http.js";
 import { createFailureSnapshot } from "./failure.js";
 import {
   minimalChildEnvironment,
@@ -52,6 +57,7 @@ export type ClaudeProviderDependencies = {
   run?: RunCommand;
   profileIsReady?: (claudeConfigDir: string) => Promise<boolean>;
   managedMcpIsConfigured?: () => Promise<boolean>;
+  readHttpUsage?: ReadClaudeHttpUsage | null;
 };
 
 async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
@@ -118,6 +124,32 @@ export function createClaudeProvider(
 ): QuotaProvider {
   const command = dependencies.command ?? "claude";
   const run = dependencies.run ?? runCommand;
+  const readHttpUsage =
+    dependencies.readHttpUsage === null
+      ? null
+      : (dependencies.readHttpUsage ?? createClaudeHttpUsageReader());
+  let cliVersion: Promise<string> | null = null;
+  function version(timeoutMilliseconds: number): Promise<string> {
+    cliVersion ??= run({
+      command,
+      args: ["--version"],
+      environment: minimalChildEnvironment({ DISABLE_AUTOUPDATER: "1" }),
+      timeoutMilliseconds,
+    })
+      .then((result) => {
+        const match = /^(\d+\.\d+\.\d+) \(Claude Code\)/u.exec(
+          result.stdout.trim(),
+        );
+        if (result.exitCode !== 0 || match?.[1] === undefined)
+          throw new ClaudeUsageHttpError();
+        return match[1];
+      })
+      .catch((error: unknown) => {
+        cliVersion = null;
+        throw error;
+      });
+    return cliVersion;
+  }
   const isProfileReady = dependencies.profileIsReady ?? profileIsReady;
   const hasManagedMcpConfig =
     dependencies.managedMcpIsConfigured ?? managedMcpIsConfigured;
@@ -227,7 +259,28 @@ export function createClaudeProvider(
             account.auth.type === "claude_profile" &&
             declaredPlan === "ultra");
         let observedAt = context.now();
-        if (readsQuota) {
+        let httpSucceeded = false;
+        if (account.auth.type === "claude_profile" && readHttpUsage !== null) {
+          try {
+            const usage = await readHttpUsage({
+              account: { ...account, auth: account.auth },
+              ultraPlan,
+              cliVersion: await version(context.timeoutMilliseconds),
+              now: context.now,
+              timeoutMilliseconds: context.timeoutMilliseconds,
+            });
+            limits = usage.limits;
+            observedAt = new Date(usage.observedAt);
+            httpSucceeded = true;
+          } catch (error) {
+            // Preserve native quota/refresh behavior if the undocumented HTTP
+            // contract changes or is unavailable. Never fabricate partial quota.
+            process.stderr.write(
+              `${JSON.stringify({ event: "claude-usage-fallback", httpStatus: error instanceof ClaudeUsageHttpError ? (error.status ?? null) : null })}\n`,
+            );
+          }
+        }
+        if (readsQuota && !httpSucceeded) {
           const usageArguments = ["--setting-sources", ""];
           if (!(await hasManagedMcpConfig())) {
             usageArguments.push("--strict-mcp-config");
