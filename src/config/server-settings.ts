@@ -151,44 +151,21 @@ export function readEffectiveScanConcurrency(
     throw new ServerSettingsError("The server settings path must be absolute.");
   }
   let fileValue = DEFAULT_SCAN_CONCURRENCY;
-  let source: string | null = null;
-  try {
-    source = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if (!(
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
-    )) {
+  const payload = readSettingsPayload(filePath);
+  const configured =
+    typeof payload === "object" &&
+    payload !== null &&
+    "scanConcurrency" in payload
+      ? payload.scanConcurrency
+      : undefined;
+  if (configured !== undefined) {
+    const parsed = scanConcurrencySchema.safeParse(configured);
+    if (!parsed.success) {
       throw new ServerSettingsError(
-        `Server settings could not be read at ${filePath}.`,
+        `scanConcurrency must be an integer from ${String(MINIMUM_SCAN_CONCURRENCY)} to ${String(MAXIMUM_SCAN_CONCURRENCY)}: ${filePath}.`,
       );
     }
-  }
-  if (source !== null) {
-    let payload: unknown;
-    try {
-      payload = JSON.parse(source);
-    } catch {
-      throw new ServerSettingsError(
-        `Server settings are not valid JSON: ${filePath}.`,
-      );
-    }
-    const configured =
-      typeof payload === "object" &&
-      payload !== null &&
-      "scanConcurrency" in payload
-        ? payload.scanConcurrency
-        : undefined;
-    if (configured !== undefined) {
-      const parsed = scanConcurrencySchema.safeParse(configured);
-      if (!parsed.success) {
-        throw new ServerSettingsError(
-          `scanConcurrency must be an integer from ${String(MINIMUM_SCAN_CONCURRENCY)} to ${String(MAXIMUM_SCAN_CONCURRENCY)}: ${filePath}.`,
-        );
-      }
-      fileValue = parsed.data;
-    }
+    fileValue = parsed.data;
   }
   return readScanConcurrency(environment, fileValue);
 }
@@ -213,28 +190,34 @@ export function defaultServerSettingsPath(
   return join(configRoot, "seat-monitor", "settings.json");
 }
 
-function readSettingsFile(
-  filePath: string,
-): z.infer<typeof settingsFileSchema> {
+/** The one place the settings file is read: the parsed JSON, or `undefined` for a missing file. Unreadable or non-JSON files are refused. */
+function readSettingsPayload(filePath: string): unknown {
   let source: string;
   try {
     source = readFileSync(filePath, "utf8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return {};
+      return undefined;
     }
     throw new ServerSettingsError(
       `Server settings could not be read at ${filePath}.`,
     );
   }
-
-  let payload: unknown;
   try {
-    payload = JSON.parse(source);
+    return JSON.parse(source) as unknown;
   } catch {
     throw new ServerSettingsError(
       `Server settings are not valid JSON: ${filePath}.`,
     );
+  }
+}
+
+function readSettingsFile(
+  filePath: string,
+): z.infer<typeof settingsFileSchema> {
+  const payload = readSettingsPayload(filePath);
+  if (payload === undefined) {
+    return {};
   }
   const parsed = settingsFileSchema.safeParse(payload);
   if (!parsed.success) {
