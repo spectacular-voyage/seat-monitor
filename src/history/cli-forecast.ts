@@ -68,7 +68,8 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
           (limit) =>
             limit.projectionStatus === "already_exhausted" ||
             limit.projectionStatus === "exhausts_before_reset" ||
-            limit.projectionStatus === "exhaustion_projected",
+            limit.projectionStatus === "exhaustion_projected" ||
+            limit.projectionStatus === "reset_unconfirmed",
         )
         .map((limit) => ({ account, limit })),
     )

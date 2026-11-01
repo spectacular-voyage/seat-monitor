@@ -212,6 +212,26 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
   return measured.slice(epochStart);
 }
 
+function observedDropAtOrAfter(
+  points: readonly HistorySeriesPoint[],
+  atMilliseconds: number,
+): boolean {
+  const measured = points
+    .filter((point): point is MeasuredPoint => point.usedPercent !== null)
+    .sort(
+      (left, right) =>
+        Date.parse(left.observedAt) - Date.parse(right.observedAt),
+    );
+  return measured.some((current, index) => {
+    const previous = measured[index - 1];
+    return (
+      previous !== undefined &&
+      Date.parse(current.observedAt) >= atMilliseconds &&
+      previous.usedPercent - current.usedPercent >= MATERIAL_DROP_PERCENT
+    );
+  });
+}
+
 function monotonicUsage(points: readonly MeasuredPoint[]): MeasuredPoint[] {
   let maximum = 0;
   return points.map((point) => {
@@ -409,8 +429,29 @@ export function projectExhaustion(
     selected.rate,
   );
   const projectedExhaustionAt = new Date(exhaustionMilliseconds).toISOString();
-  const resetMilliseconds =
+  const reportedResetMilliseconds =
     effectiveResetAt === null ? null : Date.parse(effectiveResetAt);
+  // Instants only (UTC epoch milliseconds), never wall-clock strings, so a DST fallback hour cannot shift the comparison. A reset that is not later
+  // than the latest observation has already passed: relief is counted only once usage was actually seen to drop after it.
+  const pastResetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    reportedResetMilliseconds <= latestMilliseconds
+      ? reportedResetMilliseconds
+      : null;
+  const resetIsPast = pastResetMilliseconds !== null;
+  // Direct evidence only: a material usage drop observed at or after the reset, read from the whole measured series. The epoch boundary is not evidence, because
+  // epoch filtering by reset metadata can start a later epoch with no drop at all.
+  const resetConfirmed =
+    pastResetMilliseconds !== null &&
+    observedDropAtOrAfter(points, pastResetMilliseconds);
+  // A future reset is the only reset that can arrive before exhaustion; a confirmed past one has already happened and an unconfirmed one is not relief.
+  const resetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    !resetIsPast
+      ? reportedResetMilliseconds
+      : null;
   const baselineExhaustionMilliseconds =
     epochRate > 0
       ? projectedAt(latestMilliseconds, latest.usedPercent, epochRate)
@@ -424,7 +465,9 @@ export function projectExhaustion(
   return {
     status:
       resetMilliseconds === null
-        ? "exhaustion_projected"
+        ? resetIsPast && !resetConfirmed
+          ? "reset_unconfirmed"
+          : "exhaustion_projected"
         : exhaustionMilliseconds < resetMilliseconds
           ? "exhausts_before_reset"
           : "reset_before_exhaustion",

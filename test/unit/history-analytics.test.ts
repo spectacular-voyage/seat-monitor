@@ -1312,3 +1312,125 @@ describe("a latest unauthorized snapshot (#84)", () => {
     expect(session?.projection.status).toBe("exhausts_before_reset");
   });
 });
+
+describe("a reset in the past is relief only once usage was seen to drop (seat-monitor #88)", () => {
+  // 2026-11-01 01:10 PDT is 08:10Z; the clocks fall back at 02:00 PDT, so 01:30 occurs twice (PDT 08:30Z and PST 09:30Z).
+  const rising = (resetAt: string, endAt: string): HistorySeriesPoint[] => {
+    const end = Date.parse(endAt);
+    return [
+      point(new Date(end - 60 * 60_000).toISOString(), 70, resetAt),
+      point(new Date(end - 30 * 60_000).toISOString(), 79, resetAt),
+      point(endAt, 88, resetAt),
+    ];
+  };
+
+  it("reports a past reset with no observed drop as unconfirmed and projects exhaustion as if no reset happened", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const unconfirmed = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      resetAt,
+    );
+    const noReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      null,
+    );
+
+    expect(unconfirmed.status).toBe("reset_unconfirmed");
+    expect(unconfirmed.status).not.toBe("reset_before_exhaustion");
+    expect(unconfirmed.projectedExhaustionAt).not.toBeNull();
+    expect(unconfirmed.projectedExhaustionAt).toBe(
+      noReset.projectedExhaustionAt,
+    );
+    expect(noReset.status).toBe("exhaustion_projected");
+  });
+
+  it("treats a past reset followed by an observed usage drop as confirmed", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const result = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 90, resetAt),
+        point("2026-11-01T08:15:00.000Z", 5, resetAt),
+        point("2026-11-01T08:30:00.000Z", 10, resetAt),
+        point("2026-11-01T08:45:00.000Z", 15, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("exhaustion_projected");
+    expect(result.sampleCount).toBe(3);
+  });
+
+  it("does not read a later epoch created by changed or null reset metadata as a usage drop", () => {
+    // The 08:00 sample carries no resetAt, so epoch filtering drops it and the epoch starts after the reset with usage only rising: no drop was observed.
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const noDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 70, null),
+        point("2026-11-01T08:15:00.000Z", 80, resetAt),
+        point("2026-11-01T08:30:00.000Z", 85, resetAt),
+        point("2026-11-01T08:45:00.000Z", 90, resetAt),
+      ],
+      resetAt,
+    );
+    // Beside it: the same shape with an actual drop after the reset is confirmed.
+    const actualDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 90, null),
+        point("2026-11-01T08:15:00.000Z", 5, resetAt),
+        point("2026-11-01T08:30:00.000Z", 10, resetAt),
+        point("2026-11-01T08:45:00.000Z", 15, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(noDrop.status).toBe("reset_unconfirmed");
+    expect(actualDrop.status).toBe("exhaustion_projected");
+  });
+
+  it("does not count a drop that happened before the reset as confirmation", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const result = projectExhaustion(
+      [
+        point("2026-11-01T07:00:00.000Z", 90, resetAt),
+        point("2026-11-01T07:20:00.000Z", 5, resetAt),
+        point("2026-11-01T07:50:00.000Z", 20, resetAt),
+        point("2026-11-01T08:20:00.000Z", 35, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("reset_unconfirmed");
+  });
+
+  it("keeps a future reset as relief or a warning exactly as before", () => {
+    const resetAt = "2026-11-01T13:10:00.000Z";
+    const farReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      resetAt,
+    );
+    const nearReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      "2026-11-01T08:50:00.000Z",
+    );
+
+    expect(farReset.status).toBe("exhausts_before_reset");
+    expect(nearReset.status).toBe("reset_before_exhaustion");
+  });
+
+  it("compares instants across the DST fallback, not wall-clock strings", () => {
+    // Observed 01:05 PST (09:05Z) is a LATER instant than the reset at 01:10 PDT (08:10Z), though its wall-clock time reads earlier.
+    const pastByInstant = projectExhaustion(
+      rising("2026-11-01T08:10:00.000Z", "2026-11-01T09:05:00.000Z"),
+      "2026-11-01T08:10:00.000Z",
+    );
+    // Observed 01:19 PDT (08:19Z) is an EARLIER instant than a reset at 01:10 PST (09:10Z), though its wall-clock time reads later.
+    const futureByInstant = projectExhaustion(
+      rising("2026-11-01T09:10:00.000Z", "2026-11-01T08:19:21.000Z"),
+      "2026-11-01T09:10:00.000Z",
+    );
+
+    expect(pastByInstant.status).toBe("reset_unconfirmed");
+    expect(futureByInstant.status).toBe("exhausts_before_reset");
+    expect(futureByInstant.status).not.toBe("reset_unconfirmed");
+  });
+});

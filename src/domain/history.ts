@@ -32,6 +32,7 @@ export const projectionSchema = z
       "already_exhausted",
       "exhausts_before_reset",
       "reset_before_exhaustion",
+      "reset_unconfirmed",
       "exhaustion_projected",
     ]),
     ratePercentPerHour: z.number().nonnegative().nullable(),
