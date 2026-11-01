@@ -1,0 +1,960 @@
+{
+  "accounts": 18,
+  "outcomes": [
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Codex",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Codex",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Codex",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Codex",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Codex",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    },
+    {
+      "platform": "Claude",
+      "status": "ok",
+      "error": null
+    }
+  ],
+  "durationSeconds": 12.411,
+  "peakRssBytes": 2575908864,
+  "peakCgroupBytes": 2686754816,
+  "maxChildren": 19,
+  "atPeak": [
+    {
+      "pid": 1538,
+      "kind": "server",
+      "rssBytes": 54198272
+    },
+    {
+      "pid": 3181889,
+      "kind": "claude usage",
+      "rssBytes": 305299456
+    },
+    {
+      "pid": 3181891,
+      "kind": "claude usage",
+      "rssBytes": 411705344
+    },
+    {
+      "pid": 3181895,
+      "kind": "claude usage",
+      "rssBytes": 290934784
+    },
+    {
+      "pid": 3181896,
+      "kind": "claude usage",
+      "rssBytes": 320299008
+    },
+    {
+      "pid": 3181901,
+      "kind": "claude usage",
+      "rssBytes": 304742400
+    },
+    {
+      "pid": 3182276,
+      "kind": "claude usage",
+      "rssBytes": 301142016
+    },
+    {
+      "pid": 3182456,
+      "kind": "claude usage",
+      "rssBytes": 294871040
+    },
+    {
+      "pid": 3182495,
+      "kind": "claude usage",
+      "rssBytes": 292716544
+    }
+  ],
+  "processes": [
+    {
+      "pid": 1538,
+      "ppid": 1433,
+      "kind": "server",
+      "peakRssBytes": 144150528,
+      "hwmBytes": 438386688
+    },
+    {
+      "pid": 3181713,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 137408512,
+      "hwmBytes": 137408512
+    },
+    {
+      "pid": 3181714,
+      "ppid": 1538,
+      "kind": "claude",
+      "peakRssBytes": 135446528,
+      "hwmBytes": 135446528
+    },
+    {
+      "pid": 3181715,
+      "ppid": 1538,
+      "kind": "codex",
+      "peakRssBytes": 134070272,
+      "hwmBytes": 134070272
+    },
+    {
+      "pid": 3181717,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 139976704,
+      "hwmBytes": 139976704
+    },
+    {
+      "pid": 3181726,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 136740864,
+      "hwmBytes": 136740864
+    },
+    {
+      "pid": 3181727,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 133644288,
+      "hwmBytes": 133644288
+    },
+    {
+      "pid": 3181731,
+      "ppid": 1538,
+      "kind": "codex app-server",
+      "peakRssBytes": 130498560,
+      "hwmBytes": 130498560
+    },
+    {
+      "pid": 3181734,
+      "ppid": 1538,
+      "kind": "codex app-server",
+      "peakRssBytes": 126844928,
+      "hwmBytes": 126844928
+    },
+    {
+      "pid": 3181799,
+      "ppid": 3181715,
+      "kind": "lsb_release",
+      "peakRssBytes": 54132736,
+      "hwmBytes": 54132736
+    },
+    {
+      "pid": 3181811,
+      "ppid": 3181799,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181813,
+      "ppid": 3181811,
+      "kind": "cut",
+      "peakRssBytes": 16384,
+      "hwmBytes": 16384
+    },
+    {
+      "pid": 3181817,
+      "ppid": 3181734,
+      "kind": "lsb_release",
+      "peakRssBytes": 2134016,
+      "hwmBytes": 2134016
+    },
+    {
+      "pid": 3181820,
+      "ppid": 3181731,
+      "kind": "lsb_release",
+      "peakRssBytes": 2129920,
+      "hwmBytes": 2129920
+    },
+    {
+      "pid": 3181824,
+      "ppid": 3181817,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181826,
+      "ppid": 3181824,
+      "kind": "cut",
+      "peakRssBytes": 4542464,
+      "hwmBytes": 4542464
+    },
+    {
+      "pid": 3181827,
+      "ppid": 3181824,
+      "kind": "tr",
+      "peakRssBytes": 8175616,
+      "hwmBytes": 8175616
+    },
+    {
+      "pid": 3181828,
+      "ppid": 3181820,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3181829,
+      "ppid": 3181799,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181832,
+      "ppid": 3181829,
+      "kind": "tr",
+      "peakRssBytes": 1409024,
+      "hwmBytes": 1409024
+    },
+    {
+      "pid": 3181834,
+      "ppid": 3181828,
+      "kind": "lsb_release",
+      "peakRssBytes": 126976,
+      "hwmBytes": 126976
+    },
+    {
+      "pid": 3181835,
+      "ppid": 3181828,
+      "kind": "cut",
+      "peakRssBytes": 3297280,
+      "hwmBytes": 3297280
+    },
+    {
+      "pid": 3181838,
+      "ppid": 3181799,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181840,
+      "ppid": 3181838,
+      "kind": "tr",
+      "peakRssBytes": 7430144,
+      "hwmBytes": 7430144
+    },
+    {
+      "pid": 3181841,
+      "ppid": 3181820,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3181843,
+      "ppid": 3181817,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181845,
+      "ppid": 3181843,
+      "kind": "lsb_release",
+      "peakRssBytes": 131072,
+      "hwmBytes": 131072
+    },
+    {
+      "pid": 3181846,
+      "ppid": 3181841,
+      "kind": "cut",
+      "peakRssBytes": 430080,
+      "hwmBytes": 430080
+    },
+    {
+      "pid": 3181848,
+      "ppid": 3181817,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3181850,
+      "ppid": 3181848,
+      "kind": "tr",
+      "peakRssBytes": 8040448,
+      "hwmBytes": 8040448
+    },
+    {
+      "pid": 3181851,
+      "ppid": 3181820,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3181853,
+      "ppid": 3181851,
+      "kind": "tr",
+      "peakRssBytes": 471040,
+      "hwmBytes": 471040
+    },
+    {
+      "pid": 3181889,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 318095360,
+      "hwmBytes": 318095360
+    },
+    {
+      "pid": 3181891,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 416768000,
+      "hwmBytes": 416768000
+    },
+    {
+      "pid": 3181895,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 329064448,
+      "hwmBytes": 329064448
+    },
+    {
+      "pid": 3181896,
+      "ppid": 1538,
+      "kind": "claude",
+      "peakRssBytes": 334487552,
+      "hwmBytes": 334487552
+    },
+    {
+      "pid": 3181901,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 320847872,
+      "hwmBytes": 320847872
+    },
+    {
+      "pid": 3181969,
+      "ppid": 3181731,
+      "kind": "bwrap",
+      "peakRssBytes": 2453504,
+      "hwmBytes": 2453504
+    },
+    {
+      "pid": 3181970,
+      "ppid": 3181969,
+      "kind": "bwrap",
+      "peakRssBytes": 1347584,
+      "hwmBytes": 1347584
+    },
+    {
+      "pid": 3181978,
+      "ppid": 3181734,
+      "kind": "bwrap",
+      "peakRssBytes": 2465792,
+      "hwmBytes": 2465792
+    },
+    {
+      "pid": 3181982,
+      "ppid": 3181978,
+      "kind": "true",
+      "peakRssBytes": 303104,
+      "hwmBytes": 303104
+    },
+    {
+      "pid": 3181986,
+      "ppid": 3181731,
+      "kind": "lsb_release",
+      "peakRssBytes": 2129920,
+      "hwmBytes": 2129920
+    },
+    {
+      "pid": 3181989,
+      "ppid": 3181986,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3181991,
+      "ppid": 3181989,
+      "kind": "cut",
+      "peakRssBytes": 8028160,
+      "hwmBytes": 8028160
+    },
+    {
+      "pid": 3181992,
+      "ppid": 3181989,
+      "kind": "tr",
+      "peakRssBytes": 5017600,
+      "hwmBytes": 5017600
+    },
+    {
+      "pid": 3182001,
+      "ppid": 3181986,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3182003,
+      "ppid": 3182001,
+      "kind": "tr",
+      "peakRssBytes": 6242304,
+      "hwmBytes": 6242304
+    },
+    {
+      "pid": 3182010,
+      "ppid": 3181891,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182011,
+      "ppid": 3182010,
+      "kind": "uname",
+      "peakRssBytes": 7684096,
+      "hwmBytes": 7684096
+    },
+    {
+      "pid": 3182014,
+      "ppid": 3181715,
+      "kind": "bwrap",
+      "peakRssBytes": 2412544,
+      "hwmBytes": 2412544
+    },
+    {
+      "pid": 3182016,
+      "ppid": 3182014,
+      "kind": "true",
+      "peakRssBytes": 270336,
+      "hwmBytes": 270336
+    },
+    {
+      "pid": 3182029,
+      "ppid": 3181889,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182033,
+      "ppid": 3182029,
+      "kind": "uname",
+      "peakRssBytes": 2150400,
+      "hwmBytes": 2150400
+    },
+    {
+      "pid": 3182034,
+      "ppid": 3181734,
+      "kind": "lsb_release",
+      "peakRssBytes": 2129920,
+      "hwmBytes": 2129920
+    },
+    {
+      "pid": 3182036,
+      "ppid": 3181895,
+      "kind": "sh",
+      "peakRssBytes": 2117632,
+      "hwmBytes": 2117632
+    },
+    {
+      "pid": 3182039,
+      "ppid": 3182034,
+      "kind": "lsb_release",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182053,
+      "ppid": 3182034,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3182055,
+      "ppid": 3182053,
+      "kind": "tr",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182070,
+      "ppid": 3181896,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182073,
+      "ppid": 3182070,
+      "kind": "uname",
+      "peakRssBytes": 507904,
+      "hwmBytes": 507904
+    },
+    {
+      "pid": 3182081,
+      "ppid": 3181901,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182082,
+      "ppid": 3181715,
+      "kind": "lsb_release",
+      "peakRssBytes": 2134016,
+      "hwmBytes": 2134016
+    },
+    {
+      "pid": 3182086,
+      "ppid": 3182081,
+      "kind": "uname",
+      "peakRssBytes": 5292032,
+      "hwmBytes": 5292032
+    },
+    {
+      "pid": 3182098,
+      "ppid": 3182082,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3182101,
+      "ppid": 3182098,
+      "kind": "tr",
+      "peakRssBytes": 1306624,
+      "hwmBytes": 1306624
+    },
+    {
+      "pid": 3182168,
+      "ppid": 1538,
+      "kind": "codex app-server",
+      "peakRssBytes": 131395584,
+      "hwmBytes": 131395584
+    },
+    {
+      "pid": 3182203,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 134815744,
+      "hwmBytes": 134815744
+    },
+    {
+      "pid": 3182204,
+      "ppid": 3182168,
+      "kind": "lsb_release",
+      "peakRssBytes": 2125824,
+      "hwmBytes": 2125824
+    },
+    {
+      "pid": 3182210,
+      "ppid": 3182204,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3182212,
+      "ppid": 3182210,
+      "kind": "cut",
+      "peakRssBytes": 1216512,
+      "hwmBytes": 1216512
+    },
+    {
+      "pid": 3182218,
+      "ppid": 3182204,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3182231,
+      "ppid": 1538,
+      "kind": "codex app-server",
+      "peakRssBytes": 131969024,
+      "hwmBytes": 131969024
+    },
+    {
+      "pid": 3182256,
+      "ppid": 3182231,
+      "kind": "lsb_release",
+      "peakRssBytes": 2129920,
+      "hwmBytes": 2129920
+    },
+    {
+      "pid": 3182257,
+      "ppid": 3182256,
+      "kind": "getopt",
+      "peakRssBytes": 1966080,
+      "hwmBytes": 1966080
+    },
+    {
+      "pid": 3182262,
+      "ppid": 3182256,
+      "kind": "lsb_release",
+      "peakRssBytes": 1118208,
+      "hwmBytes": 1118208
+    },
+    {
+      "pid": 3182264,
+      "ppid": 3182262,
+      "kind": "cut",
+      "peakRssBytes": 2846720,
+      "hwmBytes": 2846720
+    },
+    {
+      "pid": 3182276,
+      "ppid": 1538,
+      "kind": "claude",
+      "peakRssBytes": 346042368,
+      "hwmBytes": 346042368
+    },
+    {
+      "pid": 3182312,
+      "ppid": 3182276,
+      "kind": "sh",
+      "peakRssBytes": 2109440,
+      "hwmBytes": 2109440
+    },
+    {
+      "pid": 3182313,
+      "ppid": 3182312,
+      "kind": "uname",
+      "peakRssBytes": 1765376,
+      "hwmBytes": 1765376
+    },
+    {
+      "pid": 3182356,
+      "ppid": 3182231,
+      "kind": "bwrap",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182374,
+      "ppid": 3182231,
+      "kind": "lsb_release",
+      "peakRssBytes": 104841216,
+      "hwmBytes": 104841216
+    },
+    {
+      "pid": 3182376,
+      "ppid": 3182374,
+      "kind": "lsb_release",
+      "peakRssBytes": 114688,
+      "hwmBytes": 114688
+    },
+    {
+      "pid": 3182418,
+      "ppid": 3182168,
+      "kind": "lsb_release",
+      "peakRssBytes": 2134016,
+      "hwmBytes": 2134016
+    },
+    {
+      "pid": 3182427,
+      "ppid": 3182418,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3182431,
+      "ppid": 3182418,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3182437,
+      "ppid": 3182418,
+      "kind": "lsb_release",
+      "peakRssBytes": 1122304,
+      "hwmBytes": 1122304
+    },
+    {
+      "pid": 3182439,
+      "ppid": 3182437,
+      "kind": "tr",
+      "peakRssBytes": 253952,
+      "hwmBytes": 253952
+    },
+    {
+      "pid": 3182442,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 139362304,
+      "hwmBytes": 139362304
+    },
+    {
+      "pid": 3182454,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 137166848,
+      "hwmBytes": 137166848
+    },
+    {
+      "pid": 3182456,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 315584512,
+      "hwmBytes": 315584512
+    },
+    {
+      "pid": 3182495,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 320716800,
+      "hwmBytes": 320716800
+    },
+    {
+      "pid": 3182525,
+      "ppid": 3182456,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182528,
+      "ppid": 3182525,
+      "kind": "uname",
+      "peakRssBytes": 1949696,
+      "hwmBytes": 1949696
+    },
+    {
+      "pid": 3182546,
+      "ppid": 3182495,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182547,
+      "ppid": 3182546,
+      "kind": "uname",
+      "peakRssBytes": 8110080,
+      "hwmBytes": 8110080
+    },
+    {
+      "pid": 3182768,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 141070336,
+      "hwmBytes": 141070336
+    },
+    {
+      "pid": 3182775,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 138407936,
+      "hwmBytes": 138407936
+    },
+    {
+      "pid": 3182779,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 344797184,
+      "hwmBytes": 344797184
+    },
+    {
+      "pid": 3182808,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 339050496,
+      "hwmBytes": 339050496
+    },
+    {
+      "pid": 3182839,
+      "ppid": 1538,
+      "kind": "claude",
+      "peakRssBytes": 133832704,
+      "hwmBytes": 133832704
+    },
+    {
+      "pid": 3182842,
+      "ppid": 3182779,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182844,
+      "ppid": 3182842,
+      "kind": "uname",
+      "peakRssBytes": 7471104,
+      "hwmBytes": 7471104
+    },
+    {
+      "pid": 3182867,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 351215616,
+      "hwmBytes": 351215616
+    },
+    {
+      "pid": 3182868,
+      "ppid": 3182808,
+      "kind": "sh",
+      "peakRssBytes": 319488,
+      "hwmBytes": 319488
+    },
+    {
+      "pid": 3182876,
+      "ppid": 1538,
+      "kind": "claude",
+      "peakRssBytes": 129187840,
+      "hwmBytes": 129187840
+    },
+    {
+      "pid": 3182912,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 380547072,
+      "hwmBytes": 381865984
+    },
+    {
+      "pid": 3182916,
+      "ppid": 1538,
+      "kind": "claude auth",
+      "peakRssBytes": 136638464,
+      "hwmBytes": 136638464
+    },
+    {
+      "pid": 3182926,
+      "ppid": 3182867,
+      "kind": "sh",
+      "peakRssBytes": 2113536,
+      "hwmBytes": 2113536
+    },
+    {
+      "pid": 3182927,
+      "ppid": 3182926,
+      "kind": "uname",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182931,
+      "ppid": 3182926,
+      "kind": "uname",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182943,
+      "ppid": 1538,
+      "kind": "claude usage",
+      "peakRssBytes": 348606464,
+      "hwmBytes": 348606464
+    },
+    {
+      "pid": 3182959,
+      "ppid": 3182912,
+      "kind": "sh",
+      "peakRssBytes": 2117632,
+      "hwmBytes": 2117632
+    },
+    {
+      "pid": 3182960,
+      "ppid": 3182959,
+      "kind": "uname",
+      "peakRssBytes": 2392064,
+      "hwmBytes": 2392064
+    },
+    {
+      "pid": 3182982,
+      "ppid": 3182943,
+      "kind": "sh",
+      "peakRssBytes": 2117632,
+      "hwmBytes": 2117632
+    },
+    {
+      "pid": 3182986,
+      "ppid": 3182982,
+      "kind": "uname",
+      "peakRssBytes": 0,
+      "hwmBytes": 0
+    },
+    {
+      "pid": 3182995,
+      "ppid": 3182982,
+      "kind": "uname",
+      "peakRssBytes": 5599232,
+      "hwmBytes": 5599232
+    }
+  ]
+}

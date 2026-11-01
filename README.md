@@ -272,7 +272,7 @@ Copy the packaged `settings.example.json` or create a private file with this sha
 {
   "scanIntervalSeconds": 60,
   "scanOnStartup": true,
-  "scanConcurrency": 4,
+  "scanConcurrency": 1,
   "port": 3000,
   "history": {
     "rawRetentionHours": 6,
@@ -291,7 +291,7 @@ Environment variables override the settings file:
 
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
-- `SEAT_MONITOR_SCAN_CONCURRENCY`, an integer from 1 through 16 (default 4)
+- `SEAT_MONITOR_SCAN_CONCURRENCY`, an integer from 1 through 16 (default 1)
 - `SEAT_MONITOR_PORT`
 - `SEAT_MONITOR_HOST`, as `127.0.0.1` (default), `localhost`, or `0.0.0.0`
 - `SEAT_MONITOR_ALLOWED_HOSTS`, as comma-separated server IPv4 addresses or hostnames without ports
@@ -353,7 +353,45 @@ The server:
 - recomputes reset countdowns when each API response is serialized; and
 - redacts framework and provider errors.
 
-Account checks run in parallel with a default concurrency of four, settable from 1 through 16 with `scanConcurrency` or `SEAT_MONITOR_SCAN_CONCURRENCY` (each in-flight check is a separate CLI child process, so the setting bounds how many run at once per server or CLI process; it is not a hard memory limit, and each child's memory is not bounded by it). The CLI resolves the environment variable first, then the `scanConcurrency` key of the selected settings file, and ignores every other settings key. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
+Account checks run sequentially by default, with concurrency settable from 1 through 16 using `scanConcurrency` or `SEAT_MONITOR_SCAN_CONCURRENCY` (each in-flight check is a separate CLI child process, so the setting bounds how many run at once per server or CLI process; it is not a hard memory limit, and each child's memory is not bounded by it). The CLI resolves the environment variable first, then the `scanConcurrency` key of the selected settings file, and ignores every other settings key. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
+
+### Scan memory acceptance check
+
+On Linux, each completed server scan writes a `scan-memory` JSON line to stderr
+(the systemd journal). It reports the sampled peak **sum of server and descendant
+RSS**, per-PID RSS peaks and kernel high-water marks, concurrent child count,
+remaining children, and a 500,000,000-byte (500 decimal MB) budget. Process
+arguments, credentials and account identifiers are excluded. Sampling is every
+10 ms, includes children spawned by native worker threads, and continues tracking
+observed descendants if they are reparented. Very short-lived processes or spikes
+between samples can be missed. The per-PID high-water marks are not added together:
+they can occur at different times, and the server's is a lifetime high-water mark.
+
+When the server has a readable, dedicated cgroup v2, the log also reports sampled
+`memory.current` and its anonymous/file/kernel breakdown at the cgroup peak.
+Cgroup accounting includes filesystem cache and kernel memory; it is not the same
+quantity as combined RSS. Do not compare a historical systemd `MemoryPeak` directly
+with a single scan's sampled RSS peak.
+
+Run the acceptance gate against a locally running candidate server, using the same
+account configuration as the server:
+
+```sh
+npm run check:scan-memory -- --url http://127.0.0.1:3000 --scans 3
+```
+
+The default budget is 500 MB; `--budget-mb` can state a different test budget.
+The command prints each full report and exits nonzero for a budget breach,
+remaining children, unavailable measurements, missing accounts, or any account
+failure. It forces full scans, including when the cache is fresh. This is a live
+acceptance check requiring configured provider credentials, separate from the
+credential-free unit tests that verify the measurement and failure paths.
+Larger explicit concurrency settings remain supported, but require their own
+memory check. Serial scans take longer; per-provider deadlines and quota parsing
+are unchanged.
+
+See [the Galactica measurements](docs/diagnostics/scan-memory/README.md) for the
+before/after results and the remaining 500 MB acceptance failure.
 
 An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. Remote authentication and TLS are not implemented; network exposure is intended only for a trusted LAN.
 

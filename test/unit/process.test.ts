@@ -55,3 +55,49 @@ describe("provider process runner", () => {
     ).rejects.toBeInstanceOf(ProcessSpawnError);
   });
 });
+
+describe.skipIf(process.platform !== "linux")("provider descendants", () => {
+  it.each(["timeout", "success", "output"])(
+    "reaps the entire group on %s",
+    async (mode) => {
+      const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+      const directory = await mkdtemp(
+        join(tmpdir(), "seat-monitor-descendant-"),
+      );
+      const pidFile = join(directory, "pid");
+      const source = `
+      const { spawn } = require('node:child_process');
+      const { writeFileSync } = require('node:fs');
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });
+      writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+      ${mode === "success" ? "setTimeout(() => process.exit(0), 50);" : mode === "output" ? "setTimeout(() => process.stdout.write('x'.repeat(1100000)), 50);" : "setInterval(() => {}, 1000);"}
+    `;
+      try {
+        const result = runCommand({
+          command: process.execPath,
+          args: ["-e", source],
+          environment: {},
+          timeoutMilliseconds: 500,
+        });
+        if (mode === "success")
+          await expect(result).resolves.toMatchObject({ exitCode: 0 });
+        else
+          await expect(result).rejects.toBeInstanceOf(
+            mode === "timeout" ? ProcessTimeoutError : ProcessOutputError,
+          );
+        const pid = (await readFile(pidFile, "utf8")).trim();
+        let status = "";
+        try {
+          status = await readFile(`/proc/${pid}/status`, "utf8");
+        } catch {
+          /* Reaped. */
+        }
+        expect(status === "" || /^State:\s+Z/mu.test(status)).toBe(true);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+});

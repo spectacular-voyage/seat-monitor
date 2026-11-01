@@ -9,6 +9,13 @@ import {
   ProcessTimeoutError,
 } from "./process.js";
 
+import {
+  isolatedProcessGroup,
+  killProcessGroup,
+  reapProcessGroup,
+  trackProcessGroup,
+} from "./process-group.js";
+
 const MAX_OUTPUT_BYTES = 1_000_000;
 
 const rpcMessageSchema = z.looseObject({
@@ -44,10 +51,13 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
       env: options.environment,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      detached: isolatedProcessGroup,
     });
+    trackProcessGroup(child);
     const lines = createInterface({ input: child.stdout });
 
     let settled = false;
+    let failure: Error | undefined;
     let outputBytes = 0;
     let accountReceived = false;
     let limitsReceived = false;
@@ -61,10 +71,8 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
     function cleanup(): void {
       clearTimeout(timer);
       lines.close();
-      child.stdin.end();
-      if (child.exitCode === null) {
-        child.kill("SIGKILL");
-      }
+      child.stdin.destroy();
+      killProcessGroup(child);
     }
 
     function finishWithError(error: Error): void {
@@ -72,8 +80,8 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
         return;
       }
       settled = true;
+      failure = error;
       cleanup();
-      reject(error);
     }
 
     function finishWithSuccess(): void {
@@ -82,7 +90,6 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
       }
       settled = true;
       cleanup();
-      resolve({ accountResult, rateLimitsResult });
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -91,9 +98,14 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
         finishWithError(new ProcessOutputError());
       }
     });
-    child.stderr.resume();
+    child.stderr.on("data", (chunk: Buffer) => {
+      outputBytes += chunk.byteLength;
+      if (outputBytes > MAX_OUTPUT_BYTES)
+        finishWithError(new ProcessOutputError());
+    });
 
     lines.on("line", (line) => {
+      if (settled) return;
       let message: unknown;
       try {
         message = JSON.parse(line);
@@ -128,9 +140,11 @@ export const readCodexAppServer: ReadCodexAppServer = async (options) =>
       finishWithError(new ProcessSpawnError(error));
     });
     child.once("close", () => {
-      if (!settled) {
-        finishWithError(new CodexProtocolError());
-      }
+      if (!settled) finishWithError(new CodexProtocolError());
+      void reapProcessGroup(child).then(() => {
+        if (failure !== undefined) reject(failure);
+        else resolve({ accountResult, rateLimitsResult });
+      }, reject);
     });
 
     const messages = [

@@ -59,7 +59,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:scan-memory": "npm run build && node scripts/check-scan-memory.mjs"
   },
   "dependencies": {
     "fastify": "5.12.7",

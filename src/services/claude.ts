@@ -136,6 +136,10 @@ export function createClaudeProvider(
       let temporaryDirectory: string | null = null;
 
       try {
+        // A quota probe has no project context. Avoid loading workspace files.
+        temporaryDirectory = await mkdtemp(
+          join(tmpdir(), "seat-monitor-claude-"),
+        );
         let environment: NodeJS.ProcessEnv;
         const readsQuota = account.auth.type === "claude_profile";
         if (account.auth.type === "claude_profile") {
@@ -156,9 +160,6 @@ export function createClaudeProvider(
             // DISABLE_TELEMETRY is set, so profile quota reads must not set it.
           });
         } else {
-          temporaryDirectory = await mkdtemp(
-            join(tmpdir(), "seat-monitor-claude-"),
-          );
           environment = minimalChildEnvironment({
             CLAUDE_CODE_OAUTH_TOKEN: account.auth.credential,
             CLAUDE_CONFIG_DIR: temporaryDirectory,
@@ -173,6 +174,7 @@ export function createClaudeProvider(
           command,
           args: ["auth", "status", "--json"],
           environment,
+          cwd: temporaryDirectory,
           timeoutMilliseconds: context.timeoutMilliseconds,
         });
         if (authResult.exitCode !== 0) {
@@ -235,6 +237,7 @@ export function createClaudeProvider(
             command,
             args: usageArguments,
             environment,
+            cwd: temporaryDirectory,
             timeoutMilliseconds: context.timeoutMilliseconds,
           });
           observedAt = context.now();
