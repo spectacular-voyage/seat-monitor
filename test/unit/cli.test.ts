@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../src/cli.js";
@@ -155,29 +159,115 @@ describe("CLI", () => {
     },
   );
 
-  it("refuses an out-of-range SEAT_MONITOR_SCAN_CONCURRENCY with exit 2 before scanning", async () => {
-    const stdout = writer();
-    const stderr = writer();
-    const previous = process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
-    process.env.SEAT_MONITOR_SCAN_CONCURRENCY = "17";
-    try {
-      const exitCode = await runCli([], {
-        stdout: stdout.sink,
-        stderr: stderr.sink,
-      });
-
-      expect(exitCode).toBe(2);
-      expect(stdout.read()).toBe("");
-      expect(stderr.read()).toBe(
-        "SEAT_MONITOR_SCAN_CONCURRENCY must be an integer from 1 to 16.\n",
-      );
-    } finally {
-      if (previous === undefined) {
+  describe("scan concurrency resolution (SEATMON-PROBE-RAM-1)", () => {
+    async function withSettings<T>(
+      file: unknown,
+      environment: string | undefined,
+      run: () => Promise<T>,
+    ): Promise<T> {
+      const directory = mkdtempSync(join(tmpdir(), "seat-monitor-cli-"));
+      const filePath = join(directory, "settings.json");
+      if (file !== undefined) {
+        writeFileSync(filePath, JSON.stringify(file));
+      }
+      const previousConcurrency = process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
+      const previousSettings = process.env.SEAT_MONITOR_SETTINGS;
+      process.env.SEAT_MONITOR_SETTINGS = filePath;
+      if (environment === undefined) {
         delete process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
       } else {
-        process.env.SEAT_MONITOR_SCAN_CONCURRENCY = previous;
+        process.env.SEAT_MONITOR_SCAN_CONCURRENCY = environment;
+      }
+      try {
+        return await run();
+      } finally {
+        if (previousConcurrency === undefined) {
+          delete process.env.SEAT_MONITOR_SCAN_CONCURRENCY;
+        } else {
+          process.env.SEAT_MONITOR_SCAN_CONCURRENCY = previousConcurrency;
+        }
+        if (previousSettings === undefined) {
+          delete process.env.SEAT_MONITOR_SETTINGS;
+        } else {
+          process.env.SEAT_MONITOR_SETTINGS = previousSettings;
+        }
+        rmSync(directory, { recursive: true, force: true });
       }
     }
+
+    function memoryHistory(): HistoryService {
+      return new HistoryService(
+        openSqliteHistoryStore({
+          filePath: ":memory:",
+          rawRetentionHours: 6,
+          hourlyRetentionDays: 30,
+          retentionDays: 365,
+        }),
+      );
+    }
+
+    async function runWith(
+      file: unknown,
+      environment: string | undefined,
+    ): Promise<{
+      exitCode: number;
+      seen: (number | undefined)[];
+      error: string;
+    }> {
+      const seen: (number | undefined)[] = [];
+      const stderr = writer();
+      const exitCode = await withSettings(file, environment, () =>
+        runCli([], {
+          createScanner: (options) => {
+            seen.push(options?.concurrency);
+            return () => Promise.resolve([fixture()]);
+          },
+          createHistory: memoryHistory,
+          now: () => new Date("2026-08-26T18:00:00.000Z"),
+          timeZone: "America/Los_Angeles",
+          stdout: writer().sink,
+          stderr: stderr.sink,
+        }),
+      );
+      return { exitCode, seen, error: stderr.read() };
+    }
+
+    it("builds the scanner with the settings-file value, the environment taking precedence, else 4", async () => {
+      expect((await runWith({ scanConcurrency: 2 }, undefined)).seen).toEqual([
+        2,
+      ]);
+      expect((await runWith({ scanConcurrency: 2 }, "3")).seen).toEqual([3]);
+      expect((await runWith(undefined, undefined)).seen).toEqual([4]);
+      expect((await runWith({}, undefined)).seen).toEqual([4]);
+    });
+
+    it("ignores unrelated settings, valid or not, when resolving the concurrency", async () => {
+      const result = await runWith(
+        { scanConcurrency: 5, port: 99_999, host: "not a host", unknown: true },
+        undefined,
+      );
+
+      expect(result.seen).toEqual([5]);
+      expect(result.exitCode).toBe(0);
+    });
+
+    it.each([
+      ["env 17", { scanConcurrency: 2 }, "17"],
+      ["env 0", undefined, "0"],
+      ["env non-integer", undefined, "2.5"],
+      ["file 17", { scanConcurrency: 17 }, undefined],
+      ["file 0", { scanConcurrency: 0 }, undefined],
+      ["file text", { scanConcurrency: "4" }, undefined],
+    ])(
+      "refuses %s with exit 2 before any scanner is built or probe runs",
+      async (_label, file, environment) => {
+        const result = await runWith(file, environment);
+
+        expect(result.exitCode).toBe(2);
+        expect(result.seen).toEqual([]);
+        expect(result.error).toMatch(/scanConcurrency|SCAN_CONCURRENCY/u);
+      },
+    );
   });
 
   it("defaults to a log-free aligned text report", async () => {

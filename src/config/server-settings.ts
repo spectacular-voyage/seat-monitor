@@ -21,6 +21,12 @@ export const MAXIMUM_SCAN_CONCURRENCY = 16;
 const retentionDaysSchema = z.number().int().min(1).max(3_650);
 const retentionHoursSchema = z.number().int().min(1).max(87_600);
 
+const scanConcurrencySchema = z
+  .number()
+  .int()
+  .min(MINIMUM_SCAN_CONCURRENCY)
+  .max(MAXIMUM_SCAN_CONCURRENCY);
+
 const settingsFileSchema = z
   .object({
     scanIntervalSeconds: z
@@ -30,12 +36,7 @@ const settingsFileSchema = z
       .max(MAXIMUM_SCAN_INTERVAL_SECONDS)
       .optional(),
     scanOnStartup: z.boolean().optional(),
-    scanConcurrency: z
-      .number()
-      .int()
-      .min(MINIMUM_SCAN_CONCURRENCY)
-      .max(MAXIMUM_SCAN_CONCURRENCY)
-      .optional(),
+    scanConcurrency: scanConcurrencySchema.optional(),
     port: z.number().int().min(1).max(65_535).optional(),
     host: serverHostSchema.optional(),
     allowedHosts: z.array(allowedHostSchema).optional(),
@@ -135,6 +136,61 @@ export function readScanConcurrency(
       maximum: MAXIMUM_SCAN_CONCURRENCY,
     },
   );
+}
+
+/**
+ * The effective concurrency for callers that do not need the rest of the server settings (the CLI): the environment wins, then the selected settings file's
+ * `scanConcurrency`, then the default. Only that one key is read and validated, so unrelated host, port or history settings never block a scan. A missing
+ * file is the default; an unreadable or non-JSON file, or an out-of-range value, is refused.
+ */
+export function readEffectiveScanConcurrency(
+  environment: NodeJS.ProcessEnv = process.env,
+  filePath = defaultServerSettingsPath(environment),
+): number {
+  if (!isAbsolute(filePath)) {
+    throw new ServerSettingsError("The server settings path must be absolute.");
+  }
+  let fileValue = DEFAULT_SCAN_CONCURRENCY;
+  let source: string | null = null;
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (!(
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    )) {
+      throw new ServerSettingsError(
+        `Server settings could not be read at ${filePath}.`,
+      );
+    }
+  }
+  if (source !== null) {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(source);
+    } catch {
+      throw new ServerSettingsError(
+        `Server settings are not valid JSON: ${filePath}.`,
+      );
+    }
+    const configured =
+      typeof payload === "object" &&
+      payload !== null &&
+      "scanConcurrency" in payload
+        ? payload.scanConcurrency
+        : undefined;
+    if (configured !== undefined) {
+      const parsed = scanConcurrencySchema.safeParse(configured);
+      if (!parsed.success) {
+        throw new ServerSettingsError(
+          `scanConcurrency must be an integer from ${String(MINIMUM_SCAN_CONCURRENCY)} to ${String(MAXIMUM_SCAN_CONCURRENCY)}: ${filePath}.`,
+        );
+      }
+      fileValue = parsed.data;
+    }
+  }
+  return readScanConcurrency(environment, fileValue);
 }
 
 export function defaultServerSettingsPath(

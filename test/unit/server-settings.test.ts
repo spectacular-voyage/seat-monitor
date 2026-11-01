@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   defaultServerSettingsPath,
+  readEffectiveScanConcurrency,
   readScanConcurrency,
   readServerSettings,
   ServerSettingsError,
@@ -273,5 +274,51 @@ describe("scan concurrency setting (SEATMON-PROBE-RAM-1)", () => {
     writeFileSync(filePath, JSON.stringify({ scanConcurrency: value }));
 
     expect(() => readServerSettings({}, filePath)).toThrow(ServerSettingsError);
+  });
+});
+
+describe("effective scan concurrency without the other server settings", () => {
+  it("takes the environment first, then the file value, then 4, ignoring unrelated keys", () => {
+    const filePath = join(directory(), "settings.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({ scanConcurrency: 2, port: 99_999, host: "nope" }),
+    );
+
+    expect(readEffectiveScanConcurrency({}, filePath)).toBe(2);
+    expect(
+      readEffectiveScanConcurrency(
+        { SEAT_MONITOR_SCAN_CONCURRENCY: "9" },
+        filePath,
+      ),
+    ).toBe(9);
+    expect(
+      readEffectiveScanConcurrency({}, join(directory(), "none.json")),
+    ).toBe(4);
+  });
+
+  it("refuses a bad file value, bad JSON, a bad environment value and a relative path", () => {
+    const bad = join(directory(), "bad.json");
+    writeFileSync(bad, JSON.stringify({ scanConcurrency: 17 }));
+    const broken = join(directory(), "broken.json");
+    writeFileSync(broken, "{");
+    const fine = join(directory(), "fine.json");
+    writeFileSync(fine, JSON.stringify({ scanConcurrency: 3 }));
+
+    expect(() => readEffectiveScanConcurrency({}, bad)).toThrow(
+      ServerSettingsError,
+    );
+    expect(() => readEffectiveScanConcurrency({}, broken)).toThrow(
+      ServerSettingsError,
+    );
+    expect(() =>
+      readEffectiveScanConcurrency(
+        { SEAT_MONITOR_SCAN_CONCURRENCY: "0" },
+        fine,
+      ),
+    ).toThrow(ServerSettingsError);
+    expect(() => readEffectiveScanConcurrency({}, "relative.json")).toThrow(
+      ServerSettingsError,
+    );
   });
 });

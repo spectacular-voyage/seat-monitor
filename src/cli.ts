@@ -9,7 +9,7 @@ import {
   defaultAccountsConfigPath,
 } from "./config/accounts.js";
 import {
-  readScanConcurrency,
+  readEffectiveScanConcurrency,
   ServerSettingsError,
 } from "./config/server-settings.js";
 import { cliQuotaSchema } from "./domain/cli-forecast.js";
@@ -50,6 +50,7 @@ Options:
 
 export type CliDependencies = {
   scan?: Scanner;
+  createScanner?: typeof createDefaultScanner;
   now?: () => Date;
   timeZone?: string;
   stdout?: { write: (value: string) => unknown };
@@ -188,7 +189,9 @@ export async function runCli(
   try {
     const baseScan =
       dependencies.scan ??
-      createDefaultScanner({ concurrency: readScanConcurrency(process.env) });
+      (dependencies.createScanner ?? createDefaultScanner)({
+        concurrency: readEffectiveScanConcurrency(process.env),
+      });
     history =
       dependencies.history ??
       (dependencies.scan === undefined ||
