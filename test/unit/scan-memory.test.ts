@@ -9,6 +9,18 @@ import { runCommand } from "../../src/services/process.js";
 describe.skipIf(process.platform !== "linux")(
   "scan memory acceptance gate",
   () => {
+    it("rejects server-only measurements even when RSS is within budget", () => {
+      const report = startProcessMemoryMonitor().stop();
+      expect(report.supported).toBe(true);
+      expect(report.samples).toBeGreaterThan(0);
+      expect(report.peakRssBytes).toBeGreaterThan(0);
+      expect(report.maxChildren).toBe(0);
+      expect(report.remainingChildren).toEqual([]);
+      expect(() => assertScanMemoryBudget(report, report.peakRssBytes)).toThrow(
+        "No provider child process was observed",
+      );
+    });
+
     it("counts a resident child and fails an intentionally undersized budget", async () => {
       const monitor = startProcessMemoryMonitor();
       await runCommand({

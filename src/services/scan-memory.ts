@@ -70,12 +70,15 @@ function readProcess(pid: number, rootPid: number): ProcessReading | null {
  * argv is classified locally; no command lines, identities or credentials leave here.
  * RSS sums shared pages conservatively. Shorter-than-interval processes may be missed.
  */
-export function startProcessMemoryMonitor(rootPid = process.pid): {
+export function startProcessMemoryMonitor(
+  rootPid = process.pid,
+  intervalMs = MEMORY_SAMPLE_INTERVAL_MS,
+): {
   stop: () => ScanMemoryReport;
 } {
   const report: ScanMemoryReport = {
     supported: process.platform === "linux",
-    sampleIntervalMs: MEMORY_SAMPLE_INTERVAL_MS,
+    sampleIntervalMs: intervalMs,
     samples: 0,
     peakRssBytes: 0,
     maxChildren: 0,
@@ -190,7 +193,7 @@ export function startProcessMemoryMonitor(rootPid = process.pid): {
     );
   }
   sample();
-  const timer = setInterval(sample, MEMORY_SAMPLE_INTERVAL_MS);
+  const timer = setInterval(sample, intervalMs);
   timer.unref();
   return {
     stop() {
@@ -213,6 +216,10 @@ export function assertScanMemoryBudget(
     throw new Error(
       "Process-tree memory measurement is unavailable (Linux /proc required).",
     );
+  if (report.maxChildren === 0)
+    throw new Error(
+      "No provider child process was observed; full-scan memory measurement is incomplete.",
+    );
   if (report.peakRssBytes > budgetBytes)
     throw new Error(
       `Full scan peak ${String(report.peakRssBytes)} bytes exceeds budget ${String(budgetBytes)} bytes.`,
@@ -223,7 +230,9 @@ export function assertScanMemoryBudget(
 
 export function withScanMemoryLog(scan: Scanner): Scanner {
   return async () => {
-    const monitor = startProcessMemoryMonitor();
+    // Keep synchronous /proc work off most event-loop turns. The external
+    // acceptance checker retains the finer 10 ms default for its budget gate.
+    const monitor = startProcessMemoryMonitor(process.pid, 50);
     let accounts = 0;
     try {
       const snapshots = await scan();

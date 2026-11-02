@@ -136,7 +136,8 @@ npm run check:scan-memory -- --scans 3 --interval-seconds 60
 ```
 
 The gate requires every configured account to return a valid successful snapshot,
-no remaining children, and peak combined RSS at or below 500,000,000 B. It reports
+at least one observed provider child, no remaining children, and peak combined RSS
+at or below 500,000,000 B. A server-only measurement cannot pass. It reports
 stale observations separately. `--interval-seconds 0` explicitly tests immediate
 manual refreshes. The server logs `scan-memory` after each scan and distinguishes
 `claude-usage-cached` from heavyweight `claude-usage-fallback`.
@@ -145,6 +146,10 @@ another scan. Thus the window always includes a complete scan; it may also
 conservatively include the tail of an earlier scan. A cached provider observation
 is not evidence of a skipped account: every full scan still verifies identity and
 attempts the HTTP quota read, preserving actual observation ages on throttling.
+Following review, the in-server sampler runs every 50 ms to reduce synchronous
+filesystem work on the event loop. The external checker retains its 10 ms rate;
+each report includes its actual sampling interval. The recorded six scans above
+predate this production-only sampling change.
 
 The final cgroup's first peak contained 116,285,440 B anonymous, 837,308,416 B file
 and 5,152,768 B kernel memory. Native executable/file cache still counts toward

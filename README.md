@@ -378,7 +378,9 @@ On Linux, each completed server scan writes a `scan-memory` JSON line to stderr
 RSS**, per-PID RSS peaks and kernel high-water marks, concurrent child count,
 remaining children, and a 500,000,000-byte (500 decimal MB) budget. Process
 arguments, credentials and account identifiers are excluded. Sampling is every
-10 ms, includes children spawned by native worker threads, and continues tracking
+50 ms inside the server and every 10 ms in the external acceptance checker; the
+reported `sampleIntervalMs` identifies the rate. Sampling includes children
+spawned by native worker threads and continues tracking
 observed descendants if they are reparented. Very short-lived processes or spikes
 between samples can be missed. The per-PID high-water marks are not added together:
 they can occur at different times, and the server's is a lifetime high-water mark.
@@ -398,7 +400,8 @@ npm run check:scan-memory -- --url http://127.0.0.1:3000 --scans 3 --interval-se
 
 The default is one full scan with a 500 MB budget; `--budget-mb` can state a different test budget. Repeated scans wait 60 seconds after completion, matching the normal scheduler; `--interval-seconds 0` explicitly stress-tests immediate refreshes. Reports include duration and the count of observations older than five minutes.
 The command prints each full report and exits nonzero for a budget breach,
-remaining children, unavailable measurements, missing accounts, or any account
+remaining children, unavailable measurements (including no observed provider
+children), missing accounts, or any account
 failure. It forces full scans, including when the cache is fresh. This is a live
 acceptance check requiring configured provider credentials, separate from the
 credential-free unit tests that verify the measurement and failure paths.
