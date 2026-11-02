@@ -1,3 +1,4 @@
+import { zonedFormatter } from "./zoned-formatter.js";
 import type { QuotaLimit } from "../domain/quota.js";
 import { verifiedUltraSession } from "./claude-ultra.js";
 
@@ -26,16 +27,7 @@ type DateParts = {
 };
 
 function partsAt(instantMilliseconds: number, timeZone: string): DateParts {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = zonedFormatter(timeZone);
   const values = new Map<string, number>(
     formatter
       .formatToParts(new Date(instantMilliseconds))

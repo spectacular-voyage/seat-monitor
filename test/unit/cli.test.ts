@@ -232,13 +232,13 @@ describe("CLI", () => {
       return { exitCode, seen, error: stderr.read() };
     }
 
-    it("builds the scanner with the settings-file value, the environment taking precedence, else 4", async () => {
+    it("builds the scanner with the settings-file value, the environment taking precedence, else 1", async () => {
       expect((await runWith({ scanConcurrency: 2 }, undefined)).seen).toEqual([
         2,
       ]);
       expect((await runWith({ scanConcurrency: 2 }, "3")).seen).toEqual([3]);
-      expect((await runWith(undefined, undefined)).seen).toEqual([4]);
-      expect((await runWith({}, undefined)).seen).toEqual([4]);
+      expect((await runWith(undefined, undefined)).seen).toEqual([1]);
+      expect((await runWith({}, undefined)).seen).toEqual([1]);
     });
 
     it("ignores unrelated settings, valid or not, when resolving the concurrency", async () => {

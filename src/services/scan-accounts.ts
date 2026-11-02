@@ -12,7 +12,7 @@ import { createCodexProvider } from "./codex.js";
 import { createFailureSnapshot } from "./failure.js";
 import type { QuotaProvider } from "./provider.js";
 
-export const DEFAULT_CONCURRENCY = 4;
+export const DEFAULT_CONCURRENCY = 1;
 export const DEFAULT_TIMEOUT_MILLISECONDS = 8_000;
 export const DEFAULT_TIMEOUT_MILLISECONDS_BY_PLATFORM = {
   Claude: 16_000,

@@ -39,6 +39,7 @@ import {
   type Scanner,
 } from "./services/scan-accounts.js";
 import { SnapshotCache } from "./services/snapshot-cache.js";
+import { withScanMemoryLog } from "./services/scan-memory.js";
 import { ScanScheduler } from "./services/scan-scheduler.js";
 import { isMainModule } from "./entry-point.js";
 import {
@@ -255,7 +256,7 @@ export async function buildServer(
   const readDashboardAssets = async (): Promise<DashboardAssets> =>
     assets ?? dashboardAssetLoader();
   const cache = new SnapshotCache({
-    scan,
+    scan: options.scan === undefined ? withScanMemoryLog(scan) : scan,
     freshnessMilliseconds:
       options.freshnessMilliseconds ?? DEFAULT_FRESHNESS_MILLISECONDS,
     now,

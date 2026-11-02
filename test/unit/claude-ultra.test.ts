@@ -38,6 +38,7 @@ async function scan(
   exitCode = 0,
 ) {
   const provider = createClaudeProvider({
+    readHttpUsage: null,
     profileIsReady: () => Promise.resolve(true),
     managedMcpIsConfigured: () => Promise.resolve(false),
     run: ({ args }) =>
