@@ -947,12 +947,12 @@ function renderFleetThroughput(throughput) {
     );
     const usageTitle =
       platform === "Claude"
-        ? "Claude account sessions"
+        ? "Claude account weekly quota"
         : "Codex account primaries";
     const usage = createThroughputCard(
       `throughput-usage throughput-${platform.toLocaleLowerCase("en-US")}`,
       usageTitle,
-      `${platform === "Claude" ? "Session" : "Primary"} quota consumed; each line is one account.`,
+      `${platform === "Claude" ? "Weekly" : "Primary"} quota consumed; each line is one account.`,
     );
     if (platformSessions.length > 0) {
       usage.append(createSessionLegend(platformSessions));
@@ -982,7 +982,7 @@ function renderFleetThroughput(throughput) {
     const latestAccountCount = vendor?.points.at(-1)?.accountCount ?? 0;
     const rateTitle =
       platform === "Claude"
-        ? "Claude total session burn"
+        ? "Claude total weekly burn"
         : "Codex total primary burn";
     const card = createThroughputCard(
       `throughput-rate throughput-${platform.toLocaleLowerCase("en-US")}`,
@@ -1172,6 +1172,13 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
   const panels = element("div", "window-grid");
   const entries = [];
   for (const limit of account.limits) {
+    if (
+      limit.key === "base.session" &&
+      limit.currentUsedPercent === null &&
+      limit.applicability !== "not_applicable"
+    ) {
+      continue;
+    }
     if (
       limit.depth === 1 &&
       account.limits.some((candidate) => candidate.key === limit.parentKey)

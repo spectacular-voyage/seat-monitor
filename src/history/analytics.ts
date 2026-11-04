@@ -579,12 +579,12 @@ function downsample<T>(points: readonly T[]): T[] {
   return selected;
 }
 
-function canonicalSessionLimit(
+function canonicalThroughputLimit(
   account: HistoryAnalytics["accounts"][number],
 ): AnalyticsLimit | undefined {
   // Codex currently exposes `codex.primary` as its closest account-wide
   // consumption window even when the provider reports a weekly duration.
-  const key = account.platform === "Claude" ? "base.session" : "codex.primary";
+  const key = account.platform === "Claude" ? "base.weekly" : "codex.primary";
   return account.limits.find((limit) => limit.key === key);
 }
 
@@ -752,7 +752,7 @@ function buildFleetThroughput(
   },
 ): HistoryAnalytics["fleetThroughput"] {
   const selected = accounts.flatMap((account) => {
-    const limit = canonicalSessionLimit(account);
+    const limit = canonicalThroughputLimit(account);
     if (limit === undefined || limit.applicability === "not_applicable") {
       return [];
     }

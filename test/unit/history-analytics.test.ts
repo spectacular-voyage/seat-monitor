@@ -95,7 +95,7 @@ function resetEvent(
   };
 }
 
-function accountSessionSeries(
+function accountThroughputSeries(
   accountAlias: string,
   platform: "Claude" | "Codex",
   key: string,
@@ -841,26 +841,38 @@ describe("historical quota analytics", () => {
     expect(result.scanIntervalSeconds).toBe(60);
   });
 
-  it("builds account session overlays and total vendor burn series", () => {
+  it("builds account weekly quota overlays and total vendor burn series", () => {
     const claudeOne = claudeSnapshot({ alias: "claude-one@example.com" });
     const claudeTwo = claudeSnapshot({ alias: "claude-two@example.com" });
     const codex = codexSnapshot("codex-one@example.com");
     const result = buildHistoryAnalytics({
       snapshots: [claudeOne, claudeTwo, codex],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-one@example.com",
           "Claude",
           "base.session",
+          [0, 40, 80],
+        ),
+        accountThroughputSeries(
+          "claude-one@example.com",
+          "Claude",
+          "fable.weekly",
+          [0, 30, 60],
+        ),
+        accountThroughputSeries(
+          "claude-one@example.com",
+          "Claude",
+          "base.weekly",
           [0, 10, 15],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-two@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [0, 20, 30],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "codex-one@example.com",
           "Codex",
           "codex.primary",
@@ -881,10 +893,12 @@ describe("historical quota analytics", () => {
       expect.objectContaining({
         accountAlias: "claude-one@example.com",
         platform: "Claude",
+        limitKey: "base.weekly",
       }),
       expect.objectContaining({
         accountAlias: "claude-two@example.com",
         platform: "Claude",
+        limitKey: "base.weekly",
       }),
       expect.objectContaining({
         accountAlias: "codex-one@example.com",
@@ -927,16 +941,16 @@ describe("historical quota analytics", () => {
     const result = buildHistoryAnalytics({
       snapshots: [active, idle],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-active@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [56, 60, 59, 64],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-idle@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [0, 0, 0, 0],
         ),
       ],
@@ -959,15 +973,15 @@ describe("historical quota analytics", () => {
     expect(rates?.map((point) => point.accountCount)).toEqual([2, 2, 2]);
   });
 
-  it("does not calculate a fleet rate across a session reset", () => {
+  it("does not calculate a fleet rate across a weekly reset", () => {
     const snapshot = claudeSnapshot({ alias: "claude-reset@example.com" });
     const result = buildHistoryAnalytics({
       snapshots: [snapshot],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-reset@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [80, 90, 5, 10],
         ),
       ],
@@ -989,10 +1003,10 @@ describe("historical quota analytics", () => {
 
   it("honors a provider reset when the usage drop is small", () => {
     const snapshot = claudeSnapshot({ alias: "claude-low-reset@example.com" });
-    const resetSeries = accountSessionSeries(
+    const resetSeries = accountThroughputSeries(
       "claude-low-reset@example.com",
       "Claude",
-      "base.session",
+      "base.weekly",
       [3, 4, 1, 2],
     );
     const previousReset = minutesBeforeNow(20);
@@ -1032,10 +1046,10 @@ describe("historical quota analytics", () => {
       const result = buildHistoryAnalytics({
         snapshots: [snapshot],
         series: [
-          accountSessionSeries(
+          accountThroughputSeries(
             "claude-scale@example.com",
             "Claude",
-            "base.session",
+            "base.weekly",
             [0, 5, 10],
           ),
         ],
