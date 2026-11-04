@@ -372,8 +372,15 @@ function addTimeAxisHover(
     top,
     bottom,
     labelWidth = 108,
+    hoverSeries = [],
+    accountLabel = null,
   },
 ) {
+  const tooltip = element("div", "chart-tooltip");
+  tooltip.hidden = true;
+  const tooltipAccount = element("strong", "chart-tooltip-account");
+  const tooltipTime = element("span", "chart-tooltip-time");
+  tooltip.append(tooltipAccount, tooltipTime);
   const halfLabelWidth = labelWidth / 2;
   const guide = svgElement("line", {
     y1: top,
@@ -407,6 +414,7 @@ function addTimeAxisHover(
     guide.setAttribute("visibility", visibility);
     labelBackground.setAttribute("visibility", visibility);
     label.setAttribute("visibility", visibility);
+    if (!visible) tooltip.hidden = true;
   };
   target.addEventListener("pointermove", (event) => {
     const bounds = svg.getBoundingClientRect();
@@ -433,6 +441,52 @@ function addTimeAxisHover(
     label.setAttribute("x", String(labelX));
     label.textContent = formatAxisDateTime(milliseconds);
     setVisible(true);
+    const svgY = ((event.clientY - bounds.top) / bounds.height) * height;
+    let closestLabel = accountLabel;
+    let closestDistance = (12 * width) / bounds.width;
+    for (const entry of hoverSeries) {
+      for (let index = 0; index < entry.points.length; index += 1) {
+        const point = entry.points[index];
+        const previous = point.breakBefore
+          ? point
+          : (entry.points[index - 1] ?? point);
+        const dx = point.x - previous.x;
+        const dy = point.y - previous.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const fraction =
+          lengthSquared === 0
+            ? 0
+            : Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((svgX - previous.x) * dx + (svgY - previous.y) * dy) /
+                    lengthSquared,
+                ),
+              );
+        const distance = Math.hypot(
+          svgX - previous.x - fraction * dx,
+          svgY - previous.y - fraction * dy,
+        );
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestLabel = entry.label;
+        }
+      }
+    }
+    if (closestLabel === null) {
+      tooltip.hidden = true;
+      return;
+    }
+    const container = svg.parentElement;
+    if (tooltip.parentElement !== container) container.append(tooltip);
+    tooltipAccount.textContent = closestLabel;
+    tooltipTime.textContent = formatAxisDateTime(milliseconds);
+    tooltip.hidden = false;
+    const containerBounds = container.getBoundingClientRect();
+    const tooltipX = event.clientX - containerBounds.left + 12;
+    tooltip.style.left = `${Math.max(0, Math.min(container.clientWidth - tooltip.offsetWidth, tooltipX))}px`;
+    tooltip.style.top = `${Math.max(0, event.clientY - containerBounds.top - tooltip.offsetHeight - 12)}px`;
   });
   target.addEventListener("pointerleave", () => setVisible(false));
   svg.append(guide, labelBackground, label, target);
@@ -464,6 +518,7 @@ function createUsageGraph(
   overlays = [],
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  accountLabel = null,
 ) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
@@ -708,6 +763,7 @@ function createUsageGraph(
         : "now";
   svg.append(startLabel, endLabel);
   addTimeAxisHover(svg, {
+    accountLabel,
     rangeStart: chartStart,
     rangeEnd: chartEnd,
     width,
@@ -748,13 +804,26 @@ function createThroughputLineGraph(
   series,
   rangeStart,
   rangeEnd,
-  { ariaLabel, maximum, formatAxisValue, breakOnDecrease = false },
+  {
+    ariaLabel,
+    maximum,
+    formatAxisValue,
+    breakOnDecrease = false,
+    forecasts = [],
+    nowAt = rangeEnd,
+  },
 ) {
   const wrapper = element("div", "throughput-plot");
   const visibleSeries = series
     .map((entry) => ({
       ...entry,
       points: entry.points
+        .map((point, index) => ({
+          ...point,
+          breakBefore:
+            point.breakBefore ||
+            (index > 0 && !Number.isFinite(entry.points[index - 1].value)),
+        }))
         .filter(
           (point) =>
             Number.isFinite(point.value) &&
@@ -772,7 +841,7 @@ function createThroughputLineGraph(
       element(
         "p",
         "throughput-chart-empty",
-        "More session history is needed for this chart.",
+        "More quota history is needed for this chart.",
       ),
     );
     return wrapper;
@@ -827,6 +896,7 @@ function createThroughputLineGraph(
           const previous = entry.points[index - 1];
           const command =
             index === 0 ||
+            point.breakBefore ||
             (breakOnDecrease &&
               previous !== undefined &&
               point.value < previous.value)
@@ -856,6 +926,38 @@ function createThroughputLineGraph(
     }
   }
 
+  for (const forecast of forecasts) {
+    svg.append(
+      svgElement("path", {
+        d: forecast.points
+          .map(
+            (point, index) =>
+              `${index === 0 ? "M" : "L"}${x(Date.parse(point.observedAt))},${y(point.value)}`,
+          )
+          .join(" "),
+        class: `throughput-line throughput-forecast ${forecast.colorClass}`,
+      }),
+    );
+  }
+  if (nowAt < rangeEnd) {
+    svg.append(
+      svgElement("line", {
+        x1: x(nowAt),
+        x2: x(nowAt),
+        y1: top,
+        y2: height - bottom,
+        class: "throughput-now",
+      }),
+    );
+    const nowLabel = svgElement("text", {
+      x: x(nowAt) + 4,
+      y: top + 10,
+      class: "throughput-time-label",
+    });
+    nowLabel.textContent = "now";
+    svg.append(nowLabel);
+  }
+
   const startLabel = svgElement("text", {
     x: left,
     y: height - 6,
@@ -868,7 +970,8 @@ function createThroughputLineGraph(
     class: "throughput-time-label",
     "text-anchor": "end",
   });
-  endLabel.textContent = "now";
+  endLabel.textContent =
+    rangeEnd > nowAt ? formatAxisDateTime(rangeEnd) : "now";
   svg.append(startLabel, endLabel);
   addTimeAxisHover(svg, {
     rangeStart,
@@ -880,6 +983,18 @@ function createThroughputLineGraph(
     top,
     bottom,
     labelWidth: 156,
+    hoverSeries: [...visibleSeries, ...forecasts].map((entry) => ({
+      label: entry.label,
+      points: entry.points.map((point, index) => ({
+        x: x(Date.parse(point.observedAt)),
+        y: y(point.value),
+        breakBefore:
+          point.breakBefore ||
+          (breakOnDecrease &&
+            index > 0 &&
+            point.value < entry.points[index - 1].value),
+      })),
+    })),
   });
   wrapper.append(svg);
   return wrapper;
@@ -921,6 +1036,7 @@ function emptyFleetThroughput(from, to) {
     rateWindowMinutes: 30,
     smoothingWindowMinutes: 60,
     sessions: [],
+    totals: [],
     vendors: [
       { platform: "Claude", points: [] },
       { platform: "Codex", points: [] },
@@ -954,9 +1070,6 @@ function renderFleetThroughput(throughput) {
       usageTitle,
       `${platform === "Claude" ? "Weekly" : "Primary"} quota consumed; each line is one account.`,
     );
-    if (platformSessions.length > 0) {
-      usage.append(createSessionLegend(platformSessions));
-    }
     usage.append(
       createThroughputLineGraph(platformSessions, rangeStart, rangeEnd, {
         ariaLabel: `${platform} account quota consumption`,
@@ -965,6 +1078,9 @@ function renderFleetThroughput(throughput) {
         breakOnDecrease: true,
       }),
     );
+    if (platformSessions.length > 0) {
+      usage.append(createSessionLegend(platformSessions));
+    }
     throughputCharts.append(usage);
   }
 
@@ -1010,6 +1126,112 @@ function renderFleetThroughput(throughput) {
     );
     throughputCharts.append(card);
   }
+  throughputCharts.append(
+    createFleetQuotaTotalCard(throughput, rangeStart, rangeEnd),
+  );
+}
+
+function fleetQuotaOutlook(total) {
+  switch (total.status) {
+    case "already_exhausted":
+      return "All tracked account quotas are exhausted.";
+    case "not_consuming":
+      return "No measurable recent burn.";
+    case "insufficient_history":
+      return "More history is needed to project every account.";
+    case "reset_before_exhaustion":
+      return `Next reset ${formatDateTime(total.nextResetAt)} comes before projected depletion.`;
+    case "exhaustion_projected":
+      return `Projected depletion ${formatDateTime(total.projectedExhaustionAt)} at the current combined burn rate.`;
+    case "beyond_horizon":
+      return "No projected depletion within seven days at the current combined burn rate.";
+    default:
+      return "Current usage is unavailable for one or more accounts.";
+  }
+}
+
+function createFleetQuotaTotalCard(throughput, rangeStart, rangeEnd) {
+  const totals = throughput.totals ?? [];
+  const card = createThroughputCard(
+    "throughput-total",
+    "Total fleet quota usage",
+    "Percentage of combined quota used, separately for Claude weekly and Codex primary. Each account counts equally. Dashed forecasts assume work can move between accounts and stop at the next reset or seven days.",
+  );
+  const series = totals.map((total) => {
+    const points = total.points.map((point) => ({
+      observedAt: point.observedAt,
+      value: point.usedPercent,
+      breakBefore: point.breakBefore,
+    }));
+    // Current snapshot readings anchor the projection independently of chart resolution.
+    if (total.currentUsedPercent !== null)
+      points.push({
+        observedAt: total.observedAt,
+        value: total.currentUsedPercent,
+        breakBefore:
+          points.length === 0 ||
+          Date.parse(total.observedAt) - Date.parse(points.at(-1).observedAt) >
+            300_000,
+      });
+    return {
+      platform: total.platform,
+      label: `${total.platform} total quota`,
+      colorClass: VENDOR_RATE_COLOR_CLASSES[total.platform],
+      points,
+    };
+  });
+  const forecasts = totals
+    .filter((total) => total.projectionEndAt !== null)
+    .map((total) => ({
+      label: `${total.platform} projected total quota`,
+      colorClass: VENDOR_RATE_COLOR_CLASSES[total.platform],
+      points: [
+        { observedAt: total.observedAt, value: total.currentUsedPercent },
+        {
+          observedAt: total.projectionEndAt,
+          value: total.projectionEndUsedPercent,
+        },
+      ],
+    }));
+  const chartEnd = Math.max(
+    rangeEnd,
+    ...totals.map((total) =>
+      Date.parse(total.projectionEndAt ?? throughput.to),
+    ),
+  );
+  card.append(
+    createThroughputLineGraph(series, rangeStart, chartEnd, {
+      ariaLabel:
+        "Total Claude weekly and Codex primary quota usage and projected depletion",
+      maximum: 100,
+      formatAxisValue: (value) => `${Math.round(value)}%`,
+      forecasts,
+      nowAt: rangeEnd,
+    }),
+  );
+  card.append(
+    createSessionLegend(
+      series.map((entry, index) => ({
+        ...entry,
+        label: `${formatPercent(totals[index].currentUsedPercent)} used · ${totals[index].accountCount} account${totals[index].accountCount === 1 ? "" : "s"}`,
+      })),
+    ),
+  );
+  const outlooks = element("div", "throughput-total-outlooks");
+  for (const total of totals) {
+    const outlook = element("p", "throughput-total-outlook");
+    outlook.append(
+      element("strong", "", `${total.platform}: `),
+      document.createTextNode(
+        total.accountCount === 0
+          ? "No tracked accounts."
+          : fleetQuotaOutlook(total),
+      ),
+    );
+    outlooks.append(outlook);
+  }
+  card.append(outlooks);
+  return card;
 }
 
 function createChartLegend(limits) {
@@ -1082,6 +1304,7 @@ function createLimit(
   overlays = [],
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  accountLabel = null,
 ) {
   const notApplicable = createNotApplicableSession(limit, element);
   if (notApplicable !== null) return notApplicable;
@@ -1148,6 +1371,7 @@ function createLimit(
       overlays,
       chartWidth,
       chartHeight,
+      accountLabel,
     ),
   );
 
@@ -1166,6 +1390,13 @@ function panelClass(limit) {
     return "fable-panel";
   }
   return "provider-panel";
+}
+
+function hasSessionUsage(account) {
+  return account.limits.some(
+    (limit) =>
+      limit.key === "base.session" && Number.isFinite(limit.currentUsedPercent),
+  );
 }
 
 function createWindowPanels(account, rangeStart, rangeEnd) {
@@ -1202,7 +1433,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         ? 304
         : 640;
     const chartHeight =
-      account.platform === "Codex"
+      account.platform === "Codex" || !hasSessionUsage(account)
         ? CODEX_USAGE_CHART_HEIGHT
         : DEFAULT_USAGE_CHART_HEIGHT;
     panel.append(
@@ -1213,6 +1444,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         entry.overlays,
         chartWidth,
         chartHeight,
+        account.accountAlias,
       ),
     );
     panels.append(panel);
@@ -1389,8 +1621,16 @@ function createFleetAccount(account) {
     item.append(limits);
   }
   wrapper.append(item);
+  const badge = createResetBadge(account);
+  if (badge !== null) wrapper.append(badge);
+  return wrapper;
+}
+
+function createResetBadge(account, showZero = false) {
   const resetAccount = latestResetAccounts.find(
-    (candidate) => candidate.accountAlias === account.accountAlias,
+    (candidate) =>
+      candidate.platform === account.platform &&
+      candidate.accountAlias === account.accountAlias,
   );
   const count = resetAccount?.offers.reduce(
     (total, offer) => total + offer.count,
@@ -1401,21 +1641,25 @@ function createFleetAccount(account) {
     lastConfirmedAt !== null &&
     Date.now() - Date.parse(lastConfirmedAt) <
       RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS;
-  if (count > 0 && recentlyConfirmed) {
+  if (
+    (count > 0 || (showZero && count === 0 && resetAccount?.status === "ok")) &&
+    recentlyConfirmed
+  ) {
     const current = resetAccount.status === "ok";
     const badge = element(
-      "a",
+      count > 0 ? "a" : "span",
       `reset-badge ${current ? "" : "reset-badge-stale"}`,
       `${count} reset${count === 1 ? "" : "s"} ${current ? "available" : "last seen"}`,
     );
-    badge.href = `#${encodeURIComponent(`account-resets-${account.platform}-${account.accountAlias}`)}`;
+    if (count > 0)
+      badge.href = `#${encodeURIComponent(`account-resets-${account.platform}-${account.accountAlias}`)}`;
     badge.setAttribute(
       "aria-label",
-      `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}; view expiration`,
+      `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}${count > 0 ? "; view expiration" : ""}`,
     );
-    wrapper.append(badge);
+    return badge;
   }
-  return wrapper;
+  return null;
 }
 
 function resetCheckIssue(account) {
@@ -1550,7 +1794,7 @@ function renderResetOffers(accounts) {
     resetOffersContainer.append(row);
   }
   if (latestAnalyticsPayload !== null) {
-    renderFleetCapacity(latestAnalyticsPayload.accounts);
+    renderAnalytics(latestAnalyticsPayload);
   }
 }
 
@@ -1582,7 +1826,14 @@ function createAccountCard(account, rangeStart, rangeEnd) {
       : account.platform === "Codex"
         ? "codex-history"
         : "";
-  const card = element("article", `account-card ${providerClass}`);
+  const compactClass =
+    account.platform === "Claude" && !hasSessionUsage(account)
+      ? " compact-history"
+      : "";
+  const card = element(
+    "article",
+    `account-card ${providerClass}${compactClass}`,
+  );
   card.id = accountHistoryId(account);
   card.tabIndex = -1;
   const header = element("header", "account-header");
@@ -1600,6 +1851,8 @@ function createAccountCard(account, rangeStart, rangeEnd) {
       }`,
     ),
   );
+  const resetBadge = createResetBadge(account, true);
+  if (resetBadge !== null) identity.append(resetBadge);
   header.append(identity);
   const staleCardPill = staleReadingPill(account);
   if (staleCardPill !== null) {
