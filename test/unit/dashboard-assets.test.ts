@@ -70,7 +70,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
     expect(javascript).toContain("renderFleetThroughput");
-    expect(javascript).toContain("Claude total session burn");
+    expect(javascript).toContain("Claude total weekly burn");
     expect(javascript).toContain("Codex total primary burn");
     expect(javascript).not.toContain("average account consumption rate");
     expect(javascript).toContain("createThroughputLineGraph");
@@ -200,7 +200,7 @@ describe("dashboard assets", () => {
     expect(css).toContain("table-layout: fixed");
     expect(css).toContain("align-items: stretch");
     expect(css).toContain(".usage-series-label");
-    expect(javascript).toContain('"Claude account sessions"');
+    expect(javascript).toContain('"Claude account weekly quota"');
     expect(javascript).toContain('"Codex account primaries"');
     expect(javascript).toContain("throughput-usage");
     expect(css).not.toContain(".throughput-overlay");

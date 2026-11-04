@@ -149,12 +149,17 @@ describe("Ultra history and forecasts", () => {
       expect(session?.points.some((point) => point.usedPercent === 90)).toBe(
         true,
       );
-      expect(analytics.fleetThroughput.sessions).toEqual([]);
+      expect(analytics.fleetThroughput.sessions).toEqual([
+        expect.objectContaining({
+          platform: "Claude",
+          limitKey: "base.weekly",
+        }),
+      ]);
       expect(
-        analytics.fleetThroughput.vendors.every(
-          (vendor) => vendor.points.length === 0,
-        ),
-      ).toBe(true);
+        analytics.fleetThroughput.vendors
+          .find((vendor) => vendor.platform === "Claude")
+          ?.points.at(-1),
+      ).toMatchObject({ ratePercentPerHour: 0, accountCount: 1 });
       expect(analytics.recommendations.fable).toMatchObject({
         accountAlias: current.accountAlias,
         effectiveHeadroomPercent: 24,
