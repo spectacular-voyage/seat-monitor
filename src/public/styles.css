@@ -655,7 +655,7 @@ button:focus-visible,
 
 .throughput-legend {
   display: flex;
-  padding: 10px 14px 0;
+  padding: 0 14px 12px;
   flex-wrap: wrap;
   gap: 6px 14px;
 }
@@ -867,6 +867,11 @@ button:focus-visible,
   align-items: baseline;
   flex-wrap: wrap;
   gap: 5px 8px;
+}
+
+.account-header .reset-badge {
+  position: static;
+  white-space: nowrap;
 }
 
 .account-vendor {
@@ -1102,10 +1107,12 @@ button:focus-visible,
   overflow: visible;
 }
 
+.account-card.compact-history .chart-wrap,
 .account-card.codex-history .chart-wrap {
   min-height: 58px;
 }
 
+.account-card.compact-history .chart-empty,
 .account-card.codex-history .chart-empty {
   min-height: 54px;
 }
@@ -1170,6 +1177,56 @@ button:focus-visible,
   cursor: crosshair;
   fill: transparent;
   pointer-events: all;
+}
+
+.chart-wrap,
+.throughput-plot {
+  position: relative;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  max-width: calc(100% - 8px);
+  padding: 7px 10px;
+  border: 1px solid #59635c;
+  border-radius: 6px;
+  background: #252c27;
+  color: #eef3ef;
+  font-size: 0.75rem;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  box-shadow: 0 3px 12px #0006;
+}
+
+.chart-tooltip-account,
+.chart-tooltip-time {
+  display: block;
+}
+
+.compact-history .chart-legend {
+  display: none;
+}
+
+.compact-history .usage-primary-value::before,
+.compact-history .usage-overlay-value::before {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  margin-right: 5px;
+  background: #8fd3ab;
+  vertical-align: middle;
+  content: "";
+}
+
+.compact-history .usage-overlay-value::before {
+  background: #d8ac76;
+}
+
+.compact-history .limit-metrics th,
+.compact-history .limit-metrics td {
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .chart-hover-guide {
@@ -1376,6 +1433,7 @@ noscript {
 }
 
 @media (min-width: 781px) {
+  .account-card.compact-history .chart-time-label,
   .account-card.codex-history .chart-time-label {
     font-size: 6px;
   }
@@ -1462,6 +1520,17 @@ noscript {
 }
 
 @media (max-width: 520px) {
+  .compact-history .limit {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .compact-history .limit-metrics th,
+  .compact-history .limit-metrics td {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
   .shell {
     width: min(100% - 12px, 1440px);
   }
@@ -1524,4 +1593,34 @@ noscript {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.throughput-total {
+  grid-column: 1 / -1;
+}
+
+.throughput-forecast {
+  stroke-dasharray: 6 4;
+  opacity: 0.8;
+}
+
+.throughput-now {
+  stroke: #9aa89f;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.throughput-total-outlooks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding: 0 14px 14px;
+}
+
+.throughput-total-outlook {
+  flex: 1 1 240px;
+  margin: 0;
+  color: #aab1ab;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }

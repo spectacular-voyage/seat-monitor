@@ -15,6 +15,7 @@ import {
   addCalendarDaysInTimeZone,
   minutesUntilReset,
 } from "../services/time.js";
+import { buildFleetQuotaTotals } from "./fleet-quota.js";
 import type { HistoryHealth } from "./service.js";
 import type {
   HistoryLimitSeries,
@@ -863,6 +864,13 @@ function buildFleetThroughput(
     to: new Date(options.toMilliseconds).toISOString(),
     rateWindowMinutes: THROUGHPUT_RATE_WINDOW_MINUTES,
     smoothingWindowMinutes: smoothingMinutes,
+    totals: buildFleetQuotaTotals(
+      accounts,
+      series,
+      fromMilliseconds,
+      options.toMilliseconds,
+      options.scanIntervalSeconds ?? 60,
+    ),
     sessions,
     vendors,
   };
