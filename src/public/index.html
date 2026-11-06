@@ -9,6 +9,24 @@
     <script type="module" src="/app.js"></script>
   </head>
   <body>
+    <aside class="page-tools" aria-label="Dashboard navigation and filters">
+      <nav aria-label="Page sections">
+        <p class="eyebrow">On this page</p>
+        <ul class="section-links">
+          <li><a href="#capacity">At a glance</a></li>
+          <li><a href="#accounts">Per-account history</a></li>
+          <li><a href="#throughput">Fleet throughput</a></li>
+          <li><a href="#account-resets">Account limit resets</a></li>
+          <li><a href="#fleet-summary">Fleet summary</a></li>
+        </ul>
+      </nav>
+      <fieldset id="vendor-filters" aria-describedby="vendor-filter-help">
+        <legend>Show accounts</legend>
+        <label><input type="checkbox" value="Codex" checked /> Codex</label>
+        <label><input type="checkbox" value="Claude" checked /> Claude</label>
+      </fieldset>
+      <p id="vendor-filter-help">Filters account lists only.</p>
+    </aside>
     <main class="shell">
       <header class="masthead">
         <div class="brand">
@@ -20,7 +38,11 @@
         </div>
       </header>
 
-      <section class="capacity" aria-labelledby="capacity-heading">
+      <section
+        id="capacity"
+        class="capacity"
+        aria-labelledby="capacity-heading"
+      >
         <div class="capacity-layout">
           <div class="capacity-main">
             <div class="section-heading">
@@ -44,7 +66,11 @@
         </div>
       </section>
 
-      <section class="accounts" aria-labelledby="accounts-heading">
+      <section
+        id="accounts"
+        class="accounts"
+        aria-labelledby="accounts-heading"
+      >
         <div class="section-heading accounts-heading">
           <h2 id="accounts-heading" class="eyebrow">
             Per-account usage history
@@ -89,7 +115,11 @@
         </div>
       </section>
 
-      <section class="throughput" aria-labelledby="throughput-heading">
+      <section
+        id="throughput"
+        class="throughput"
+        aria-labelledby="throughput-heading"
+      >
         <div class="section-heading throughput-heading">
           <div>
             <h2 id="throughput-heading" class="eyebrow">Fleet throughput</h2>
@@ -120,7 +150,11 @@
         </div>
       </section>
 
-      <section class="claude-resets" aria-labelledby="reset-offers-heading">
+      <section
+        id="account-resets"
+        class="claude-resets"
+        aria-labelledby="reset-offers-heading"
+      >
         <div class="section-heading">
           <h2 id="reset-offers-heading" class="eyebrow">
             Account limit resets
@@ -132,6 +166,7 @@
       </section>
 
       <section
+        id="fleet-summary"
         class="bottom-dashboard"
         aria-label="Secondary dashboard information"
       >
