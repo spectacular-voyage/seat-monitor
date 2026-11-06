@@ -36,6 +36,9 @@ const fleetCapacity = document.querySelector("#fleet-capacity");
 const resetOffersContainer = document.querySelector("#reset-offers");
 const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
+const vendorFilters = document.querySelector("#vendor-filters");
+const vendorCheckboxes = [...vendorFilters.querySelectorAll("input")];
+const VENDOR_FILTER_STORAGE_KEY = "seat-monitor:visible-vendors";
 const rangeControls = document.querySelector("#range-controls");
 const accountOrderControls = document.querySelector("#account-order-controls");
 const throughputRangeControls = document.querySelector(
@@ -49,6 +52,46 @@ let throughputRangeDays = 1;
 let accountHistoryOrder = "session";
 let latestAnalyticsPayload = null;
 let latestResetAccounts = [];
+
+function restoreVendorFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VENDOR_FILTER_STORAGE_KEY));
+    if (
+      Array.isArray(saved) &&
+      saved.every((vendor) => vendor === "Claude" || vendor === "Codex")
+    ) {
+      for (const checkbox of vendorCheckboxes) {
+        checkbox.checked = saved.includes(checkbox.value);
+      }
+    }
+  } catch {
+    // Filtering still works when browser storage is unavailable.
+  }
+}
+
+function applyVendorFilters() {
+  const visible = new Set(
+    vendorCheckboxes
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value),
+  );
+  for (const container of [fleetCapacity, accountCards]) {
+    container.querySelector(".vendor-filter-empty")?.remove();
+    const rows = [...container.querySelectorAll("[data-account-platform]")];
+    for (const row of rows) {
+      row.hidden = !visible.has(row.dataset.accountPlatform);
+    }
+    if (rows.length > 0 && rows.every((row) => row.hidden)) {
+      container.append(
+        element(
+          "p",
+          "vendor-filter-empty",
+          "No accounts match the selected vendors.",
+        ),
+      );
+    }
+  }
+}
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -1566,6 +1609,7 @@ function accountHistoryId(account) {
 
 function createFleetAccount(account) {
   const wrapper = element("div", "fleet-account-row");
+  wrapper.dataset.accountPlatform = account.platform;
   const item = element("a", "fleet-account");
   item.href = `#${encodeURIComponent(accountHistoryId(account))}`;
   item.setAttribute(
@@ -1835,6 +1879,7 @@ function createAccountCard(account, rangeStart, rangeEnd) {
     `account-card ${providerClass}${compactClass}`,
   );
   card.id = accountHistoryId(account);
+  card.dataset.accountPlatform = account.platform;
   card.tabIndex = -1;
   const header = element("header", "account-header");
   const identity = element("div", "account-identity-line");
@@ -2034,6 +2079,7 @@ function renderAnalytics(payload) {
     payload.historyHealth === "ready" ? "healthy-text" : "warning-text";
   renderTopWarnings({ ...payload, accounts });
   renderFleetCapacity(accounts);
+  applyVendorFilters();
   renderFleetThroughput(
     payload.fleetThroughput ?? emptyFleetThroughput(payload.from, payload.to),
   );
@@ -2273,6 +2319,23 @@ async function fetchDashboard(forceRefresh = false) {
     });
   }
 }
+
+restoreVendorFilters();
+vendorFilters.addEventListener("change", () => {
+  applyVendorFilters();
+  try {
+    localStorage.setItem(
+      VENDOR_FILTER_STORAGE_KEY,
+      JSON.stringify(
+        vendorCheckboxes
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => checkbox.value),
+      ),
+    );
+  } catch {
+    // Keep the current selection even if it cannot be saved.
+  }
+});
 
 rangeControls.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-periods]");
