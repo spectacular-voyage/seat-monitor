@@ -1,0 +1,14 @@
+What's contributing to your usage?
+
+Approximate, based on local sessions on this machine - does not include other devices or claude.ai.
+
+Requests this session: 42 (12 subagent)
+Requests this week: 311
+
+Usage advice
+  - 38% of your usage came from sessions with more than 150k tokens of context. Consider /compact earlier.
+  - 21% came from subagent-heavy requests.
+
+MCP servers
+  example-docs-server    9% of requests
+  example-search-server  4% of requests

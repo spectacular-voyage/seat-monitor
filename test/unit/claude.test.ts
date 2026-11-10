@@ -73,7 +73,7 @@ describe("Claude provider", () => {
         stderr: "",
       });
     };
-    const provider = createClaudeProvider({ run });
+    const provider = createClaudeProvider({ readHttpUsage: null, run });
 
     const snapshot = await provider.scan(account, {
       now: () => new Date("2026-08-26T18:00:00.000Z"),
@@ -104,7 +104,7 @@ describe("Claude provider", () => {
         stdout: "",
         stderr: "secret-token provider detail",
       });
-    const provider = createClaudeProvider({ run });
+    const provider = createClaudeProvider({ readHttpUsage: null, run });
 
     const snapshot = await provider.scan(account, {
       now: () => new Date("2026-08-26T18:00:00.000Z"),
@@ -146,6 +146,7 @@ describe("Claude provider", () => {
       });
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       run,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(false),
@@ -196,6 +197,7 @@ describe("Claude provider", () => {
     };
     const argumentLists: string[][] = [];
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       run: (options) => {
         argumentLists.push([...options.args]);
@@ -241,6 +243,7 @@ describe("Claude provider", () => {
       },
     };
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       run: () =>
         Promise.resolve({
@@ -267,6 +270,117 @@ describe("Claude provider", () => {
     );
   });
 
+  it.each([
+    "claude-usage-advice-only.txt",
+    "claude-usage-insights-only-2.1.312.txt",
+  ])("reports quota_unavailable, never ok or zero, for %s", async (fixture) => {
+    const authFixture = await readFile(
+      new URL("../fixtures/claude-auth-status.json", import.meta.url),
+      "utf8",
+    );
+    const adviceFixture = await readFile(
+      new URL(`../fixtures/${fixture}`, import.meta.url),
+      "utf8",
+    );
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-profile@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "profile",
+        expectedEmail: "profile@example.com",
+        claudeConfigDir: "/profiles/profile",
+      },
+    };
+    const provider = createClaudeProvider({
+      readHttpUsage: null,
+      profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(false),
+      run: (options) =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: options.args[0] === "auth" ? authFixture : adviceFixture,
+          stderr: "",
+        }),
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-10-28T23:52:00.000Z"),
+      timeoutMilliseconds: 8_000,
+    });
+
+    expect(snapshot.status).toBe("error");
+    if (snapshot.status !== "error") {
+      throw new TypeError("Expected an error snapshot.");
+    }
+    expect(snapshot.error.code).toBe("quota_unavailable");
+    expect(snapshot.error.message).toBe(
+      "Claude /usage did not supply session or week quota windows; the quota is unknown.",
+    );
+    expect(snapshot.plan).toBeNull();
+    expect(snapshot.limits).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain("usedPercent");
+  });
+
+  it("reports the weekly figures with the session unknown, as ok and not as an error", async () => {
+    const authFixture = await readFile(
+      new URL("../fixtures/claude-auth-status.json", import.meta.url),
+      "utf8",
+    );
+    const weeklyOnly = await readFile(
+      new URL("../fixtures/claude-usage-weekly-only.txt", import.meta.url),
+      "utf8",
+    );
+    const profileAccount: LoadedAccount = {
+      accountAlias: "claude-profile@example.com",
+      platform: "Claude",
+      auth: {
+        type: "claude_profile",
+        profile: "profile",
+        expectedEmail: "profile@example.com",
+        claudeConfigDir: "/profiles/profile",
+      },
+    };
+    const provider = createClaudeProvider({
+      readHttpUsage: null,
+      profileIsReady: () => Promise.resolve(true),
+      managedMcpIsConfigured: () => Promise.resolve(false),
+      run: (options) =>
+        Promise.resolve({
+          exitCode: 0,
+          stdout: options.args[0] === "auth" ? authFixture : weeklyOnly,
+          stderr: "",
+        }),
+    });
+
+    const snapshot = await provider.scan(profileAccount, {
+      now: () => new Date("2026-10-28T23:52:00.000Z"),
+      timeoutMilliseconds: 8_000,
+    });
+
+    expect(snapshot.status).toBe("ok");
+    if (snapshot.status !== "ok") {
+      throw new TypeError("Expected an ok snapshot.");
+    }
+    const session = snapshot.limits.find(
+      (limit) => limit.key === "base.session",
+    );
+    expect(session).toEqual(
+      expect.objectContaining({
+        availability: "available",
+        usedPercent: null,
+        resetAt: null,
+        label: "Current Session",
+      }),
+    );
+    expect(
+      snapshot.limits.find((limit) => limit.key === "base.weekly"),
+    ).toEqual(
+      expect.objectContaining({ availability: "available", usedPercent: 61 }),
+    );
+    expect(JSON.stringify(snapshot)).not.toContain("invalid_response");
+  });
+
   it("preserves an enterprise-managed MCP configuration", async () => {
     const authFixture = await readFile(
       new URL("../fixtures/claude-auth-status.json", import.meta.url),
@@ -288,6 +402,7 @@ describe("Claude provider", () => {
     };
     const argumentLists: string[][] = [];
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(true),
       managedMcpIsConfigured: () => Promise.resolve(true),
       run: (options) => {
@@ -325,6 +440,7 @@ describe("Claude provider", () => {
     };
     let runCalled = false;
     const provider = createClaudeProvider({
+      readHttpUsage: null,
       profileIsReady: () => Promise.resolve(false),
       run: () => {
         runCalled = true;

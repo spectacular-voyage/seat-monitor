@@ -14,7 +14,9 @@ The original draft named website roots rather than authenticated quota endpoints
 | Codex on ChatGPT Business or Enterprise        | Supports the same profile mode or an environment-provided `CODEX_ACCESS_TOKEN`                                                |
 | API-organization usage and spend               | Out of scope for V1 because it is a different billing product from subscription seats                                         |
 
-Seat Monitor does not scrape dashboards, parse terminal control sequences, or reuse browser cookies. The dashboard's optional Claude reset-offer check makes a read-only request to Claude's private OAuth usage endpoint using each verified local profile. It requests the `cedar_ember` reset block as a Claude Code client and treats an ineligible response as unknown, rather than as proof of no offers. This endpoint is undocumented and may change; failure appears as unavailable reset status without changing quota scans. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for the original quota sources and mapping decisions.
+Seat Monitor does not scrape dashboards, parse terminal control sequences, or reuse browser cookies. The dashboard's optional Claude reset-offer check makes a read-only request to Claude's private OAuth usage endpoint using each verified local profile. It requests the `cedar_ember` reset block with Claude Code's `skip_spend=1` query and client headers, and recognizes an explicit `no_grant` response as zero offers while keeping other ineligibility reasons unconfirmed. This endpoint is undocumented and may change; failure appears as unavailable reset status without changing quota scans. See [the provider-contract spike](docs/notes/sm.task.2026-08-26-provider-contract-spike.md) for the original quota sources and mapping decisions.
+
+If `/usage` returns contribution insights without quota windows, Seat Monitor reports `quota_unavailable` with empty limits and keeps current quota and forecasts unknown. [Claude Code's usage documentation](https://code.claude.com/docs/en/costs#plan-usage-breakdown) describes these percentages as overlapping shares of local activity, not consumed or remaining plan quota. They are never quota inputs. Updating the error classification does not recover a missing provider reading.
 
 ## Install
 
@@ -85,6 +87,12 @@ Set `SEAT_MONITOR_CONFIG` to an absolute path to use another file. `XDG_CONFIG_H
 
 ### Set up Claude profiles
 
+Claude Ultra can have no five-hour session limit after account verification; weekly all-models and Fable limits still apply. Unverified Ultra can still have a session limit. See [Anthropic's Ultra plan documentation](https://support.claude.com/en/articles/17728952-what-is-the-ultra-plan).
+
+When native authentication reports `ultra`, the monitor recognizes that plan directly. If authentication still reports legacy `max`, an operator who has independently confirmed the account's Ultra plan can add `"plan": "ultra"` at the top level of that account's `claude_profile` definition in `accounts.json`. The declaration is optional, applies only with native `max`, and does not override an unknown or contradictory native plan. Legacy `max` alone is never treated as Ultra. Confirming and editing real account declarations is a separate operator action; this feature does not discover or change them.
+
+For a known Ultra plan, a successful complete native quota report containing valid weekly and Fable percentages and resets, the quota header and closing contribution heading, and no session row yields explicit `applicability: "not_applicable"` on `base.session`. Its usage, duration and reset remain null. Forecast and dashboard views show N/A and use the remaining weekly constraints. A session-bearing report remains limited; missing, truncated, malformed and failed readings retain the conservative unknown/error behavior. Older session history is preserved as history, without reviving a current session percentage, rate, reset or risk for an N/A reading. History databases gain one nullable metadata column; existing observations and rollups are preserved.
+
 List the configured Claude accounts and profile locations:
 
 ```sh
@@ -101,7 +109,9 @@ The command creates an isolated `CLAUDE_CONFIG_DIR` with mode `0700` and restric
 
 The monitor combines `claude auth status --json` with zero-token `claude --setting-sources "" --strict-mcp-config -p "/usage"` output. Empty setting sources skip user, project, and local settings, while strict MCP mode ignores configured MCP servers. On hosts with an enterprise `managed-mcp.json`, the monitor omits strict mode because Claude Code requires that managed policy to remain authoritative. Treat `.credentials.json` like a password and never place a profile inside the repository.
 
-The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Accounts awaiting their first check or whose offer status could not be read are listed there, including checks rate limited by Claude. Checks are normally staggered to at most one per minute across the fleet, and each account is checked at most once every 20 minutes. After any reset check is rate limited, the fleet slows to one reset probe per hour and prioritizes accounts with no confirmed reading; this backoff survives service restarts. The last confirmed offers are kept through failed checks and service restarts, labeled as last seen, and removed when they expire. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
+The dashboard also checks for unused Claude limit-reset offers after a profile passes its expected-email check. An overview badge links to the reset section, where each offer's expiry appears in the browser's local time. Accounts awaiting their first check or whose offer status could not be read are listed there, including HTTP 429 rate limits and HTTP 529 overload responses. Checks are normally staggered to at most one per minute across the fleet, and each account is checked at most once every 20 minutes. After a rate limit or overload response, the fleet slows to one reset probe per hour and checks the least recently attempted account, so accounts with a prior successful reading continue to get turns; this backoff survives service restarts. The last confirmed offers are kept through failed checks and service restarts, labeled as last seen, and removed when they expire. To avoid presenting a spent offer as available, a reading older than 24 hours no longer gets an overview badge; its last known value remains in the detail section until expiry or a successful check. Reset status is available only for persistent Claude profiles with a usable OAuth access token. The monitor never uses a reset.
+
+The reset check identifies as a Claude CLI client so Anthropic can evaluate CLI-surface grants. Failed checks distinguish HTTP 429/529, rejected client surface or CLI version, missing reset data, malformed responses, unreadable credentials, and network failures. An explicit `no_grant` eligibility reason with no remaining grants confirms zero resets and clears cached offers, as does an eligible response with an empty grant list. Other eligibility reasons remain unconfirmed; their safe machine reason is retained as `ineligibleReason` in the cache and API and shown in the dashboard. To test whether frequent CLI quota reads contribute to reset-probe 429s, set `SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT` to one configured Claude account alias. When that account is verified and the fleet is due for a reset check, the server pauses its quota scans for 15 minutes, retains its last snapshot with the original observation time, performs one reset check, and resumes scans. Other accounts continue normally. The pause is visible through `quietUntil` on `/api/claude-resets` and in the dashboard. The experiment runs once per service process and does not start until `/api/claude-resets` is read; leave the setting unset for normal operation.
 
 Codex reset credits appear in the same overview badges and expiry section. Their count and detail rows arrive with the existing Codex App Server quota scan, so no additional Codex provider request is made. Last confirmed credits are kept through failed scans and service restarts, labeled as last seen, and removed when they expire. The monitor never redeems a credit.
 
@@ -185,7 +195,7 @@ Report the installed package version without scanning:
 seat-monitor --version
 ```
 
-Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports include total fleet burn followed by a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `fleetBurn`, `riskRanking`, and `accounts`; each fleet-burn entry reports `totalRatePercentPerHour`, contributing account count, observation time, slope window, and smoothing window. Each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
+Forecast mode records the fresh scan, then applies the same history analytics used by the dashboard. Its text and Markdown reports include total fleet burn (Claude weekly and Codex primary quota) followed by a soonest-first **Who exhausts next** ranking. The versioned JSON object contains `apiVersion`, `generatedAt`, `historyHealth`, `fleetBurn`, `riskRanking`, and `accounts`; each fleet-burn entry reports `totalRatePercentPerHour`, contributing account count, observation time, slope window, and smoothing window. Each relevant limit reports current consumption, percent-per-hour rate and basis, projection status, projected exhaustion time and uncertainty bound, minutes to exhaustion, reset timestamp/provenance, sample count, and observation span. It omits chart points and never invents an exhaustion time for `insufficient_history` or `not_consuming` states. A `reset_unconfirmed` limit has a reset time that has already passed with no observed usage drop after it; it counts no relief, projects exhaustion as if no reset happened, and is ranked like `exhaustion_projected`. A `reset_before_exhaustion` detail may retain its explicitly hypothetical projected time, but is excluded from the risk ranking because reset intervenes first.
 
 JSON migration: consumers of the former plain array should read `payload.accounts` instead of `payload`; forecast consumers should read `usedPercent` instead of `currentConsumedPercent`.
 
@@ -226,7 +236,7 @@ Use `seat-monitor-server --version` to confirm which globally installed package 
 
 When no port is configured, the server prefers `3000` and walks upward (`3001`, `3002`, …) until it finds an available loopback port. A port set in the settings file or `SEAT_MONITOR_PORT` remains exact and fails if occupied.
 
-Open the loopback URL printed at startup. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an account-wide quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; Fable remains in its account detail and recommendation card instead of creating a masthead alert. Already-exhausted quotas remain visible in account detail without a persistent masthead duplicate. Only the stale-scan warning exposes a contextual **Refresh now** action. At a glance rows are ordered by the soonest measured weekly reset and link to the corresponding account history. Per-account history defaults to Claude Session % high-to-low with Codex after it; its selector can instead order cards by the soonest weekly reset. Per-account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Historical provider resets are solid. A future reset is dashed and anchors the graph's right edge when the selected period reaches measured history; narrower views that would otherwise begin in the future instead show the most recent measured interval ending now. Hovering over usage or throughput lines shows the corresponding local day and time on the x-axis. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. A separate Fleet throughput section uses distinct multi-account graphs for Claude Session and Codex primary consumption, followed by one total-burn graph per vendor. Total burn sums the measurable account slopes, so it is expressed in account-quota percentage points per hour and can exceed 100. Its independent controls select one day, week, 30-day month, or year; the rate line applies scale-aware moving averages of one hour, six hours, one day, or one week respectively to suppress quantization spikes. Per-account controls continue to show ½, 1, 2, 5, or 10 quota periods. Recommendation cards and diagnostic counts follow the history sections, and reported limits appear as a current/expected ratio.
+Open the loopback URL printed at startup. By default, the server scans immediately at startup and continues scanning every 60 seconds, even when no dashboard is open. Setting `scanOnStartup` to `false` skips the immediate scan but does not stop scheduled scanning. The dashboard reads the latest scheduled result every 60 seconds. Its masthead warns when an account-wide quota is projected to exhaust or when the last completed scan is older than two configured scan intervals; Fable remains in its account detail and recommendation card instead of creating a masthead alert. Already-exhausted quotas remain visible in account detail without a persistent masthead duplicate. Only the stale-scan warning exposes a contextual **Refresh now** action. At a glance rows are ordered by the soonest measured weekly reset and link to the corresponding account history. Per-account history defaults to Claude Session % high-to-low with Codex after it; its selector can instead order cards by the soonest weekly reset. Per-account cards show current quota, local usage history, provider and inferred reset markers, usage rate, and exhaustion-versus-reset projections. Historical provider resets are solid. A future reset is dashed and anchors the graph's right edge when the selected period reaches measured history; narrower views that would otherwise begin in the future instead show the most recent measured interval ending now. Hovering over usage or throughput lines shows the account name and local timestamp in a popover, with the time also shown on the x-axis. Claude weekly and Fable history share one two-column graph with separate series and metrics, while Session occupies the third column. Claude cards without measured Session usage use compact charts like Codex, and account headers show recently confirmed reset counts. A separate Fleet throughput section uses distinct multi-account graphs for Claude weekly and Codex primary consumption, with legends below the graphs, followed by one total-burn graph per vendor. A full-width total-quota graph shows Claude weekly and Codex primary consumption as a percentage of each provider’s combined account quotas, with every account weighted equally. Its dashed projections use per-account usage rates, assume work can move between accounts, and stop at the next reset or seven days. Missing or stale readings suppress a fleet forecast, and incomplete historical coverage leaves gaps rather than treating missing accounts as unused capacity. Total burn sums the measurable account slopes, so it is expressed in account-quota percentage points per hour and can exceed 100. Its independent controls select one day, week, 30-day month, or year; the rate line applies scale-aware moving averages of one hour, six hours, one day, or one week respectively to suppress quantization spikes. Per-account controls continue to show ½, 1, 2, 5, or 10 quota periods. Recommendation cards and diagnostic counts follow the history sections, and reported limits appear as a current/expected ratio. An account whose reading is older than 300 seconds when the server generated the page is marked **STALE** on its card and at-a-glance row.
 
 `GET /api/quota` retains its runtime-validated array response. CLI JSON wraps that account array in an object. Historical data is additive:
 
@@ -262,6 +272,7 @@ Copy the packaged `settings.example.json` or create a private file with this sha
 {
   "scanIntervalSeconds": 60,
   "scanOnStartup": true,
+  "scanConcurrency": 1,
   "port": 3000,
   "history": {
     "rawRetentionHours": 6,
@@ -280,6 +291,7 @@ Environment variables override the settings file:
 
 - `SEAT_MONITOR_SCAN_INTERVAL_SECONDS`
 - `SEAT_MONITOR_SCAN_ON_STARTUP`, as `true` or `false`
+- `SEAT_MONITOR_SCAN_CONCURRENCY`, an integer from 1 through 16 (default 1)
 - `SEAT_MONITOR_PORT`
 - `SEAT_MONITOR_HOST`, as `127.0.0.1` (default), `localhost`, or `0.0.0.0`
 - `SEAT_MONITOR_ALLOWED_HOSTS`, as comma-separated server IPv4 addresses or hostnames without ports
@@ -341,7 +353,64 @@ The server:
 - recomputes reset countdowns when each API response is serialized; and
 - redacts framework and provider errors.
 
-Account checks run in parallel with a default concurrency of eight. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude account, authentication and `/usage` run sequentially.
+Account checks run sequentially by default, with concurrency settable from 1 through 16 using `scanConcurrency` or `SEAT_MONITOR_SCAN_CONCURRENCY` (each in-flight check is a separate CLI child process, so the setting bounds how many run at once per server or CLI process; it is not a hard memory limit, and each child's memory is not bounded by it). The CLI resolves the environment variable first, then the `scanConcurrency` key of the selected settings file, and ignores every other settings key. Codex subprocesses retain the strict eight-second deadline; Claude subprocesses allow sixteen seconds because the headless CLI occasionally exceeds eight seconds even when credentials and quota output are healthy. Within one Claude profile, CLI identity verification runs before a lightweight authenticated HTTP quota read. The native `/usage` command remains a compatibility fallback for unsupported schemas, unavailable caches, and other HTTP failures. A throttled HTTP read can reuse the latest identity-matched observation with its original timestamp; it never stamps an old reading as fresh.
+
+Claude profile scans use the same isolated login and expected-email verification as
+before. The HTTP quota reader uses the installed CLI version in its User-Agent,
+rejects redirects, bounds responses to 1 MB, and applies the provider deadline.
+It maps the provider's normalized `limits` array, preserving Fable utilization and
+verified Ultra session applicability. It does not use local usage advice or
+`weekly_scoped_shares` as quota. The endpoint is undocumented: unknown layouts
+fall back to the native CLI rather than guessing.
+
+On HTTP 429/529, the reader can use its bounded last-success cache (64 profiles)
+or the CLI's identity-matched persisted usage cache. The original observation time
+is retained, so old readings display **STALE** and do not become newly dated historical
+observations. Authorization errors never use this HTTP cache. Native compatibility
+fallback remains logged as `claude-usage-fallback` and can exceed the measured
+memory budget. No provider credentials or account identifiers appear in these
+memory/fallback logs.
+
+### Scan memory acceptance check
+
+On Linux, each completed server scan writes a `scan-memory` JSON line to stderr
+(the systemd journal). It reports the sampled peak **sum of server and descendant
+RSS**, per-PID RSS peaks and kernel high-water marks, concurrent child count,
+remaining children, and a 500,000,000-byte (500 decimal MB) budget. Process
+arguments, credentials and account identifiers are excluded. Sampling is every
+50 ms inside the server and every 10 ms in the external acceptance checker; the
+reported `sampleIntervalMs` identifies the rate. Sampling includes children
+spawned by native worker threads and continues tracking
+observed descendants if they are reparented. Very short-lived processes or spikes
+between samples can be missed. The per-PID high-water marks are not added together:
+they can occur at different times, and the server's is a lifetime high-water mark.
+
+When the server has a readable, dedicated cgroup v2, the log also reports sampled
+`memory.current` and its anonymous/file/kernel breakdown at the cgroup peak.
+Cgroup accounting includes filesystem cache and kernel memory; it is not the same
+quantity as combined RSS. Do not compare a historical systemd `MemoryPeak` directly
+with a single scan's sampled RSS peak.
+
+Run the acceptance gate against a locally running candidate server, using the same
+account configuration as the server:
+
+```sh
+npm run check:scan-memory -- --url http://127.0.0.1:3000 --scans 3 --interval-seconds 60
+```
+
+The default is one full scan with a 500 MB budget; `--budget-mb` can state a different test budget. Repeated scans wait 60 seconds after completion, matching the normal scheduler; `--interval-seconds 0` explicitly stress-tests immediate refreshes. Reports include duration and the count of observations older than five minutes.
+The command prints each full report and exits nonzero for a budget breach,
+remaining children, unavailable measurements (including no observed provider
+children), missing accounts, or any account
+failure. It forces full scans, including when the cache is fresh. This is a live
+acceptance check requiring configured provider credentials, separate from the
+credential-free unit tests that verify the measurement and failure paths.
+Larger explicit concurrency settings remain supported, but require their own
+memory check. Serial scans take longer; per-provider deadlines and quota parsing
+are unchanged.
+
+See [the Galactica measurements](docs/diagnostics/scan-memory/README.md) for the
+before/after results: the HTTP-first reader passes the 500 MB combined-RSS gate. This is not a 500 MB cgroup ceiling: filesystem cache and native fallback can exceed that figure.
 
 An operating-system service is not required for scheduling. A future systemd user service, launchd agent, or Windows service may be used to start and keep `seat-monitor-server` running across logins or reboots. Remote authentication and TLS are not implemented; network exposure is intended only for a trusted LAN.
 
@@ -369,7 +438,7 @@ Run the complete quality gate with:
 npm run check
 ```
 
-Provider adapters accept injected clocks and process clients. Fixtures are derived from public provider examples and contain no live account identifiers, credentials, or usage values.
+Provider adapters accept injected clocks and process clients. Fixtures use public provider examples or explicitly supplied identifier-free captures. The Claude 2.1.312 insights-only regression preserves the supplied 678-byte capture (SHA256 `d416bd44048da780154f2911ecb4263dfe283ab0a43e7a2efe131ccb15ce0194`); its local contribution shares are test data, never live quota. Fixtures contain no live account identifiers or credentials.
 
 ## Security
 

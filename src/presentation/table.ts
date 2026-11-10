@@ -22,8 +22,12 @@ function markdownRow(cells: readonly string[]): string {
 }
 
 function rowStatus(row: QuotaReportRow): string {
+  if (row.applicability === "not_applicable") return "not applicable";
   if (row.support === "unsupported") {
     return "unsupported";
+  }
+  if (row.key === "base.session" && row.consumedPercent === null) {
+    return "unknown";
   }
   return row.constantSuspect ? "**CONSTANT-SUSPECT**" : "";
 }

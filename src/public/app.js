@@ -2,13 +2,20 @@ import {
   LONGEST_QUOTA_PERIOD_MINUTES,
   compareAccountsBySessionUtilization,
   compareFleetAccountsByWeeklyReset,
+  readingIsStale,
+  toneForLimit,
 } from "./capacity-order.js";
+import {
+  createNotApplicableSession,
+  fallbackLimit,
+} from "./session-applicability.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const ACCOUNT_SERIES_COLOR_COUNT = 8;
 const DEFAULT_USAGE_CHART_HEIGHT = 176;
 const CODEX_USAGE_CHART_HEIGHT = 100;
+const RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const VENDOR_RATE_COLOR_CLASSES = {
   Claude: "throughput-color-claude",
   Codex: "throughput-color-codex",
@@ -29,6 +36,9 @@ const fleetCapacity = document.querySelector("#fleet-capacity");
 const resetOffersContainer = document.querySelector("#reset-offers");
 const throughputCharts = document.querySelector("#fleet-throughput-charts");
 const topWarnings = document.querySelector("#top-warnings");
+const vendorFilters = document.querySelector("#vendor-filters");
+const vendorCheckboxes = [...vendorFilters.querySelectorAll("input")];
+const VENDOR_FILTER_STORAGE_KEY = "seat-monitor:visible-vendors";
 const rangeControls = document.querySelector("#range-controls");
 const accountOrderControls = document.querySelector("#account-order-controls");
 const throughputRangeControls = document.querySelector(
@@ -42,6 +52,46 @@ let throughputRangeDays = 1;
 let accountHistoryOrder = "session";
 let latestAnalyticsPayload = null;
 let latestResetAccounts = [];
+
+function restoreVendorFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VENDOR_FILTER_STORAGE_KEY));
+    if (
+      Array.isArray(saved) &&
+      saved.every((vendor) => vendor === "Claude" || vendor === "Codex")
+    ) {
+      for (const checkbox of vendorCheckboxes) {
+        checkbox.checked = saved.includes(checkbox.value);
+      }
+    }
+  } catch {
+    // Filtering still works when browser storage is unavailable.
+  }
+}
+
+function applyVendorFilters() {
+  const visible = new Set(
+    vendorCheckboxes
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value),
+  );
+  for (const container of [fleetCapacity, accountCards]) {
+    container.querySelector(".vendor-filter-empty")?.remove();
+    const rows = [...container.querySelectorAll("[data-account-platform]")];
+    for (const row of rows) {
+      row.hidden = !visible.has(row.dataset.accountPlatform);
+    }
+    if (rows.length > 0 && rows.every((row) => row.hidden)) {
+      container.append(
+        element(
+          "p",
+          "vendor-filter-empty",
+          "No accounts match the selected vendors.",
+        ),
+      );
+    }
+  }
+}
 
 function element(name, className, text) {
   const value = document.createElement(name);
@@ -175,12 +225,16 @@ function isSameLocalDay(leftValue, rightValue) {
 function projectionText(projection) {
   const exhaustion = formatExhaustionRange(projection);
   switch (projection.status) {
+    case "not_applicable":
+      return "N/A: no five-hour session limit";
     case "already_exhausted":
       return "Quota is exhausted";
     case "exhausts_before_reset":
       return `Projected empty ${exhaustion}`;
     case "reset_before_exhaustion":
       return "Reset is expected before exhaustion";
+    case "reset_unconfirmed":
+      return `Projected empty ${exhaustion} (reset time passed, not confirmed)`;
     case "exhaustion_projected":
       return `Projected empty ${exhaustion}`;
     case "not_consuming":
@@ -327,20 +381,6 @@ function renderTopWarnings(payload) {
   topWarnings.replaceChildren(...warnings);
 }
 
-function toneForLimit(limit) {
-  if (
-    limit.projection.status === "already_exhausted" ||
-    limit.projection.status === "exhausts_before_reset" ||
-    (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 90)
-  ) {
-    return "danger";
-  }
-  if (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 75) {
-    return "warning";
-  }
-  return "healthy";
-}
-
 function inferredWindowDurationMinutes(limit) {
   if (limit.windowDurationMinutes !== null) {
     return limit.windowDurationMinutes;
@@ -375,8 +415,15 @@ function addTimeAxisHover(
     top,
     bottom,
     labelWidth = 108,
+    hoverSeries = [],
+    accountLabel = null,
   },
 ) {
+  const tooltip = element("div", "chart-tooltip");
+  tooltip.hidden = true;
+  const tooltipAccount = element("strong", "chart-tooltip-account");
+  const tooltipTime = element("span", "chart-tooltip-time");
+  tooltip.append(tooltipAccount, tooltipTime);
   const halfLabelWidth = labelWidth / 2;
   const guide = svgElement("line", {
     y1: top,
@@ -410,6 +457,7 @@ function addTimeAxisHover(
     guide.setAttribute("visibility", visibility);
     labelBackground.setAttribute("visibility", visibility);
     label.setAttribute("visibility", visibility);
+    if (!visible) tooltip.hidden = true;
   };
   target.addEventListener("pointermove", (event) => {
     const bounds = svg.getBoundingClientRect();
@@ -436,6 +484,52 @@ function addTimeAxisHover(
     label.setAttribute("x", String(labelX));
     label.textContent = formatAxisDateTime(milliseconds);
     setVisible(true);
+    const svgY = ((event.clientY - bounds.top) / bounds.height) * height;
+    let closestLabel = accountLabel;
+    let closestDistance = (12 * width) / bounds.width;
+    for (const entry of hoverSeries) {
+      for (let index = 0; index < entry.points.length; index += 1) {
+        const point = entry.points[index];
+        const previous = point.breakBefore
+          ? point
+          : (entry.points[index - 1] ?? point);
+        const dx = point.x - previous.x;
+        const dy = point.y - previous.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const fraction =
+          lengthSquared === 0
+            ? 0
+            : Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((svgX - previous.x) * dx + (svgY - previous.y) * dy) /
+                    lengthSquared,
+                ),
+              );
+        const distance = Math.hypot(
+          svgX - previous.x - fraction * dx,
+          svgY - previous.y - fraction * dy,
+        );
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestLabel = entry.label;
+        }
+      }
+    }
+    if (closestLabel === null) {
+      tooltip.hidden = true;
+      return;
+    }
+    const container = svg.parentElement;
+    if (tooltip.parentElement !== container) container.append(tooltip);
+    tooltipAccount.textContent = closestLabel;
+    tooltipTime.textContent = formatAxisDateTime(milliseconds);
+    tooltip.hidden = false;
+    const containerBounds = container.getBoundingClientRect();
+    const tooltipX = event.clientX - containerBounds.left + 12;
+    tooltip.style.left = `${Math.max(0, Math.min(container.clientWidth - tooltip.offsetWidth, tooltipX))}px`;
+    tooltip.style.top = `${Math.max(0, event.clientY - containerBounds.top - tooltip.offsetHeight - 12)}px`;
   });
   target.addEventListener("pointerleave", () => setVisible(false));
   svg.append(guide, labelBackground, label, target);
@@ -447,7 +541,8 @@ function projectionLineEnd(limit, projectionAt) {
   }
   if (
     limit.projection.status === "exhausts_before_reset" ||
-    limit.projection.status === "exhaustion_projected"
+    limit.projection.status === "exhaustion_projected" ||
+    limit.projection.status === "reset_unconfirmed"
   ) {
     return projectionAt;
   }
@@ -466,6 +561,7 @@ function createUsageGraph(
   overlays = [],
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  accountLabel = null,
 ) {
   const wrapper = element("div", "chart-wrap");
   const chartLimits = [limit, ...overlays];
@@ -710,6 +806,7 @@ function createUsageGraph(
         : "now";
   svg.append(startLabel, endLabel);
   addTimeAxisHover(svg, {
+    accountLabel,
     rangeStart: chartStart,
     rangeEnd: chartEnd,
     width,
@@ -750,13 +847,26 @@ function createThroughputLineGraph(
   series,
   rangeStart,
   rangeEnd,
-  { ariaLabel, maximum, formatAxisValue, breakOnDecrease = false },
+  {
+    ariaLabel,
+    maximum,
+    formatAxisValue,
+    breakOnDecrease = false,
+    forecasts = [],
+    nowAt = rangeEnd,
+  },
 ) {
   const wrapper = element("div", "throughput-plot");
   const visibleSeries = series
     .map((entry) => ({
       ...entry,
       points: entry.points
+        .map((point, index) => ({
+          ...point,
+          breakBefore:
+            point.breakBefore ||
+            (index > 0 && !Number.isFinite(entry.points[index - 1].value)),
+        }))
         .filter(
           (point) =>
             Number.isFinite(point.value) &&
@@ -774,7 +884,7 @@ function createThroughputLineGraph(
       element(
         "p",
         "throughput-chart-empty",
-        "More session history is needed for this chart.",
+        "More quota history is needed for this chart.",
       ),
     );
     return wrapper;
@@ -829,6 +939,7 @@ function createThroughputLineGraph(
           const previous = entry.points[index - 1];
           const command =
             index === 0 ||
+            point.breakBefore ||
             (breakOnDecrease &&
               previous !== undefined &&
               point.value < previous.value)
@@ -858,6 +969,38 @@ function createThroughputLineGraph(
     }
   }
 
+  for (const forecast of forecasts) {
+    svg.append(
+      svgElement("path", {
+        d: forecast.points
+          .map(
+            (point, index) =>
+              `${index === 0 ? "M" : "L"}${x(Date.parse(point.observedAt))},${y(point.value)}`,
+          )
+          .join(" "),
+        class: `throughput-line throughput-forecast ${forecast.colorClass}`,
+      }),
+    );
+  }
+  if (nowAt < rangeEnd) {
+    svg.append(
+      svgElement("line", {
+        x1: x(nowAt),
+        x2: x(nowAt),
+        y1: top,
+        y2: height - bottom,
+        class: "throughput-now",
+      }),
+    );
+    const nowLabel = svgElement("text", {
+      x: x(nowAt) + 4,
+      y: top + 10,
+      class: "throughput-time-label",
+    });
+    nowLabel.textContent = "now";
+    svg.append(nowLabel);
+  }
+
   const startLabel = svgElement("text", {
     x: left,
     y: height - 6,
@@ -870,7 +1013,8 @@ function createThroughputLineGraph(
     class: "throughput-time-label",
     "text-anchor": "end",
   });
-  endLabel.textContent = "now";
+  endLabel.textContent =
+    rangeEnd > nowAt ? formatAxisDateTime(rangeEnd) : "now";
   svg.append(startLabel, endLabel);
   addTimeAxisHover(svg, {
     rangeStart,
@@ -882,6 +1026,18 @@ function createThroughputLineGraph(
     top,
     bottom,
     labelWidth: 156,
+    hoverSeries: [...visibleSeries, ...forecasts].map((entry) => ({
+      label: entry.label,
+      points: entry.points.map((point, index) => ({
+        x: x(Date.parse(point.observedAt)),
+        y: y(point.value),
+        breakBefore:
+          point.breakBefore ||
+          (breakOnDecrease &&
+            index > 0 &&
+            point.value < entry.points[index - 1].value),
+      })),
+    })),
   });
   wrapper.append(svg);
   return wrapper;
@@ -923,6 +1079,7 @@ function emptyFleetThroughput(from, to) {
     rateWindowMinutes: 30,
     smoothingWindowMinutes: 60,
     sessions: [],
+    totals: [],
     vendors: [
       { platform: "Claude", points: [] },
       { platform: "Codex", points: [] },
@@ -949,16 +1106,13 @@ function renderFleetThroughput(throughput) {
     );
     const usageTitle =
       platform === "Claude"
-        ? "Claude account sessions"
+        ? "Claude account weekly quota"
         : "Codex account primaries";
     const usage = createThroughputCard(
       `throughput-usage throughput-${platform.toLocaleLowerCase("en-US")}`,
       usageTitle,
-      `${platform === "Claude" ? "Session" : "Primary"} quota consumed; each line is one account.`,
+      `${platform === "Claude" ? "Weekly" : "Primary"} quota consumed; each line is one account.`,
     );
-    if (platformSessions.length > 0) {
-      usage.append(createSessionLegend(platformSessions));
-    }
     usage.append(
       createThroughputLineGraph(platformSessions, rangeStart, rangeEnd, {
         ariaLabel: `${platform} account quota consumption`,
@@ -967,6 +1121,9 @@ function renderFleetThroughput(throughput) {
         breakOnDecrease: true,
       }),
     );
+    if (platformSessions.length > 0) {
+      usage.append(createSessionLegend(platformSessions));
+    }
     throughputCharts.append(usage);
   }
 
@@ -984,7 +1141,7 @@ function renderFleetThroughput(throughput) {
     const latestAccountCount = vendor?.points.at(-1)?.accountCount ?? 0;
     const rateTitle =
       platform === "Claude"
-        ? "Claude total session burn"
+        ? "Claude total weekly burn"
         : "Codex total primary burn";
     const card = createThroughputCard(
       `throughput-rate throughput-${platform.toLocaleLowerCase("en-US")}`,
@@ -1012,6 +1169,112 @@ function renderFleetThroughput(throughput) {
     );
     throughputCharts.append(card);
   }
+  throughputCharts.append(
+    createFleetQuotaTotalCard(throughput, rangeStart, rangeEnd),
+  );
+}
+
+function fleetQuotaOutlook(total) {
+  switch (total.status) {
+    case "already_exhausted":
+      return "All tracked account quotas are exhausted.";
+    case "not_consuming":
+      return "No measurable recent burn.";
+    case "insufficient_history":
+      return "More history is needed to project every account.";
+    case "reset_before_exhaustion":
+      return `Next reset ${formatDateTime(total.nextResetAt)} comes before projected depletion.`;
+    case "exhaustion_projected":
+      return `Projected depletion ${formatDateTime(total.projectedExhaustionAt)} at the current combined burn rate.`;
+    case "beyond_horizon":
+      return "No projected depletion within seven days at the current combined burn rate.";
+    default:
+      return "Current usage is unavailable for one or more accounts.";
+  }
+}
+
+function createFleetQuotaTotalCard(throughput, rangeStart, rangeEnd) {
+  const totals = throughput.totals ?? [];
+  const card = createThroughputCard(
+    "throughput-total",
+    "Total fleet quota usage",
+    "Percentage of combined quota used, separately for Claude weekly and Codex primary. Each account counts equally. Dashed forecasts assume work can move between accounts and stop at the next reset or seven days.",
+  );
+  const series = totals.map((total) => {
+    const points = total.points.map((point) => ({
+      observedAt: point.observedAt,
+      value: point.usedPercent,
+      breakBefore: point.breakBefore,
+    }));
+    // Current snapshot readings anchor the projection independently of chart resolution.
+    if (total.currentUsedPercent !== null)
+      points.push({
+        observedAt: total.observedAt,
+        value: total.currentUsedPercent,
+        breakBefore:
+          points.length === 0 ||
+          Date.parse(total.observedAt) - Date.parse(points.at(-1).observedAt) >
+            300_000,
+      });
+    return {
+      platform: total.platform,
+      label: `${total.platform} total quota`,
+      colorClass: VENDOR_RATE_COLOR_CLASSES[total.platform],
+      points,
+    };
+  });
+  const forecasts = totals
+    .filter((total) => total.projectionEndAt !== null)
+    .map((total) => ({
+      label: `${total.platform} projected total quota`,
+      colorClass: VENDOR_RATE_COLOR_CLASSES[total.platform],
+      points: [
+        { observedAt: total.observedAt, value: total.currentUsedPercent },
+        {
+          observedAt: total.projectionEndAt,
+          value: total.projectionEndUsedPercent,
+        },
+      ],
+    }));
+  const chartEnd = Math.max(
+    rangeEnd,
+    ...totals.map((total) =>
+      Date.parse(total.projectionEndAt ?? throughput.to),
+    ),
+  );
+  card.append(
+    createThroughputLineGraph(series, rangeStart, chartEnd, {
+      ariaLabel:
+        "Total Claude weekly and Codex primary quota usage and projected depletion",
+      maximum: 100,
+      formatAxisValue: (value) => `${Math.round(value)}%`,
+      forecasts,
+      nowAt: rangeEnd,
+    }),
+  );
+  card.append(
+    createSessionLegend(
+      series.map((entry, index) => ({
+        ...entry,
+        label: `${formatPercent(totals[index].currentUsedPercent)} used · ${totals[index].accountCount} account${totals[index].accountCount === 1 ? "" : "s"}`,
+      })),
+    ),
+  );
+  const outlooks = element("div", "throughput-total-outlooks");
+  for (const total of totals) {
+    const outlook = element("p", "throughput-total-outlook");
+    outlook.append(
+      element("strong", "", `${total.platform}: `),
+      document.createTextNode(
+        total.accountCount === 0
+          ? "No tracked accounts."
+          : fleetQuotaOutlook(total),
+      ),
+    );
+    outlooks.append(outlook);
+  }
+  card.append(outlooks);
+  return card;
 }
 
 function createChartLegend(limits) {
@@ -1084,7 +1347,10 @@ function createLimit(
   overlays = [],
   chartWidth = 640,
   chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  accountLabel = null,
 ) {
+  const notApplicable = createNotApplicableSession(limit, element);
+  if (notApplicable !== null) return notApplicable;
   const section = element(
     "section",
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
@@ -1148,6 +1414,7 @@ function createLimit(
       overlays,
       chartWidth,
       chartHeight,
+      accountLabel,
     ),
   );
 
@@ -1168,10 +1435,24 @@ function panelClass(limit) {
   return "provider-panel";
 }
 
+function hasSessionUsage(account) {
+  return account.limits.some(
+    (limit) =>
+      limit.key === "base.session" && Number.isFinite(limit.currentUsedPercent),
+  );
+}
+
 function createWindowPanels(account, rangeStart, rangeEnd) {
   const panels = element("div", "window-grid");
   const entries = [];
   for (const limit of account.limits) {
+    if (
+      limit.key === "base.session" &&
+      limit.currentUsedPercent === null &&
+      limit.applicability !== "not_applicable"
+    ) {
+      continue;
+    }
     if (
       limit.depth === 1 &&
       account.limits.some((candidate) => candidate.key === limit.parentKey)
@@ -1195,7 +1476,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         ? 304
         : 640;
     const chartHeight =
-      account.platform === "Codex"
+      account.platform === "Codex" || !hasSessionUsage(account)
         ? CODEX_USAGE_CHART_HEIGHT
         : DEFAULT_USAGE_CHART_HEIGHT;
     panel.append(
@@ -1206,6 +1487,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         entry.overlays,
         chartWidth,
         chartHeight,
+        account.accountAlias,
       ),
     );
     panels.append(panel);
@@ -1217,7 +1499,8 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
 }
 
 function createCapacityMeter(limit) {
-  const used = limit.currentUsedPercent ?? 0;
+  const known = limit.currentUsedPercent !== null;
+  const used = known ? limit.currentUsedPercent : 0;
   const svg = svgElement("svg", {
     viewBox: "0 0 100 8",
     role: "img",
@@ -1234,14 +1517,19 @@ function createCapacityMeter(limit) {
       rx: 2,
       class: "capacity-track",
     }),
-    svgElement("rect", {
-      x: 0,
-      y: 0,
-      width: used,
-      height: 8,
-      rx: 2,
-      class: `capacity-fill ${toneForLimit(limit)}`,
-    }),
+    // An unknown reading draws no fill at all: an empty meter must never read as a healthy zero.
+    ...(known
+      ? [
+          svgElement("rect", {
+            x: 0,
+            y: 0,
+            width: used,
+            height: 8,
+            rx: 2,
+            class: `capacity-fill ${toneForLimit(limit)}`,
+          }),
+        ]
+      : []),
   );
   return svg;
 }
@@ -1250,6 +1538,8 @@ function createCapacityLimit(
   limit,
   { showReset = true, sharedReset = false } = {},
 ) {
+  const notApplicable = createNotApplicableSession(limit, element, true);
+  if (notApplicable !== null) return notApplicable;
   const row = element(
     "div",
     `capacity-limit ${limit.depth === 1 ? "subcap" : ""}`,
@@ -1319,6 +1609,7 @@ function accountHistoryId(account) {
 
 function createFleetAccount(account) {
   const wrapper = element("div", "fleet-account-row");
+  wrapper.dataset.accountPlatform = account.platform;
   const item = element("a", "fleet-account");
   item.href = `#${encodeURIComponent(accountHistoryId(account))}`;
   item.setAttribute(
@@ -1337,6 +1628,10 @@ function createFleetAccount(account) {
     ),
   );
   header.append(identity);
+  const staleFleetPill = staleReadingPill(account);
+  if (staleFleetPill !== null) {
+    header.append(staleFleetPill);
+  }
   if (account.status === "error") {
     header.append(element("span", "danger-text", "Check failed"));
   }
@@ -1370,28 +1665,86 @@ function createFleetAccount(account) {
     item.append(limits);
   }
   wrapper.append(item);
+  const badge = createResetBadge(account);
+  if (badge !== null) wrapper.append(badge);
+  return wrapper;
+}
+
+function createResetBadge(account, showZero = false) {
   const resetAccount = latestResetAccounts.find(
-    (candidate) => candidate.accountAlias === account.accountAlias,
+    (candidate) =>
+      candidate.platform === account.platform &&
+      candidate.accountAlias === account.accountAlias,
   );
   const count = resetAccount?.offers.reduce(
     (total, offer) => total + offer.count,
     0,
   );
-  if (count > 0) {
+  const lastConfirmedAt = resetAccount?.lastConfirmedAt ?? null;
+  const recentlyConfirmed =
+    lastConfirmedAt !== null &&
+    Date.now() - Date.parse(lastConfirmedAt) <
+      RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS;
+  if (
+    (count > 0 || (showZero && count === 0 && resetAccount?.status === "ok")) &&
+    recentlyConfirmed
+  ) {
     const current = resetAccount.status === "ok";
     const badge = element(
-      "a",
+      count > 0 ? "a" : "span",
       `reset-badge ${current ? "" : "reset-badge-stale"}`,
       `${count} reset${count === 1 ? "" : "s"} ${current ? "available" : "last seen"}`,
     );
-    badge.href = `#${encodeURIComponent(`account-resets-${account.platform}-${account.accountAlias}`)}`;
+    if (count > 0)
+      badge.href = `#${encodeURIComponent(`account-resets-${account.platform}-${account.accountAlias}`)}`;
     badge.setAttribute(
       "aria-label",
-      `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}; view expiration`,
+      `${count} limit reset${count === 1 ? "" : "s"} ${current ? "available" : "last confirmed"} for ${account.accountAlias}${count > 0 ? "; view expiration" : ""}`,
     );
-    wrapper.append(badge);
+    return badge;
   }
-  return wrapper;
+  return null;
+}
+
+function resetCheckIssue(account) {
+  if (account.quietUntil) {
+    return `Quota scans paused for this account; reset check scheduled for ${formatDateTime(account.quietUntil)}`;
+  }
+  if (account.status === "rate_limited") {
+    return "Provider rate limited the check (HTTP 429); reset probes are limited to one per hour";
+  }
+  if (account.status === "overloaded") {
+    return "Provider is overloaded (HTTP 529); reset probes are limited to one per hour";
+  }
+  if (account.status === "pending") {
+    return "Waiting for its scheduled check";
+  }
+  if (account.reason === "surface") {
+    return "Provider rejected the reset check for this client surface";
+  }
+  if (account.reason === "cli_version") {
+    return "Provider rejected the reset check for this Claude CLI version";
+  }
+  if (account.reason === "ineligible") {
+    return account.ineligibleReason
+      ? `Provider reported reset ineligibility: ${account.ineligibleReason}; offer availability is unconfirmed`
+      : "Provider marked the reset check ineligible without a reason; offer availability is unconfirmed";
+  }
+  if (account.reason === "missing_reset_block") {
+    return "Provider omitted the reset-offer data";
+  }
+  if (account.reason === "invalid_response") {
+    return "Provider reset-offer data could not be read";
+  }
+  if (account.reason === "credential_unavailable") {
+    return "Claude profile credentials could not be read";
+  }
+  if (account.reason === "network_error") {
+    return "Reset-offer request failed before a response was received";
+  }
+  return account.httpStatus === undefined || account.httpStatus === null
+    ? "Could not verify this account’s reset offers"
+    : `Provider returned HTTP ${account.httpStatus}; reset availability is unknown`;
 }
 
 function renderResetOffers(accounts) {
@@ -1408,6 +1761,12 @@ function renderResetOffers(accounts) {
       platform: account.platform,
       status: account.status,
       lastConfirmedAt: account.lastConfirmedAt ?? null,
+      stale:
+        account.lastConfirmedAt !== null &&
+        account.lastConfirmedAt !== undefined &&
+        Date.now() - Date.parse(account.lastConfirmedAt) >=
+          RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS,
+      issue: account.status === "ok" ? null : resetCheckIssue(account),
       ...offer,
     })),
   );
@@ -1445,11 +1804,11 @@ function renderResetOffers(accounts) {
       offer.expiresAt === null
         ? "Expiry not reported"
         : `Expires ${formatDateTime(offer.expiresAt)}`;
-    expiration.textContent =
-      offer.status === "ok"
-        ? expirationText
-        : `${expirationText} · Last confirmed ${offer.lastConfirmedAt === null ? "previously" : formatDateTime(offer.lastConfirmedAt)}; latest check ${offer.status === "rate_limited" ? "rate limited" : "unavailable"}`;
-    if (offer.status !== "ok") {
+    const current = offer.status === "ok" && !offer.stale;
+    expiration.textContent = current
+      ? expirationText
+      : `${expirationText} · Last confirmed ${offer.lastConfirmedAt === null ? "previously" : formatDateTime(offer.lastConfirmedAt)}; ${offer.issue ?? "not rechecked recently"}. This offer may have been used.`;
+    if (!current) {
       row.classList.add("reset-offer-unavailable");
     }
     row.append(expiration);
@@ -1474,20 +1833,12 @@ function renderResetOffers(accounts) {
     row.append(
       element("strong", "reset-offer-account", account.accountAlias),
       element("span", "reset-offer-label", "Reset status unavailable"),
-      element(
-        "span",
-        "reset-offer-expiration",
-        account.status === "rate_limited"
-          ? "Provider rate limited the check; reset probes are limited to one per hour"
-          : account.status === "pending"
-            ? "Waiting for its scheduled check"
-            : "Could not verify this account’s reset offers",
-      ),
+      element("span", "reset-offer-expiration", resetCheckIssue(account)),
     );
     resetOffersContainer.append(row);
   }
   if (latestAnalyticsPayload !== null) {
-    renderFleetCapacity(latestAnalyticsPayload.accounts);
+    renderAnalytics(latestAnalyticsPayload);
   }
 }
 
@@ -1504,6 +1855,14 @@ function renderFleetCapacity(accounts) {
   }
 }
 
+// STALE when the account's reading is older than 300 s at the time the server generated this payload (server clock, not the browser's).
+function staleReadingPill(account) {
+  const generatedAt = Date.parse(latestAnalyticsPayload?.generatedAt ?? "");
+  return readingIsStale(account.observedAt, generatedAt)
+    ? element("span", "pill stale", "STALE")
+    : null;
+}
+
 function createAccountCard(account, rangeStart, rangeEnd) {
   const providerClass =
     account.platform === "Claude"
@@ -1511,8 +1870,16 @@ function createAccountCard(account, rangeStart, rangeEnd) {
       : account.platform === "Codex"
         ? "codex-history"
         : "";
-  const card = element("article", `account-card ${providerClass}`);
+  const compactClass =
+    account.platform === "Claude" && !hasSessionUsage(account)
+      ? " compact-history"
+      : "";
+  const card = element(
+    "article",
+    `account-card ${providerClass}${compactClass}`,
+  );
   card.id = accountHistoryId(account);
+  card.dataset.accountPlatform = account.platform;
   card.tabIndex = -1;
   const header = element("header", "account-header");
   const identity = element("div", "account-identity-line");
@@ -1529,7 +1896,13 @@ function createAccountCard(account, rangeStart, rangeEnd) {
       }`,
     ),
   );
+  const resetBadge = createResetBadge(account, true);
+  if (resetBadge !== null) identity.append(resetBadge);
   header.append(identity);
+  const staleCardPill = staleReadingPill(account);
+  if (staleCardPill !== null) {
+    header.append(staleCardPill);
+  }
   if (account.status === "error") {
     header.append(element("span", "pill danger", "Check failed"));
   }
@@ -1706,46 +2079,12 @@ function renderAnalytics(payload) {
     payload.historyHealth === "ready" ? "healthy-text" : "warning-text";
   renderTopWarnings({ ...payload, accounts });
   renderFleetCapacity(accounts);
+  applyVendorFilters();
   renderFleetThroughput(
     payload.fleetThroughput ?? emptyFleetThroughput(payload.from, payload.to),
   );
   renderRecommendations(payload.recommendations);
   updateCountdowns();
-}
-
-function fallbackLimit(limit, weeklyLimit) {
-  const isFable = limit.key.startsWith("fable");
-  const effectiveResetAt = isFable
-    ? (weeklyLimit?.resetAt ?? null)
-    : limit.resetAt;
-  return {
-    key: limit.key,
-    label: limit.label,
-    depth: isFable ? 1 : 0,
-    parentKey: isFable ? "base.weekly" : null,
-    availability: limit.availability,
-    currentUsedPercent: limit.usedPercent,
-    headroomPercent:
-      limit.usedPercent === null ? null : 100 - limit.usedPercent,
-    windowDurationMinutes: limit.windowDurationMinutes,
-    resetAt: effectiveResetAt,
-    resetSource: effectiveResetAt === null ? null : "provider",
-    minutesUntilReset: isFable
-      ? (weeklyLimit?.minutesUntilReset ?? null)
-      : limit.minutesUntilReset,
-    points: [],
-    resetMarkers: [],
-    projection: {
-      status: "insufficient_history",
-      ratePercentPerHour: null,
-      rateBasis: null,
-      projectedFromUsedPercent: null,
-      projectedExhaustionAt: null,
-      projectedExhaustionRangeEndAt: null,
-      sampleCount: 0,
-      spanMinutes: 0,
-    },
-  };
 }
 
 function renderLiveFallback(snapshots) {
@@ -1980,6 +2319,23 @@ async function fetchDashboard(forceRefresh = false) {
     });
   }
 }
+
+restoreVendorFilters();
+vendorFilters.addEventListener("change", () => {
+  applyVendorFilters();
+  try {
+    localStorage.setItem(
+      VENDOR_FILTER_STORAGE_KEY,
+      JSON.stringify(
+        vendorCheckboxes
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => checkbox.value),
+      ),
+    );
+  } catch {
+    // Keep the current selection even if it cannot be saved.
+  }
+});
 
 rangeControls.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-periods]");

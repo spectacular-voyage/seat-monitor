@@ -39,6 +39,7 @@ import {
   type Scanner,
 } from "./services/scan-accounts.js";
 import { SnapshotCache } from "./services/snapshot-cache.js";
+import { withScanMemoryLog } from "./services/scan-memory.js";
 import { ScanScheduler } from "./services/scan-scheduler.js";
 import { isMainModule } from "./entry-point.js";
 import {
@@ -105,6 +106,7 @@ type DashboardAssets = {
   html: string;
   javascript: string;
   capacityOrder: string;
+  sessionApplicability: string;
   css: string;
 };
 
@@ -112,6 +114,7 @@ type DashboardAssetLoader = () => Promise<DashboardAssets>;
 
 export type ServerOptions = {
   scan?: Scanner;
+  scanConcurrency?: number;
   readClaudeResets?: () => Promise<ClaudeAccountResets[]>;
   readCodexResets?: () => Promise<CachedCodexResetOffers[]>;
   now?: () => Date;
@@ -134,16 +137,22 @@ export type ServerOptions = {
     instanceId: string;
     startedAt: string;
   };
+  quietProbeAccountAlias?: string;
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
-  const [html, javascript, capacityOrder, css] = await Promise.all([
-    readFile(new URL("./public/index.html", import.meta.url), "utf8"),
-    readFile(new URL("./public/app.js", import.meta.url), "utf8"),
-    readFile(new URL("./public/capacity-order.js", import.meta.url), "utf8"),
-    readFile(new URL("./public/styles.css", import.meta.url), "utf8"),
-  ]);
-  return { html, javascript, capacityOrder, css };
+  const [html, javascript, capacityOrder, sessionApplicability, css] =
+    await Promise.all([
+      readFile(new URL("./public/index.html", import.meta.url), "utf8"),
+      readFile(new URL("./public/app.js", import.meta.url), "utf8"),
+      readFile(new URL("./public/capacity-order.js", import.meta.url), "utf8"),
+      readFile(
+        new URL("./public/session-applicability.js", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("./public/styles.css", import.meta.url), "utf8"),
+    ]);
+  return { html, javascript, capacityOrder, sessionApplicability, css };
 }
 
 function requestIsAllowed(
@@ -218,7 +227,15 @@ export async function buildServer(
   );
 
   const now = options.now ?? (() => new Date());
-  const baseScan = options.scan ?? createDefaultScanner();
+  let pausedResetAccountAlias: string | null = null;
+  const baseScan =
+    options.scan ??
+    createDefaultScanner({
+      pausedAccountAlias: () => pausedResetAccountAlias,
+      ...(options.scanConcurrency === undefined
+        ? {}
+        : { concurrency: options.scanConcurrency }),
+    });
   const scan =
     options.history === undefined
       ? baseScan
@@ -227,6 +244,7 @@ export async function buildServer(
           history: options.history,
           source: "server",
           now,
+          excludedAccountAlias: () => pausedResetAccountAlias,
         });
   const dashboardAssetLoader =
     options.dashboardAssetLoader ?? loadDashboardAssets;
@@ -238,7 +256,7 @@ export async function buildServer(
   const readDashboardAssets = async (): Promise<DashboardAssets> =>
     assets ?? dashboardAssetLoader();
   const cache = new SnapshotCache({
-    scan,
+    scan: options.scan === undefined ? withScanMemoryLog(scan) : scan,
     freshnessMilliseconds:
       options.freshnessMilliseconds ?? DEFAULT_FRESHNESS_MILLISECONDS,
     now,
@@ -260,6 +278,14 @@ export async function buildServer(
                 .map((snapshot) => snapshot.accountAlias),
             ),
           now,
+          ...(options.quietProbeAccountAlias === undefined
+            ? {}
+            : {
+                quietProbeAccountAlias: options.quietProbeAccountAlias,
+                onQuietAccountChange: (accountAlias: string | null) => {
+                  pausedResetAccountAlias = accountAlias;
+                },
+              }),
         })
       : () => Promise.resolve([]));
   const readCodexResets =
@@ -350,6 +376,13 @@ export async function buildServer(
     return reply
       .type("text/javascript; charset=utf-8")
       .send(currentAssets.capacityOrder);
+  });
+  server.get("/session-applicability.js", async (_request, reply) => {
+    const currentAssets = await readDashboardAssets();
+    reply.header("Cache-Control", "no-store");
+    return reply
+      .type("text/javascript; charset=utf-8")
+      .send(currentAssets.sessionApplicability);
   });
   server.get("/styles.css", async (_request, reply) => {
     const currentAssets = await readDashboardAssets();
@@ -588,6 +621,7 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
   const server = await buildServer({
     ...selectedConfiguration,
     allowedHosts: settings.allowedHosts,
+    scanConcurrency: settings.scanConcurrency,
     reloadDashboardAssets: import.meta.url.endsWith("/server.ts"),
     history: createDefaultHistoryService(
       process.env,
@@ -599,6 +633,12 @@ async function runForegroundServer(instanceId?: string): Promise<void> {
       scanOnStartup: settings.scanOnStartup,
     },
     analytics: settings.dashboard,
+    ...(process.env.SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT === undefined
+      ? {}
+      : {
+          quietProbeAccountAlias:
+            process.env.SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT,
+        }),
     ...(instanceId === undefined
       ? {}
       : { lifecycle: { instanceId, startedAt } }),

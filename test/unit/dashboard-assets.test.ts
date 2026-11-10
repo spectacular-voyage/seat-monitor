@@ -70,7 +70,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain("file:// preview");
     expect(javascript).toContain("createCapacityMeter");
     expect(javascript).toContain("renderFleetThroughput");
-    expect(javascript).toContain("Claude total session burn");
+    expect(javascript).toContain("Claude total weekly burn");
     expect(javascript).toContain("Codex total primary burn");
     expect(javascript).not.toContain("average account consumption rate");
     expect(javascript).toContain("createThroughputLineGraph");
@@ -81,7 +81,7 @@ describe("dashboard assets", () => {
     expect(javascript).toContain('for (const platform of ["Claude", "Codex"])');
     expect(javascript).toContain("createCapacityLimitGroup");
     expect(javascript).toContain(
-      'compareFleetAccountsByWeeklyReset,\n} from "./capacity-order.js"',
+      'compareFleetAccountsByWeeklyReset,\n  readingIsStale,\n  toneForLimit,\n} from "./capacity-order.js"',
     );
     expect(javascript).toContain("compareAccountsBySessionUtilization");
     expect(javascript).toContain(
@@ -200,7 +200,7 @@ describe("dashboard assets", () => {
     expect(css).toContain("table-layout: fixed");
     expect(css).toContain("align-items: stretch");
     expect(css).toContain(".usage-series-label");
-    expect(javascript).toContain('"Claude account sessions"');
+    expect(javascript).toContain('"Claude account weekly quota"');
     expect(javascript).toContain('"Codex account primaries"');
     expect(javascript).toContain("throughput-usage");
     expect(css).not.toContain(".throughput-overlay");
@@ -217,8 +217,32 @@ describe("dashboard assets", () => {
     expect(css).toContain("font-size: clamp(1.2rem, 2.3vw, 1.875rem)");
   });
 
+  it("marks a reading older than 300 s STALE in the account card and the fleet row", () => {
+    expect(javascript).toContain("readingIsStale");
+    expect(javascript).toContain('element("span", "pill stale", "STALE")');
+    expect(javascript.match(/= staleReadingPill\(account\)/gu)).toHaveLength(2);
+    expect(css).toContain(".pill.stale");
+    expect(capacityOrderJavascript).toContain(
+      "export const READING_STALE_AFTER_SECONDS = 300;",
+    );
+  });
+
   it("keeps provider-controlled rendering on textContent", () => {
     expect(javascript).toContain("value.textContent = text");
     expect(javascript).not.toContain("innerHTML");
+  });
+
+  describe("a missing current quota reading (SEAT-MON-72, #74)", () => {
+    it("draws no meter fill for an unknown reading and styles the unknown tone", () => {
+      const meter = javascript.slice(
+        javascript.indexOf("function createCapacityMeter("),
+        javascript.indexOf("function createCapacityLimit("),
+      );
+      expect(meter).toContain("limit.currentUsedPercent !== null");
+      expect(meter).not.toContain("currentUsedPercent ?? 0");
+      expect(css).toContain(".capacity-fill.unknown");
+      expect(css).toContain(".unknown-text");
+      expect(css).toContain(".current-usage.unknown");
+    });
   });
 });

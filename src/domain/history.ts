@@ -26,11 +26,13 @@ export const historySeriesPointSchema = z
 export const projectionSchema = z
   .object({
     status: z.enum([
+      "not_applicable",
       "insufficient_history",
       "not_consuming",
       "already_exhausted",
       "exhausts_before_reset",
       "reset_before_exhaustion",
+      "reset_unconfirmed",
       "exhaustion_projected",
     ]),
     ratePercentPerHour: z.number().nonnegative().nullable(),
@@ -54,6 +56,7 @@ export const resetMarkerSchema = z
 
 export const analyticsLimitSchema = z
   .object({
+    applicability: z.literal("not_applicable").optional(),
     key: z.string().min(1),
     label: z.string().min(1),
     depth: z.union([z.literal(0), z.literal(1)]),
@@ -117,12 +120,45 @@ const fableRecommendationSchema = z
   })
   .strict();
 
+const fleetQuotaTotalSchema = z
+  .object({
+    platform: platformSchema,
+    accountCount: z.number().int().nonnegative(),
+    observedAt: isoInstantSchema,
+    currentUsedPercent: z.number().min(0).max(100).nullable(),
+    ratePercentPerHour: z.number().nonnegative().nullable(),
+    nextResetAt: isoInstantSchema.nullable(),
+    projectedExhaustionAt: isoInstantSchema.nullable(),
+    projectionEndAt: isoInstantSchema.nullable(),
+    projectionEndUsedPercent: z.number().min(0).max(100).nullable(),
+    status: z.enum([
+      "unavailable",
+      "insufficient_history",
+      "not_consuming",
+      "already_exhausted",
+      "exhaustion_projected",
+      "reset_before_exhaustion",
+      "beyond_horizon",
+    ]),
+    points: z.array(
+      z
+        .object({
+          observedAt: isoInstantSchema,
+          usedPercent: z.number().min(0).max(100).nullable(),
+          breakBefore: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 const fleetThroughputSchema = z
   .object({
     from: isoInstantSchema,
     to: isoInstantSchema,
     rateWindowMinutes: z.number().int().positive(),
     smoothingWindowMinutes: z.number().int().positive(),
+    totals: z.array(fleetQuotaTotalSchema),
     sessions: z.array(
       z
         .object({

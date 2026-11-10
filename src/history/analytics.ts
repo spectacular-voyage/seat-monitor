@@ -15,6 +15,7 @@ import {
   addCalendarDaysInTimeZone,
   minutesUntilReset,
 } from "../services/time.js";
+import { buildFleetQuotaTotals } from "./fleet-quota.js";
 import type { HistoryHealth } from "./service.js";
 import type {
   HistoryLimitSeries,
@@ -210,6 +211,26 @@ function latestEpoch(points: readonly HistorySeriesPoint[]): MeasuredPoint[] {
     }
   }
   return measured.slice(epochStart);
+}
+
+function observedDropAtOrAfter(
+  points: readonly HistorySeriesPoint[],
+  atMilliseconds: number,
+): boolean {
+  const measured = points
+    .filter((point): point is MeasuredPoint => point.usedPercent !== null)
+    .sort(
+      (left, right) =>
+        Date.parse(left.observedAt) - Date.parse(right.observedAt),
+    );
+  return measured.some((current, index) => {
+    const previous = measured[index - 1];
+    return (
+      previous !== undefined &&
+      Date.parse(current.observedAt) >= atMilliseconds &&
+      previous.usedPercent - current.usedPercent >= MATERIAL_DROP_PERCENT
+    );
+  });
 }
 
 function monotonicUsage(points: readonly MeasuredPoint[]): MeasuredPoint[] {
@@ -409,8 +430,29 @@ export function projectExhaustion(
     selected.rate,
   );
   const projectedExhaustionAt = new Date(exhaustionMilliseconds).toISOString();
-  const resetMilliseconds =
+  const reportedResetMilliseconds =
     effectiveResetAt === null ? null : Date.parse(effectiveResetAt);
+  // Instants only (UTC epoch milliseconds), never wall-clock strings, so a DST fallback hour cannot shift the comparison. A reset that is not later
+  // than the latest observation has already passed: relief is counted only once usage was actually seen to drop after it.
+  const pastResetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    reportedResetMilliseconds <= latestMilliseconds
+      ? reportedResetMilliseconds
+      : null;
+  const resetIsPast = pastResetMilliseconds !== null;
+  // Direct evidence only: a material usage drop observed at or after the reset, read from the whole measured series. The epoch boundary is not evidence, because
+  // epoch filtering by reset metadata can start a later epoch with no drop at all.
+  const resetConfirmed =
+    pastResetMilliseconds !== null &&
+    observedDropAtOrAfter(points, pastResetMilliseconds);
+  // A future reset is the only reset that can arrive before exhaustion; a confirmed past one has already happened and an unconfirmed one is not relief.
+  const resetMilliseconds =
+    reportedResetMilliseconds !== null &&
+    Number.isFinite(reportedResetMilliseconds) &&
+    !resetIsPast
+      ? reportedResetMilliseconds
+      : null;
   const baselineExhaustionMilliseconds =
     epochRate > 0
       ? projectedAt(latestMilliseconds, latest.usedPercent, epochRate)
@@ -424,7 +466,9 @@ export function projectExhaustion(
   return {
     status:
       resetMilliseconds === null
-        ? "exhaustion_projected"
+        ? resetIsPast && !resetConfirmed
+          ? "reset_unconfirmed"
+          : "exhaustion_projected"
         : exhaustionMilliseconds < resetMilliseconds
           ? "exhausts_before_reset"
           : "reset_before_exhaustion",
@@ -536,12 +580,12 @@ function downsample<T>(points: readonly T[]): T[] {
   return selected;
 }
 
-function canonicalSessionLimit(
+function canonicalThroughputLimit(
   account: HistoryAnalytics["accounts"][number],
 ): AnalyticsLimit | undefined {
   // Codex currently exposes `codex.primary` as its closest account-wide
   // consumption window even when the provider reports a weekly duration.
-  const key = account.platform === "Claude" ? "base.session" : "codex.primary";
+  const key = account.platform === "Claude" ? "base.weekly" : "codex.primary";
   return account.limits.find((limit) => limit.key === key);
 }
 
@@ -709,8 +753,8 @@ function buildFleetThroughput(
   },
 ): HistoryAnalytics["fleetThroughput"] {
   const selected = accounts.flatMap((account) => {
-    const limit = canonicalSessionLimit(account);
-    if (limit === undefined) {
+    const limit = canonicalThroughputLimit(account);
+    if (limit === undefined || limit.applicability === "not_applicable") {
       return [];
     }
     const history = series.find(
@@ -820,6 +864,13 @@ function buildFleetThroughput(
     to: new Date(options.toMilliseconds).toISOString(),
     rateWindowMinutes: THROUGHPUT_RATE_WINDOW_MINUTES,
     smoothingWindowMinutes: smoothingMinutes,
+    totals: buildFleetQuotaTotals(
+      accounts,
+      series,
+      fromMilliseconds,
+      options.toMilliseconds,
+      options.scanIntervalSeconds ?? 60,
+    ),
     sessions,
     vendors,
   };
@@ -832,12 +883,15 @@ function fableRecommendation(
     if (account.platform !== "Claude" || account.status !== "ok") {
       return [];
     }
-    const constraints = ["base.session", "base.weekly", "fable.weekly"]
+    const windows = ["base.session", "base.weekly", "fable.weekly"]
       .map((key) => account.limits.find((limit) => limit.key === key))
       .filter((limit): limit is AnalyticsLimit => limit !== undefined);
+    const constraints = windows.filter(
+      (limit) => limit.applicability !== "not_applicable",
+    );
     const fable = constraints.find((limit) => limit.key === "fable.weekly");
     if (
-      constraints.length !== 3 ||
+      windows.length !== 3 ||
       fable?.availability !== "available" ||
       constraints.some((limit) => limit.headroomPercent === null)
     ) {
@@ -960,6 +1014,16 @@ export function buildHistoryAnalytics(options: {
             snapshot.accountAlias.toLocaleLowerCase("en-US") &&
           series.platform === snapshot.platform,
       );
+      // A latest quota_unavailable snapshot means the CURRENT reading is unknown (SEAT-MON-72, #74): history stays chart history, but the
+      // current percentage, headroom, projection and risk must not be rebuilt from an older success.
+      // A latest UNAUTHORIZED snapshot (#84) is the same: the failed authentication supplied no current measurement, so an older success
+      // must not be revived as a current-looking reading, projection, risk rank or reset. Chart history stays.
+      const unauthorized =
+        snapshot.status === "error" && snapshot.error.code === "unauthorized";
+      const currentUnavailable =
+        (snapshot.status === "error" &&
+          snapshot.error.code === "quota_unavailable") ||
+        unauthorized;
       const limitKeys =
         reportRows.length > 0
           ? reportRows.map((row) => row.key)
@@ -974,6 +1038,16 @@ export function buildHistoryAnalytics(options: {
         }
         const isFable =
           snapshot.platform === "Claude" && key.startsWith("fable");
+        // A status-ok Claude snapshot whose session window is supported but UNKNOWN (PR 80, #82): the current reading, headroom, projection
+        // and reset are unknown too and must not be rebuilt from older history. Chart history and an actually observed 0 stay valid.
+        const sessionNotApplicable = row?.applicability === "not_applicable";
+        const sessionUnknown =
+          !sessionNotApplicable &&
+          snapshot.platform === "Claude" &&
+          key === "base.session" &&
+          snapshot.status === "ok" &&
+          row?.support === "available" &&
+          row.consumedPercent === null;
         const parent = reportRows.find(
           (candidate) => candidate.key === "base.weekly",
         );
@@ -982,25 +1056,35 @@ export function buildHistoryAnalytics(options: {
         const projectionResetAt = isFable
           ? (parent?.resetAt ?? null)
           : (row?.resetAt ?? points.at(-1)?.resetAt ?? null);
-        const reset = resolveReset({
-          currentResetAt: isFable
-            ? (parent?.resetAt ?? null)
-            : (row?.resetAt ?? null),
-          lastKnown: latestResetEvents.get(
-            seriesKey(snapshot.accountAlias, snapshot.platform, resetLimitKey),
-          ),
-          platform: snapshot.platform,
-          limitKey: resetLimitKey,
-          nowMilliseconds: options.nowMilliseconds,
-          timeZone: options.timeZone,
-        });
-        const windowDurationMinutes = isFable
-          ? (parent?.windowDurationMinutes ??
-            history?.points.at(-1)?.windowDurationMinutes ??
-            null)
-          : (row?.windowDurationMinutes ??
-            history?.points.at(-1)?.windowDurationMinutes ??
-            null);
+        const resetUnknown =
+          sessionUnknown || sessionNotApplicable || unauthorized;
+        const reset: ResolvedReset = resetUnknown
+          ? { resetAt: null, resetSource: null }
+          : resolveReset({
+              currentResetAt: isFable
+                ? (parent?.resetAt ?? null)
+                : (row?.resetAt ?? null),
+              lastKnown: latestResetEvents.get(
+                seriesKey(
+                  snapshot.accountAlias,
+                  snapshot.platform,
+                  resetLimitKey,
+                ),
+              ),
+              platform: snapshot.platform,
+              limitKey: resetLimitKey,
+              nowMilliseconds: options.nowMilliseconds,
+              timeZone: options.timeZone,
+            });
+        const windowDurationMinutes = sessionNotApplicable
+          ? null
+          : isFable
+            ? (parent?.windowDurationMinutes ??
+              history?.points.at(-1)?.windowDurationMinutes ??
+              null)
+            : (row?.windowDurationMinutes ??
+              history?.points.at(-1)?.windowDurationMinutes ??
+              null);
         const periodStartMilliseconds =
           options.periodMultiplier === undefined ||
           windowDurationMinutes === null
@@ -1041,19 +1125,26 @@ export function buildHistoryAnalytics(options: {
         return [
           {
             key,
+            ...(sessionNotApplicable
+              ? { applicability: "not_applicable" as const }
+              : {}),
             label: row?.label ?? history?.limit.label ?? key,
             depth: row?.depth ?? (isFable ? 1 : 0),
             parentKey: row?.parentKey ?? (isFable ? "base.weekly" : null),
             availability:
               row?.support ?? history?.limit.availability ?? "unsupported",
             currentUsedPercent:
-              row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null,
-            headroomPercent:
-              row?.headroomPercent ??
-              (points.at(-1)?.usedPercent === null ||
-              points.at(-1)?.usedPercent === undefined
+              currentUnavailable || sessionUnknown || sessionNotApplicable
                 ? null
-                : 100 - (points.at(-1)?.usedPercent ?? 100)),
+                : (row?.consumedPercent ?? points.at(-1)?.usedPercent ?? null),
+            headroomPercent:
+              currentUnavailable || sessionUnknown || sessionNotApplicable
+                ? null
+                : (row?.headroomPercent ??
+                  (points.at(-1)?.usedPercent === null ||
+                  points.at(-1)?.usedPercent === undefined
+                    ? null
+                    : 100 - (points.at(-1)?.usedPercent ?? 100))),
             windowDurationMinutes,
             resetAt: reset.resetAt,
             resetSource: reset.resetSource,
@@ -1067,7 +1158,14 @@ export function buildHistoryAnalytics(options: {
               : [...providerMarkers, ...inferredMarkers(points)].sort(
                   (left, right) => Date.parse(left.at) - Date.parse(right.at),
                 ),
-            projection: projectExhaustion(projectionPoints, projectionResetAt),
+            projection: sessionNotApplicable
+              ? {
+                  ...projectExhaustion([], null),
+                  status: "not_applicable" as const,
+                }
+              : currentUnavailable || sessionUnknown
+                ? projectExhaustion([], null)
+                : projectExhaustion(projectionPoints, projectionResetAt),
           },
         ];
       });

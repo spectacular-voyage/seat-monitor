@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
 
+import {
+  isolatedProcessGroup,
+  killProcessGroup,
+  reapProcessGroup,
+  trackProcessGroup,
+} from "./process-group.js";
+
 const MAX_OUTPUT_BYTES = 1_000_000;
 
 export class ProcessTimeoutError extends Error {
@@ -36,6 +43,7 @@ export type RunCommand = (options: {
   command: string;
   args: readonly string[];
   environment: NodeJS.ProcessEnv;
+  cwd?: string;
   timeoutMilliseconds: number;
 }) => Promise<CommandResult>;
 
@@ -80,9 +88,13 @@ export const runCommand: RunCommand = async (options) =>
   new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(options.command, [...options.args], {
       env: options.environment,
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      detached: isolatedProcessGroup,
     });
+
+    trackProcessGroup(child);
 
     let stdout = "";
     let stderr = "";
@@ -91,16 +103,20 @@ export const runCommand: RunCommand = async (options) =>
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killProcessGroup(child);
     }, options.timeoutMilliseconds);
 
     const append = (current: string, chunk: Buffer): string => {
-      const next = current + chunk.toString("utf8");
-      if (Buffer.byteLength(next, "utf8") > MAX_OUTPUT_BYTES) {
+      if (outputExceeded) return current;
+      if (
+        Buffer.byteLength(current, "utf8") + chunk.byteLength >
+        MAX_OUTPUT_BYTES
+      ) {
         outputExceeded = true;
-        child.kill("SIGKILL");
+        killProcessGroup(child);
+        return current;
       }
-      return next;
+      return current + chunk.toString("utf8");
     };
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -112,19 +128,22 @@ export const runCommand: RunCommand = async (options) =>
 
     child.once("error", (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
+      killProcessGroup(child);
       reject(new ProcessSpawnError(error));
     });
 
     child.once("close", (exitCode) => {
       clearTimeout(timer);
-      if (timedOut) {
-        reject(new ProcessTimeoutError());
-        return;
-      }
-      if (outputExceeded) {
-        reject(new ProcessOutputError());
-        return;
-      }
-      resolve({ exitCode, stdout, stderr });
+      void reapProcessGroup(child).then(() => {
+        if (timedOut) {
+          reject(new ProcessTimeoutError());
+          return;
+        }
+        if (outputExceeded) {
+          reject(new ProcessOutputError());
+          return;
+        }
+        resolve({ exitCode, stdout, stderr });
+      }, reject);
     });
   });

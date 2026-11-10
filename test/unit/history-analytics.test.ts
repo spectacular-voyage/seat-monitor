@@ -4,6 +4,7 @@ import {
   quotaSuccessSchema,
   type QuotaSnapshot,
 } from "../../src/domain/quota.js";
+import { buildCliForecast } from "../../src/history/cli-forecast.js";
 import {
   buildHistoryAnalytics,
   projectExhaustion,
@@ -94,7 +95,7 @@ function resetEvent(
   };
 }
 
-function accountSessionSeries(
+function accountThroughputSeries(
   accountAlias: string,
   platform: "Claude" | "Codex",
   key: string,
@@ -468,6 +469,100 @@ describe("historical quota analytics", () => {
     expect(session?.projection.status).toBe("exhausts_before_reset");
   });
 
+  describe("a latest quota_unavailable snapshot (SEAT-MON-72, #74)", () => {
+    const unavailable: QuotaSnapshot = {
+      accountAlias: "claude-ops@example.com",
+      platform: "Claude",
+      status: "error",
+      plan: null,
+      limits: [],
+      observedAt: new Date(nowMilliseconds).toISOString(),
+      error: {
+        code: "quota_unavailable",
+        message: "Claude /usage did not supply quota windows.",
+      },
+    };
+    const analyze = (
+      snapshots: QuotaSnapshot[],
+      history: HistoryLimitSeries[],
+    ) =>
+      buildHistoryAnalytics({
+        snapshots,
+        series: history,
+        resetEvents: [],
+        historyHealth: "ready",
+        nowMilliseconds,
+        fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+        toMilliseconds: nowMilliseconds,
+        requestedResolution: "raw",
+        timeZone: "America/Los_Angeles",
+      });
+
+    it("keeps earlier points as history but makes the current reading, headroom, projection and risk UNKNOWN", () => {
+      const rising = series("base.session", [60, 75, 90], resetAfter(300));
+      const analytics = analyze([unavailable], [rising]);
+      const session = analytics.accounts[0]?.limits.find(
+        (limit) => limit.key === "base.session",
+      );
+      expect(session?.points.map((candidate) => candidate.usedPercent)).toEqual(
+        [60, 75, 90],
+      );
+      expect(session?.currentUsedPercent).toBeNull();
+      expect(session?.headroomPercent).toBeNull();
+      expect(session?.projection.status).toBe("insufficient_history");
+      expect(session?.projection.projectedExhaustionAt).toBeNull();
+
+      const forecast = buildCliForecast(analytics);
+      const limit = forecast.accounts[0]?.limits.find(
+        (candidate) => candidate.key === "base.session",
+      );
+      expect(forecast.accounts[0]?.status).toBe("error");
+      expect(limit?.usedPercent).toBeNull();
+      expect(limit?.projectionStatus).toBe("insufficient_history");
+      expect(forecast.riskRanking).toEqual([]);
+    });
+
+    it("never turns earlier flat zero readings into a current 0% not_consuming", () => {
+      const flatZero = series("base.session", [0, 0, 0, 0], resetAfter(300));
+      const session = analyze([unavailable], [flatZero]).accounts[0]?.limits[0];
+      expect(session?.currentUsedPercent).toBeNull();
+      expect(session?.headroomPercent).toBeNull();
+      expect(session?.projection.status).not.toBe("not_consuming");
+    });
+
+    it("has no limits to show when there is no history at all", () => {
+      const analytics = analyze([unavailable], []);
+      expect(analytics.accounts[0]?.limits).toEqual([]);
+      expect(buildCliForecast(analytics).riskRanking).toEqual([]);
+    });
+
+    it("keeps a genuinely observed zero as 0% (control)", () => {
+      const observedZero = quotaSuccessSchema.parse({
+        accountAlias: "claude-ops@example.com",
+        platform: "Claude",
+        status: "ok",
+        plan: "max",
+        limits: [
+          {
+            key: "base.session",
+            label: "Current Session",
+            scope: "window",
+            availability: "available",
+            usedPercent: 0,
+            windowDurationMinutes: 300,
+            resetAt: resetAfter(300),
+          },
+        ],
+        observedAt: new Date(nowMilliseconds).toISOString(),
+      });
+      const flatZero = series("base.session", [0, 0, 0, 0], resetAfter(300));
+      const session = analyze([observedZero], [flatZero]).accounts[0]
+        ?.limits[0];
+      expect(session?.currentUsedPercent).toBe(0);
+      expect(session?.headroomPercent).toBe(100);
+    });
+  });
+
   it("treats Fable as nested capacity without converting its percentage", () => {
     const snapshot = claudeSnapshot({
       sessionUsed: 20,
@@ -746,26 +841,38 @@ describe("historical quota analytics", () => {
     expect(result.scanIntervalSeconds).toBe(60);
   });
 
-  it("builds account session overlays and total vendor burn series", () => {
+  it("builds account weekly quota overlays and total vendor burn series", () => {
     const claudeOne = claudeSnapshot({ alias: "claude-one@example.com" });
     const claudeTwo = claudeSnapshot({ alias: "claude-two@example.com" });
     const codex = codexSnapshot("codex-one@example.com");
     const result = buildHistoryAnalytics({
       snapshots: [claudeOne, claudeTwo, codex],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-one@example.com",
           "Claude",
           "base.session",
+          [0, 40, 80],
+        ),
+        accountThroughputSeries(
+          "claude-one@example.com",
+          "Claude",
+          "fable.weekly",
+          [0, 30, 60],
+        ),
+        accountThroughputSeries(
+          "claude-one@example.com",
+          "Claude",
+          "base.weekly",
           [0, 10, 15],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-two@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [0, 20, 30],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "codex-one@example.com",
           "Codex",
           "codex.primary",
@@ -786,10 +893,12 @@ describe("historical quota analytics", () => {
       expect.objectContaining({
         accountAlias: "claude-one@example.com",
         platform: "Claude",
+        limitKey: "base.weekly",
       }),
       expect.objectContaining({
         accountAlias: "claude-two@example.com",
         platform: "Claude",
+        limitKey: "base.weekly",
       }),
       expect.objectContaining({
         accountAlias: "codex-one@example.com",
@@ -832,16 +941,16 @@ describe("historical quota analytics", () => {
     const result = buildHistoryAnalytics({
       snapshots: [active, idle],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-active@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [56, 60, 59, 64],
         ),
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-idle@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [0, 0, 0, 0],
         ),
       ],
@@ -864,15 +973,15 @@ describe("historical quota analytics", () => {
     expect(rates?.map((point) => point.accountCount)).toEqual([2, 2, 2]);
   });
 
-  it("does not calculate a fleet rate across a session reset", () => {
+  it("does not calculate a fleet rate across a weekly reset", () => {
     const snapshot = claudeSnapshot({ alias: "claude-reset@example.com" });
     const result = buildHistoryAnalytics({
       snapshots: [snapshot],
       series: [
-        accountSessionSeries(
+        accountThroughputSeries(
           "claude-reset@example.com",
           "Claude",
-          "base.session",
+          "base.weekly",
           [80, 90, 5, 10],
         ),
       ],
@@ -894,10 +1003,10 @@ describe("historical quota analytics", () => {
 
   it("honors a provider reset when the usage drop is small", () => {
     const snapshot = claudeSnapshot({ alias: "claude-low-reset@example.com" });
-    const resetSeries = accountSessionSeries(
+    const resetSeries = accountThroughputSeries(
       "claude-low-reset@example.com",
       "Claude",
-      "base.session",
+      "base.weekly",
       [3, 4, 1, 2],
     );
     const previousReset = minutesBeforeNow(20);
@@ -937,10 +1046,10 @@ describe("historical quota analytics", () => {
       const result = buildHistoryAnalytics({
         snapshots: [snapshot],
         series: [
-          accountSessionSeries(
+          accountThroughputSeries(
             "claude-scale@example.com",
             "Claude",
-            "base.session",
+            "base.weekly",
             [0, 5, 10],
           ),
         ],
@@ -1011,5 +1120,331 @@ describe("historical quota analytics", () => {
     expect(adjustment).toEqual([
       { at: "2026-09-02T19:00:00.000Z", kind: "adjustment" },
     ]);
+  });
+});
+
+describe("an unknown latest Claude session (PR 80, #82)", () => {
+  const historicalReset = resetAfter(300);
+  const withSession = (
+    snapshot: QuotaSnapshot,
+    session: { usedPercent: number | null },
+  ): QuotaSnapshot => {
+    if (snapshot.status !== "ok") {
+      throw new TypeError("Expected a successful quota fixture.");
+    }
+    return quotaSuccessSchema.parse({
+      ...snapshot,
+      limits: snapshot.limits.map((limit) =>
+        limit.key === "base.session"
+          ? {
+              ...limit,
+              usedPercent: session.usedPercent,
+              resetAt: session.usedPercent === null ? null : limit.resetAt,
+            }
+          : limit,
+      ),
+    });
+  };
+  const analyze = (snapshot: QuotaSnapshot) =>
+    buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        series("base.session", [60, 75, 90], historicalReset),
+        series("base.weekly", [30, 40, 50], resetAfter(6_700)),
+      ],
+      resetEvents: [resetEvent("base.session", historicalReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+  const limitOf = (
+    analytics: ReturnType<typeof analyze>,
+    key: string,
+  ): (typeof analytics.accounts)[number]["limits"][number] | undefined =>
+    analytics.accounts[0]?.limits.find((limit) => limit.key === key);
+
+  it("leaves the session reading, headroom, forecast and reset UNKNOWN while chart history and the weekly forecast stay", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: null }),
+    );
+    const session = limitOf(analytics, "base.session");
+    const weekly = limitOf(analytics, "base.weekly");
+
+    expect(session?.points.map((candidate) => candidate.usedPercent)).toEqual([
+      60, 75, 90,
+    ]);
+    expect(session?.currentUsedPercent).toBeNull();
+    expect(session?.headroomPercent).toBeNull();
+    expect(session?.projection.status).toBe("insufficient_history");
+    expect(session?.projection.ratePercentPerHour).toBeNull();
+    expect(session?.projection.projectedExhaustionAt).toBeNull();
+    expect(session?.resetAt).toBeNull();
+    expect(session?.resetSource).toBeNull();
+    expect(session?.minutesUntilReset).toBeNull();
+
+    expect(weekly?.currentUsedPercent).toBe(89);
+    expect(weekly?.projection.status).not.toBe("insufficient_history");
+    expect(weekly?.resetAt).not.toBeNull();
+  });
+
+  it("gives a known session the normal forecast and reset from the same history (positive control)", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: 90 }),
+    );
+    const session = limitOf(analytics, "base.session");
+
+    expect(session?.currentUsedPercent).toBe(90);
+    expect(session?.headroomPercent).toBe(10);
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+    expect(session?.projection.projectedExhaustionAt).not.toBeNull();
+    expect(session?.resetAt).not.toBeNull();
+  });
+
+  it("treats an actually observed zero session as a valid current reading, not unknown", () => {
+    const analytics = analyze(
+      withSession(claudeSnapshot(), { usedPercent: 0 }),
+    );
+    const session = limitOf(analytics, "base.session");
+
+    expect(session?.currentUsedPercent).toBe(0);
+    expect(session?.headroomPercent).toBe(100);
+    expect(session?.resetAt).not.toBeNull();
+  });
+
+  it("does not turn an unknown session into a CLI forecast risk or exhaustion estimate", () => {
+    const forecast = buildCliForecast(
+      analyze(withSession(claudeSnapshot(), { usedPercent: null })),
+    );
+    const limit = forecast.accounts[0]?.limits.find(
+      (candidate) => candidate.key === "base.session",
+    );
+
+    expect(limit?.usedPercent).toBeNull();
+    expect(limit?.projectionStatus).toBe("insufficient_history");
+    expect(
+      forecast.riskRanking.some((entry) =>
+        JSON.stringify(entry).includes("base.session"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("a latest unauthorized snapshot (#84)", () => {
+  const historicalReset = resetAfter(300);
+  const unauthorized: QuotaSnapshot = {
+    accountAlias: "claude-ops@example.com",
+    platform: "Claude",
+    status: "error",
+    plan: null,
+    limits: [],
+    observedAt: new Date(nowMilliseconds).toISOString(),
+    error: { code: "unauthorized", message: "Claude is not logged in." },
+  };
+  const analyze = (snapshot: QuotaSnapshot) =>
+    buildHistoryAnalytics({
+      snapshots: [snapshot],
+      series: [
+        series("base.session", [60, 75, 90], historicalReset),
+        series("base.weekly", [30, 40, 50], resetAfter(6_700)),
+      ],
+      resetEvents: [resetEvent("base.session", historicalReset)],
+      historyHealth: "ready",
+      nowMilliseconds,
+      fromMilliseconds: nowMilliseconds - 24 * 60 * 60_000,
+      toMilliseconds: nowMilliseconds,
+      requestedResolution: "raw",
+      timeZone: "America/Los_Angeles",
+    });
+  const limitOf = (
+    analytics: ReturnType<typeof analyze>,
+    key: string,
+  ): (typeof analytics.accounts)[number]["limits"][number] | undefined =>
+    analytics.accounts[0]?.limits.find((limit) => limit.key === key);
+
+  it("keeps the chart points and the error but leaves every current reading, projection and reset UNKNOWN", () => {
+    const analytics = analyze(unauthorized);
+    expect(analytics.accounts[0]?.status).toBe("error");
+    expect(analytics.accounts[0]?.error?.code).toBe("unauthorized");
+    for (const key of ["base.session", "base.weekly"]) {
+      const limit = limitOf(analytics, key);
+      expect(limit?.points.length).toBeGreaterThan(0);
+      expect(limit?.currentUsedPercent).toBeNull();
+      expect(limit?.headroomPercent).toBeNull();
+      expect(limit?.projection.status).toBe("insufficient_history");
+      expect(limit?.projection.ratePercentPerHour).toBeNull();
+      expect(limit?.projection.projectedExhaustionAt).toBeNull();
+      expect(limit?.resetAt).toBeNull();
+      expect(limit?.resetSource).toBeNull();
+      expect(limit?.minutesUntilReset).toBeNull();
+    }
+  });
+
+  it("gives the CLI forecast no rate, exhaustion or risk entry for the account", () => {
+    const forecast = buildCliForecast(analyze(unauthorized));
+    for (const limit of forecast.accounts[0]?.limits ?? []) {
+      expect(limit.usedPercent).toBeNull();
+      expect(limit.ratePercentPerHour).toBeNull();
+      expect(limit.projectedExhaustionAt).toBeNull();
+      expect(limit.projectionStatus).toBe("insufficient_history");
+    }
+    expect(forecast.accounts[0]?.limits.length).toBeGreaterThan(0);
+    expect(forecast.riskRanking).toEqual([]);
+  });
+
+  it("leaves an ok latest snapshot with the same history unchanged (positive control)", () => {
+    const analytics = analyze(claudeSnapshot({ sessionUsed: 90 }));
+    const session = limitOf(analytics, "base.session");
+    expect(session?.currentUsedPercent).not.toBeNull();
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+    expect(session?.resetAt).not.toBeNull();
+    expect(
+      buildCliForecast(analytics).riskRanking.some((entry) =>
+        JSON.stringify(entry).includes("base.session"),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a genuinely observed zero as 0% when the latest snapshot is ok (control)", () => {
+    const session = limitOf(
+      analyze(claudeSnapshot({ sessionUsed: 0 })),
+      "base.session",
+    );
+    expect(session?.currentUsedPercent).toBe(0);
+    expect(session?.headroomPercent).toBe(100);
+  });
+
+  it("still preserves the historical projection boundary after a non-authentication scan error (control)", () => {
+    const timeout: QuotaSnapshot = {
+      ...unauthorized,
+      error: { code: "timeout", message: "Claude usage check timed out." },
+    };
+    const session = limitOf(analyze(timeout), "base.session");
+    expect(session?.resetAt).toBe(historicalReset);
+    expect(session?.projection.status).toBe("exhausts_before_reset");
+  });
+});
+
+describe("a reset in the past is relief only once usage was seen to drop (seat-monitor #88)", () => {
+  // 2026-11-01 01:10 PDT is 08:10Z; the clocks fall back at 02:00 PDT, so 01:30 occurs twice (PDT 08:30Z and PST 09:30Z).
+  const rising = (resetAt: string, endAt: string): HistorySeriesPoint[] => {
+    const end = Date.parse(endAt);
+    return [
+      point(new Date(end - 60 * 60_000).toISOString(), 70, resetAt),
+      point(new Date(end - 30 * 60_000).toISOString(), 79, resetAt),
+      point(endAt, 88, resetAt),
+    ];
+  };
+
+  it("reports a past reset with no observed drop as unconfirmed and projects exhaustion as if no reset happened", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const unconfirmed = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      resetAt,
+    );
+    const noReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      null,
+    );
+
+    expect(unconfirmed.status).toBe("reset_unconfirmed");
+    expect(unconfirmed.status).not.toBe("reset_before_exhaustion");
+    expect(unconfirmed.projectedExhaustionAt).not.toBeNull();
+    expect(unconfirmed.projectedExhaustionAt).toBe(
+      noReset.projectedExhaustionAt,
+    );
+    expect(noReset.status).toBe("exhaustion_projected");
+  });
+
+  it("treats a past reset followed by an observed usage drop as confirmed", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const result = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 90, resetAt),
+        point("2026-11-01T08:15:00.000Z", 5, resetAt),
+        point("2026-11-01T08:30:00.000Z", 10, resetAt),
+        point("2026-11-01T08:45:00.000Z", 15, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("exhaustion_projected");
+    expect(result.sampleCount).toBe(3);
+  });
+
+  it("does not read a later epoch created by changed or null reset metadata as a usage drop", () => {
+    // The 08:00 sample carries no resetAt, so epoch filtering drops it and the epoch starts after the reset with usage only rising: no drop was observed.
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const noDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 70, null),
+        point("2026-11-01T08:15:00.000Z", 80, resetAt),
+        point("2026-11-01T08:30:00.000Z", 85, resetAt),
+        point("2026-11-01T08:45:00.000Z", 90, resetAt),
+      ],
+      resetAt,
+    );
+    // Beside it: the same shape with an actual drop after the reset is confirmed.
+    const actualDrop = projectExhaustion(
+      [
+        point("2026-11-01T08:00:00.000Z", 90, null),
+        point("2026-11-01T08:15:00.000Z", 5, resetAt),
+        point("2026-11-01T08:30:00.000Z", 10, resetAt),
+        point("2026-11-01T08:45:00.000Z", 15, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(noDrop.status).toBe("reset_unconfirmed");
+    expect(actualDrop.status).toBe("exhaustion_projected");
+  });
+
+  it("does not count a drop that happened before the reset as confirmation", () => {
+    const resetAt = "2026-11-01T08:10:00.000Z";
+    const result = projectExhaustion(
+      [
+        point("2026-11-01T07:00:00.000Z", 90, resetAt),
+        point("2026-11-01T07:20:00.000Z", 5, resetAt),
+        point("2026-11-01T07:50:00.000Z", 20, resetAt),
+        point("2026-11-01T08:20:00.000Z", 35, resetAt),
+      ],
+      resetAt,
+    );
+
+    expect(result.status).toBe("reset_unconfirmed");
+  });
+
+  it("keeps a future reset as relief or a warning exactly as before", () => {
+    const resetAt = "2026-11-01T13:10:00.000Z";
+    const farReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      resetAt,
+    );
+    const nearReset = projectExhaustion(
+      rising(resetAt, "2026-11-01T08:19:21.000Z"),
+      "2026-11-01T08:50:00.000Z",
+    );
+
+    expect(farReset.status).toBe("exhausts_before_reset");
+    expect(nearReset.status).toBe("reset_before_exhaustion");
+  });
+
+  it("compares instants across the DST fallback, not wall-clock strings", () => {
+    // Observed 01:05 PST (09:05Z) is a LATER instant than the reset at 01:10 PDT (08:10Z), though its wall-clock time reads earlier.
+    const pastByInstant = projectExhaustion(
+      rising("2026-11-01T08:10:00.000Z", "2026-11-01T09:05:00.000Z"),
+      "2026-11-01T08:10:00.000Z",
+    );
+    // Observed 01:19 PDT (08:19Z) is an EARLIER instant than a reset at 01:10 PST (09:10Z), though its wall-clock time reads later.
+    const futureByInstant = projectExhaustion(
+      rising("2026-11-01T09:10:00.000Z", "2026-11-01T08:19:21.000Z"),
+      "2026-11-01T09:10:00.000Z",
+    );
+
+    expect(pastByInstant.status).toBe("reset_unconfirmed");
+    expect(futureByInstant.status).toBe("exhausts_before_reset");
+    expect(futureByInstant.status).not.toBe("reset_unconfirmed");
   });
 });

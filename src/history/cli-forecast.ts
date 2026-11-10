@@ -40,6 +40,9 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
     error: account.error,
     limits: account.limits.map((limit): CliForecastLimit => ({
       key: limit.key,
+      ...(limit.applicability === undefined
+        ? {}
+        : { applicability: limit.applicability }),
       label: limit.label,
       usedPercent: limit.currentUsedPercent,
       ratePercentPerHour: limit.projection.ratePercentPerHour,
@@ -65,7 +68,8 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
           (limit) =>
             limit.projectionStatus === "already_exhausted" ||
             limit.projectionStatus === "exhausts_before_reset" ||
-            limit.projectionStatus === "exhaustion_projected",
+            limit.projectionStatus === "exhaustion_projected" ||
+            limit.projectionStatus === "reset_unconfirmed",
         )
         .map((limit) => ({ account, limit })),
     )

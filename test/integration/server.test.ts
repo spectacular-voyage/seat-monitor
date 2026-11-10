@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   publicQuotaArraySchema,
@@ -25,6 +28,7 @@ const assets = {
   html: "<!doctype html><title>Test</title>",
   javascript: "void 0;",
   capacityOrder: "export const order = 1;",
+  sessionApplicability: "export const applicable = true;",
   css: "body {}",
 };
 
@@ -100,6 +104,7 @@ describe("HTTP server", () => {
       allowedHosts: [],
       scanIntervalSeconds: 60,
       scanOnStartup: true,
+      scanConcurrency: 4,
       port: 3_000,
       useDefaultPortFallback: true,
       history: {
@@ -228,6 +233,60 @@ describe("HTTP server", () => {
     }
   });
 
+  it("accepts one configured quiet-probe profile without contacting the provider before verification", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seat-monitor-quiet-"));
+    const priorConfig = process.env.SEAT_MONITOR_CONFIG;
+    const priorProfiles = process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR;
+    try {
+      const configPath = join(directory, "accounts.json");
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          accounts: [
+            {
+              accountAlias: "Claude_Quiet",
+              platform: "Claude",
+              auth: {
+                type: "claude_profile",
+                profile: "quiet",
+                expectedEmail: "quiet@example.com",
+              },
+            },
+          ],
+        }),
+      );
+      process.env.SEAT_MONITOR_CONFIG = configPath;
+      process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR = directory;
+      const server = await buildServer({
+        assets,
+        quietProbeAccountAlias: "Claude_Quiet",
+      });
+      try {
+        const response = await server.inject({
+          method: "GET",
+          url: "/api/claude-resets",
+          headers: allowedHeaders,
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual([
+          expect.objectContaining({
+            accountAlias: "Claude_Quiet",
+            status: "unavailable",
+          }),
+        ]);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      if (priorConfig === undefined) delete process.env.SEAT_MONITOR_CONFIG;
+      else process.env.SEAT_MONITOR_CONFIG = priorConfig;
+      if (priorProfiles === undefined)
+        delete process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR;
+      else process.env.SEAT_MONITOR_CLAUDE_PROFILES_DIR = priorProfiles;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("serves Codex reset credits with expiry", async () => {
     const server = await buildServer({
       assets,
@@ -281,6 +340,7 @@ describe("HTTP server", () => {
       html: "<!doctype html><title>Version 1</title>",
       javascript: "window.version = 1;",
       capacityOrder: "export const version = 1;",
+      sessionApplicability: "export const applicableVersion = 1;",
       css: "body { --version: 1; }",
     };
     const dashboardAssetLoader = vi.fn(() => Promise.resolve(currentAssets));
@@ -291,7 +351,13 @@ describe("HTTP server", () => {
     });
 
     const first = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -299,10 +365,17 @@ describe("HTTP server", () => {
       html: "<!doctype html><title>Version 2</title>",
       javascript: "window.version = 2;",
       capacityOrder: "export const version = 2;",
+      sessionApplicability: "export const applicableVersion = 2;",
       css: "body { --version: 2; }",
     };
     const second = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -312,12 +385,14 @@ describe("HTTP server", () => {
       "<!doctype html><title>Version 1</title>",
       "window.version = 1;",
       "export const version = 1;",
+      "export const applicableVersion = 1;",
       "body { --version: 1; }",
     ]);
     expect(second.map((response) => response.body)).toEqual([
       "<!doctype html><title>Version 2</title>",
       "window.version = 2;",
       "export const version = 2;",
+      "export const applicableVersion = 2;",
       "body { --version: 2; }",
     ]);
     expect(
@@ -325,7 +400,27 @@ describe("HTTP server", () => {
         (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
-    expect(dashboardAssetLoader).toHaveBeenCalledTimes(8);
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(10);
+  });
+
+  it("serves the actual shared applicability module imported by the dashboard", async () => {
+    const server = await buildServer({ scan: () => Promise.resolve([]) });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/session-applicability.js",
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/javascript");
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.body).toContain(
+        "export function createNotApplicableSession",
+      );
+      expect(response.body).toContain("export function fallbackLimit");
+    } finally {
+      await server.close();
+    }
   });
 
   it("keeps supplied packaged dashboard assets cached", async () => {
@@ -335,7 +430,13 @@ describe("HTTP server", () => {
     });
 
     const responses = await Promise.all(
-      ["/", "/app.js", "/capacity-order.js", "/styles.css"].map((url) =>
+      [
+        "/",
+        "/app.js",
+        "/capacity-order.js",
+        "/session-applicability.js",
+        "/styles.css",
+      ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
     );
@@ -345,6 +446,7 @@ describe("HTTP server", () => {
       assets.html,
       assets.javascript,
       assets.capacityOrder,
+      assets.sessionApplicability,
       assets.css,
     ]);
     expect(

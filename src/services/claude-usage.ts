@@ -1,4 +1,6 @@
+import { zonedFormatter } from "./zoned-formatter.js";
 import type { QuotaLimit } from "../domain/quota.js";
+import { verifiedUltraSession } from "./claude-ultra.js";
 
 const monthIndexes: Readonly<Record<string, number>> = {
   Jan: 0,
@@ -25,16 +27,7 @@ type DateParts = {
 };
 
 function partsAt(instantMilliseconds: number, timeZone: string): DateParts {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
+  const formatter = zonedFormatter(timeZone);
   const values = new Map<string, number>(
     formatter
       .formatToParts(new Date(instantMilliseconds))
@@ -184,9 +177,34 @@ function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+/**
+ * The native /usage output was readable but supplies none of the quota windows this monitor reads (for example the
+ * usage-advice report that lists request and MCP shares). The quota is UNKNOWN, not zero and not an invalid response.
+ */
+export class ClaudeUsageUnavailableError extends Error {
+  constructor() {
+    super("Claude usage output carries no session or week quota windows.");
+    this.name = "ClaudeUsageUnavailableError";
+  }
+}
+
+/** The session window when /usage omitted its line: supported but unknown, carrying no quota value. */
+function unknownSessionLimit(): QuotaLimit {
+  return {
+    key: "base.session",
+    label: "Current Session",
+    scope: "window",
+    availability: "available",
+    usedPercent: null,
+    windowDurationMinutes: null,
+    resetAt: null,
+  };
+}
+
 export function parseClaudeUsageOutput(
   output: string,
   nowMilliseconds: number,
+  ultraPlan = false,
 ): QuotaLimit[] {
   const limits: QuotaLimit[] = [];
 
@@ -219,8 +237,19 @@ export function parseClaudeUsageOutput(
     });
   }
 
+  if (limits.length === 0) {
+    // No quota window line of either supported format: the command no longer supplies them. Advice percentages are never read as quota.
+    throw new ClaudeUsageUnavailableError();
+  }
   if (!limits.some((limit) => limit.key === "base.session")) {
-    throw new TypeError("Claude usage output is missing the session window.");
+    // Omission alone remains UNKNOWN. Only an independently known Ultra plan plus
+    // a complete quota section establishes N/A; neither state fabricates 0%.
+    limits.unshift({
+      ...unknownSessionLimit(),
+      ...(verifiedUltraSession(output, limits, ultraPlan)
+        ? { applicability: "not_applicable" as const }
+        : {}),
+    });
   }
   if (!limits.some((limit) => limit.key === "fable.weekly")) {
     limits.push({

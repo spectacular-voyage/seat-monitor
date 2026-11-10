@@ -1,4 +1,15 @@
 export const LONGEST_QUOTA_PERIOD_MINUTES = 10_080;
+// A reading older than this (now - observedAt) is shown as STALE: the ruled maximum acceptable reading age.
+export const READING_STALE_AFTER_SECONDS = 300;
+
+export function readingIsStale(observedAt, nowMilliseconds) {
+  const observed = Date.parse(observedAt);
+  return (
+    Number.isFinite(observed) &&
+    Number.isFinite(nowMilliseconds) &&
+    nowMilliseconds - observed > READING_STALE_AFTER_SECONDS * 1_000
+  );
+}
 
 function compareAccountIdentity(left, right) {
   return (
@@ -51,4 +62,22 @@ export function compareFleetAccountsByWeeklyReset(left, right) {
     return leftReset - rightReset;
   }
   return compareAccountIdentity(left, right);
+}
+
+export function toneForLimit(limit) {
+  // A missing CURRENT reading (for example quota_unavailable) is neither healthy nor a zero: it is neutral and unknown (SEAT-MON-72, #74).
+  if (limit.currentUsedPercent === null) {
+    return "unknown";
+  }
+  if (
+    limit.projection.status === "already_exhausted" ||
+    limit.projection.status === "exhausts_before_reset" ||
+    (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 90)
+  ) {
+    return "danger";
+  }
+  if (limit.currentUsedPercent !== null && limit.currentUsedPercent >= 75) {
+    return "warning";
+  }
+  return "healthy";
 }

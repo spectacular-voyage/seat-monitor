@@ -1,0 +1,7 @@
+You are currently using your subscription to power your Claude Code usage
+
+Current week (all models): 61% used · resets Sep 3, 10am (America/Los_Angeles)
+Current week (Fable): 72% used · resets Sep 3, 10am (America/Los_Angeles)
+
+What's contributing to your limits usage?
+Approximate, based on local sessions on this machine — does not include other devices or claude.ai.
