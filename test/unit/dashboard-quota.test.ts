@@ -68,6 +68,13 @@ describe("dashboard quota reader", () => {
     expect(snapshotFromDashboardRow(legacy)).toEqual(claudeSnapshot());
   });
 
+  it("treats a failed server lookup as no server", async () => {
+    const read = createDashboardQuotaReader({
+      findServer: () => Promise.reject(new Error("unreadable state")),
+    });
+    await expect(read(configured)).resolves.toEqual({ kind: "none" });
+  });
+
   it("finds nothing to read when no server is running", async () => {
     const read = createDashboardQuotaReader({
       findServer: () => Promise.resolve(null),
@@ -80,6 +87,13 @@ describe("dashboard quota reader", () => {
 
   it.each([
     ["an HTTP failure", () => new Response(null, { status: 503 }), "HTTP 503"],
+    [
+      "a refused connection",
+      () => {
+        throw new TypeError("fetch failed");
+      },
+      "no quota response",
+    ],
     [
       "an unparseable payload",
       () => Response.json({ accounts: [] }),

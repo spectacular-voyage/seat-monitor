@@ -15,6 +15,7 @@ import {
   type QuotaSnapshot,
 } from "../../src/domain/quota.js";
 import { HistoryService } from "../../src/history/service.js";
+import { cachedReading } from "../helpers/quota-fixtures.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
 import { PACKAGE_VERSION } from "../../src/version.js";
 
@@ -507,6 +508,49 @@ describe("CLI", () => {
       expect(JSON.parse(stdout.read())).toMatchObject({
         source: { kind: "scan" },
       });
+    });
+
+    it("marks a cached reading stale in forecast JSON, text and Markdown", async () => {
+      const run = async (flags: string[]) => {
+        const stdout = writer();
+        await runCli(flags, {
+          readDashboard: () =>
+            Promise.resolve({
+              kind: "server",
+              url: serverUrl,
+              snapshots: [cachedReading(fixture(42, observedAt), observedAt)],
+            }),
+          loadAccounts: configured,
+          createHistory: memoryHistory,
+          now,
+          timeZone: "UTC",
+          stdout: stdout.sink,
+          stderr: writer().sink,
+        });
+        return stdout.read();
+      };
+      expect(
+        cliForecastSchema.parse(
+          JSON.parse(await run(["--forecast", "--json"])),
+        ),
+      ).toMatchObject({
+        source: { kind: "server", url: serverUrl },
+        accounts: [
+          { stale: true, cachedAt: observedAt, ageSeconds: 40, status: "ok" },
+        ],
+      });
+      const text = await run(["--forecast"]);
+      expect(text).toContain(
+        `FROM — dashboard server ${serverUrl} (its latest scheduled scan)`,
+      );
+      expect(text).toContain(
+        `  STALE — cached reading from ${observedAt}, 40s old; usage may be higher now`,
+      );
+      const markdown = await run(["--forecast", "--format", "md"]);
+      expect(markdown).toContain(`FROM — dashboard server ${serverUrl}`);
+      expect(markdown).toContain(
+        `**STALE — cached reading from ${observedAt}, 40s old; usage may be higher now**`,
+      );
     });
 
     it("rejects --scan with --version or --init-config", async () => {
