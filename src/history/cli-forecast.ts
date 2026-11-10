@@ -2,8 +2,15 @@ import {
   cliForecastSchema,
   type CliForecast,
   type CliForecastLimit,
+  type QuotaReadSource,
 } from "../domain/cli-forecast.js";
+import { readingFreshness } from "../domain/freshness.js";
 import type { HistoryAnalytics } from "../domain/history.js";
+
+/** The key `cachedAccounts` entries use for one account. */
+export function forecastAccountKey(platform: string, accountAlias: string) {
+  return `${platform}\0${accountAlias}`;
+}
 
 function minutesToExhaustion(
   projectedExhaustionAt: string | null,
@@ -18,7 +25,14 @@ function minutesToExhaustion(
   );
 }
 
-export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
+export function buildCliForecast(
+  analytics: HistoryAnalytics,
+  options: {
+    source?: QuotaReadSource;
+    // Accounts whose current reading is a cached fallback (forecastAccountKey).
+    cachedAccounts?: ReadonlySet<string>;
+  } = {},
+): CliForecast {
   const nowMilliseconds = Date.parse(analytics.generatedAt);
   const fleetBurn = analytics.fleetThroughput.vendors.map((vendor) => {
     const latest = vendor.points.at(-1);
@@ -36,6 +50,18 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
     platform: account.platform,
     plan: account.plan,
     observedAt: account.observedAt,
+    ...(account.status === "ok"
+      ? readingFreshness(
+          account.observedAt,
+          options.cachedAccounts?.has(
+            forecastAccountKey(account.platform, account.accountAlias),
+          ) ?? false,
+          nowMilliseconds,
+        )
+      : {
+          ...readingFreshness(account.observedAt, false, nowMilliseconds),
+          stale: false,
+        }),
     status: account.status,
     error: account.error,
     limits: account.limits.map((limit): CliForecastLimit => ({
@@ -100,6 +126,7 @@ export function buildCliForecast(analytics: HistoryAnalytics): CliForecast {
   return cliForecastSchema.parse({
     apiVersion: 1,
     generatedAt: analytics.generatedAt,
+    source: options.source ?? { kind: "scan" },
     historyHealth: analytics.historyHealth,
     riskRanking,
     fleetBurn,

@@ -1,4 +1,21 @@
 import type { CliForecast, CliForecastLimit } from "../domain/cli-forecast.js";
+import { formatAge } from "./quota-format.js";
+
+type ForecastAccount = CliForecast["accounts"][number];
+
+function staleNote(account: ForecastAccount): string | null {
+  if (!account.stale) {
+    return null;
+  }
+  const kind = account.cachedAt === null ? "reading" : "cached reading";
+  return `STALE — ${kind} from ${account.observedAt}, ${formatAge(account.ageSeconds)} old; usage may be higher now`;
+}
+
+function sourceLine(forecast: CliForecast): string | null {
+  return forecast.source.kind === "server"
+    ? `FROM — dashboard server ${forecast.source.url} (its latest scheduled scan)`
+    : null;
+}
 
 function value(value: number | null, suffix = ""): string {
   return value === null ? "—" : `${String(value)}${suffix}`;
@@ -63,8 +80,10 @@ function reset(limit: CliForecastLimit): string {
 
 export function renderTextForecast(forecast: CliForecast): string {
   const burnBasis = fleetBurnBasis(forecast);
+  const source = sourceLine(forecast);
   const lines = [
     `FORECAST — ${forecast.generatedAt}`,
+    ...(source === null ? [] : [source]),
     `HISTORY — ${forecast.historyHealth}`,
     "",
     `FLEET BURN${burnBasis.length === 0 ? "" : ` — ${burnBasis}`}`,
@@ -93,6 +112,10 @@ export function renderTextForecast(forecast: CliForecast): string {
       "",
       `${account.platform.toLocaleUpperCase("en-US")} ${account.accountAlias}`,
     );
+    const stale = staleNote(account);
+    if (stale !== null) {
+      lines.push(`  ${stale}`);
+    }
     if (account.status === "error") {
       lines.push(
         `  ERROR ${account.error?.code ?? "unknown"} — ${account.error?.message ?? ""}`,
@@ -108,9 +131,11 @@ export function renderTextForecast(forecast: CliForecast): string {
 }
 
 export function renderMarkdownForecast(forecast: CliForecast): string {
+  const source = sourceLine(forecast);
   const lines = [
     `# FORECAST — ${forecast.generatedAt}`,
     "",
+    ...(source === null ? [] : [source, ""]),
     `History: **${forecast.historyHealth}**`,
     "",
     "## Fleet burn",
@@ -138,9 +163,11 @@ export function renderMarkdownForecast(forecast: CliForecast): string {
     lines.push("");
   }
   for (const account of forecast.accounts) {
+    const stale = staleNote(account);
     lines.push(
       `## ${account.platform.toLocaleUpperCase("en-US")} ${account.accountAlias}`,
       "",
+      ...(stale === null ? [] : [`**${stale}**`, ""]),
       "| Limit | Consumed | Rate | Basis | Outlook | Reset | Samples | Span |",
       "| --- | ---: | ---: | --- | --- | --- | ---: | ---: |",
     );

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { runCli } from "../../src/cli.js";
 import type { LoadedClaudeProfileAccount } from "../../src/config/accounts.js";
+import { cliQuotaSchema } from "../../src/domain/cli-forecast.js";
 import {
   createClaudeHttpUsageReader,
   parseClaudeHttpUsage,
@@ -256,6 +258,88 @@ describe("HTTP-first provider compatibility", () => {
     } finally {
       stderr.mockRestore();
     }
+  });
+
+  describe("a 429 answered from the cached reading is never presented as current", () => {
+    // The real reader is throttled and falls back to the native cache, which
+    // was fetched at 2026-08-30T00:20Z (session resets 02:40, week 09-03).
+    function throttledCli(now: string) {
+      const { result } = provider(
+        createClaudeHttpUsageReader({
+          accessToken: () => Promise.resolve("token"),
+          nativeCache: () => Promise.resolve(nativeCache()),
+          fetch: () => Promise.resolve(new Response(null, { status: 429 })),
+        }),
+      );
+      const clock = () => new Date(now);
+      return async (format: string[]) => {
+        let stdout = "";
+        const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+        try {
+          await runCli(format, {
+            scan: async () => [
+              await result.scan(account, { ...context, now: clock }),
+            ],
+            now: clock,
+            timeZone: "UTC",
+            stdout: { write: (chunk: string) => (stdout += chunk) },
+            stderr: { write: () => true },
+          });
+          expect(stderr.mock.calls.flat().join("")).toContain(
+            '"event":"claude-usage-cached","httpStatus":429',
+          );
+        } finally {
+          stderr.mockRestore();
+        }
+        return stdout;
+      };
+    }
+
+    it("marks the cached row stale with its age in JSON, text and Markdown", async () => {
+      const run = throttledCli("2026-08-30T00:30:00.000Z");
+      const json = cliQuotaSchema.parse(JSON.parse(await run(["--json"])));
+      expect(json.accounts[0]).toMatchObject({
+        status: "ok",
+        stale: true,
+        cachedAt: "2026-08-30T00:20:00.000Z",
+        observedAt: "2026-08-30T00:20:00.000Z",
+        ageSeconds: 600,
+      });
+      const text = await run([]);
+      expect(text).toContain(
+        "STALE — cached reading from 2026-08-30 00:20 UTC, 10m old",
+      );
+      // A lower-bound percentage never recommends the account for use.
+      expect(text).toMatch(/^USE: {3}no account has/mu);
+      expect(text).toMatch(/^WATCH: .*STALE 10m old/mu);
+      expect(await run(["--format", "md"])).toContain(
+        "**STALE — cached reading from 2026-08-30 00:20 UTC, 10m old",
+      );
+    });
+
+    it("reports windows that reset since the cached reading as unknown", async () => {
+      const run = throttledCli("2026-09-07T00:30:00.000Z");
+      const json = cliQuotaSchema.parse(JSON.parse(await run(["--json"])));
+      const reading = json.accounts[0];
+      expect(reading).toMatchObject({ stale: true, ageSeconds: 691_800 });
+      expect(
+        reading?.status === "ok" &&
+          reading.limits.map(({ key, usedPercent, resetAt }) => ({
+            key,
+            usedPercent,
+            resetAt,
+          })),
+      ).toEqual([
+        { key: "base.session", usedPercent: null, resetAt: null },
+        { key: "base.weekly", usedPercent: null, resetAt: null },
+        { key: "fable.weekly", usedPercent: null, resetAt: null },
+      ]);
+      const text = await run([]);
+      expect(text).toContain(
+        "cached reading from 2026-08-30 00:20 UTC, 8d old",
+      );
+      expect(text).not.toContain("89%");
+    });
   });
 });
 

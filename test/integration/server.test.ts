@@ -479,6 +479,34 @@ describe("HTTP server", () => {
       throw new TypeError("Expected a successful public snapshot.");
     }
     expect(firstSnapshot.limits[0]?.minutesUntilReset).toBe(1);
+    expect(firstSnapshot).toMatchObject({
+      ageSeconds: 0,
+      stale: false,
+      cachedAt: null,
+    });
+  });
+
+  it("publishes a throttled cached fallback as stale with its cache time", async () => {
+    const cached = snapshot();
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([{ ...cached, source: "cache" }]),
+      now: () => new Date("2026-08-26T18:00:30.000Z"),
+    });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/quota",
+      headers: allowedHeaders,
+    });
+    await server.close();
+
+    expect(publicQuotaArraySchema.parse(response.json())[0]).toMatchObject({
+      observedAt: cached.observedAt,
+      ageSeconds: 30,
+      stale: true,
+      cachedAt: cached.observedAt,
+    });
   });
 
   it("coalesces simultaneous forced refresh requests", async () => {

@@ -84,6 +84,9 @@ export const quotaSuccessSchema = z
     plan: z.string().min(1).nullable(),
     limits: z.array(quotaLimitSchema).min(1),
     resetOffers: z.array(resetOfferSchema).nullable().optional(),
+    // Present only when the provider refused a live read (for example HTTP 429)
+    // and the reading is a retained cached fallback; observedAt is its cache time.
+    source: z.literal("cache").optional(),
   })
   .strict();
 
@@ -106,9 +109,19 @@ export const publicQuotaLimitSchema = quotaLimitSchema.extend({
   minutesUntilReset: z.number().int().nonnegative().nullable(),
 });
 
-export const publicQuotaSuccessSchema = quotaSuccessSchema.extend({
-  limits: z.array(publicQuotaLimitSchema).min(1),
-});
+export const publicQuotaSuccessSchema = quotaSuccessSchema
+  .omit({ source: true })
+  .extend({
+    limits: z.array(publicQuotaLimitSchema).min(1),
+    // Whole seconds from observedAt to when this response was generated.
+    ageSeconds: z.number().int().nonnegative(),
+    // A cached fallback, or a reading older than the stale threshold: not a
+    // current measurement. Usage only rises within a window, so a stale
+    // percentage is a lower bound until that window resets.
+    stale: z.boolean(),
+    // When the reading is a cached fallback, the time it was cached; else null.
+    cachedAt: isoInstantSchema.nullable(),
+  });
 
 export const publicQuotaSnapshotSchema = z.discriminatedUnion("status", [
   publicQuotaSuccessSchema,

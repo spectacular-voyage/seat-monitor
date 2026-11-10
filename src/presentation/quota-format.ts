@@ -1,5 +1,6 @@
 import type {
   QuotaReport,
+  QuotaReportAccount,
   QuotaReportRow,
   ResetDisplay,
   UseRecommendation,
@@ -52,9 +53,48 @@ function zonedParts(milliseconds: number, timeZone: string): ZonedParts {
   };
 }
 
-export function formatReportTimestamp(report: QuotaReport): string {
-  const parts = zonedParts(report.nowMilliseconds, report.timeZone);
+function formatInstant(milliseconds: number, timeZone: string): string {
+  const parts = zonedParts(milliseconds, timeZone);
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
+}
+
+export function formatReportTimestamp(report: QuotaReport): string {
+  return formatInstant(report.nowMilliseconds, report.timeZone);
+}
+
+/** A compact reading age: 45s, 12m, 5h 3m, 7d 21h. */
+export function formatAge(ageSeconds: number): string {
+  if (ageSeconds < 60) {
+    return `${String(ageSeconds)}s`;
+  }
+  const minutes = Math.floor(ageSeconds / 60);
+  if (minutes < 48 * 60) {
+    return formatDuration(minutes);
+  }
+  const days = Math.floor(minutes / 1_440);
+  const hours = Math.floor((minutes % 1_440) / 60);
+  return hours === 0
+    ? `${String(days)}d`
+    : `${String(days)}d ${String(hours)}h`;
+}
+
+/** Why an account's numbers are not current, or null when they are. */
+export function formatStaleNote(
+  account: QuotaReportAccount,
+  report: QuotaReport,
+): string | null {
+  if (!account.stale || account.ageSeconds === null) {
+    return null;
+  }
+  const kind = account.cachedAt === null ? "reading" : "cached reading";
+  return `STALE — ${kind} from ${formatInstant(Date.parse(account.observedAt), report.timeZone)}, ${formatAge(account.ageSeconds)} old; usage may be higher now`;
+}
+
+/** The text and Markdown note for a report read from a dashboard server. */
+export function formatSourceLine(report: QuotaReport): string | null {
+  return report.source.kind === "server"
+    ? `FROM:  dashboard server ${report.source.url} (its latest scheduled scan)`
+    : null;
 }
 
 export function formatPercent(value: number): string {
@@ -190,6 +230,9 @@ export function formatWatchLine(
   }
   if (recommendation.constantSuspect) {
     clauses.push("CONSTANT-SUSPECT");
+  }
+  if (recommendation.staleAgeSeconds !== null) {
+    clauses.push(`STALE ${formatAge(recommendation.staleAgeSeconds)} old`);
   }
   const reset = formatReset(
     recommendation.resetAt,

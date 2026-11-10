@@ -15,6 +15,7 @@ import {
   type QuotaSnapshot,
 } from "../../src/domain/quota.js";
 import { HistoryService } from "../../src/history/service.js";
+import { cachedReading } from "../helpers/quota-fixtures.js";
 import { openSqliteHistoryStore } from "../../src/history/sqlite-store.js";
 import { PACKAGE_VERSION } from "../../src/version.js";
 
@@ -368,6 +369,200 @@ describe("CLI", () => {
         cliQuotaSchema.parse(JSON.parse(stdout.read())).accounts,
       ),
     ).toHaveLength(1);
+  });
+
+  describe("a running dashboard server (stale CLI quota fix)", () => {
+    const observedAt = "2026-08-26T18:00:00.000Z";
+    const now = () => new Date("2026-08-26T18:00:40.000Z");
+    const serverUrl = "http://127.0.0.1:3000/";
+    const configured = () => [
+      { accountAlias: "Codex_Work", platform: "Codex" as const },
+    ];
+    function memoryHistory() {
+      return new HistoryService(
+        openSqliteHistoryStore(
+          {
+            filePath: ":memory:",
+            rawRetentionHours: 6,
+            hourlyRetentionDays: 30,
+            retentionDays: 365,
+          },
+          { now },
+        ),
+      );
+    }
+    function recordedScans(history: HistoryService) {
+      return history.listScans({
+        fromMilliseconds: Date.parse("2026-08-26T17:00:00.000Z"),
+        toMilliseconds: Date.parse("2026-08-26T19:00:00.000Z"),
+        limit: 10,
+      });
+    }
+
+    it("reads the server's latest scan instead of scanning or recording", async () => {
+      const history = memoryHistory();
+      const createScanner = vi.fn(() => () => Promise.resolve([fixture(7)]));
+      const stdout = writer();
+      const exitCode = await runCli(["--json"], {
+        createScanner,
+        readDashboard: () =>
+          Promise.resolve({
+            kind: "server",
+            url: serverUrl,
+            snapshots: [fixture(42, observedAt)],
+          }),
+        loadAccounts: configured,
+        history,
+        now,
+        stdout: stdout.sink,
+        stderr: writer().sink,
+      });
+
+      expect(exitCode).toBe(0);
+      expect(createScanner).not.toHaveBeenCalled();
+      expect(cliQuotaSchema.parse(JSON.parse(stdout.read()))).toMatchObject({
+        source: { kind: "server", url: serverUrl },
+        accounts: [
+          {
+            accountAlias: "Codex_Work",
+            observedAt,
+            ageSeconds: 40,
+            stale: false,
+            cachedAt: null,
+            limits: [expect.objectContaining({ usedPercent: 42 })],
+          },
+        ],
+      });
+      expect(recordedScans(history)).toHaveLength(0);
+      history.close();
+    });
+
+    it("names the server in text output and keeps a direct scan's text unchanged", async () => {
+      const fromServer = writer();
+      await runCli([], {
+        readDashboard: () =>
+          Promise.resolve({
+            kind: "server",
+            url: serverUrl,
+            snapshots: [fixture(42, observedAt)],
+          }),
+        loadAccounts: configured,
+        createHistory: memoryHistory,
+        now,
+        timeZone: "UTC",
+        stdout: fromServer.sink,
+        stderr: writer().sink,
+      });
+      expect(fromServer.read()).toContain(
+        `FROM:  dashboard server ${serverUrl} (its latest scheduled scan)`,
+      );
+      const direct = writer();
+      await runCli([], {
+        scan: () => Promise.resolve([fixture(42, observedAt)]),
+        now,
+        timeZone: "UTC",
+        stdout: direct.sink,
+        stderr: writer().sink,
+      });
+      expect(direct.read()).not.toContain("FROM:");
+    });
+
+    it("scans directly with --scan even when a server is running", async () => {
+      const readDashboard = vi.fn();
+      const stdout = writer();
+      await runCli(["--scan", "--json"], {
+        createScanner: () => () => Promise.resolve([fixture(7, observedAt)]),
+        readDashboard,
+        createHistory: memoryHistory,
+        now,
+        stdout: stdout.sink,
+        stderr: writer().sink,
+      });
+      expect(readDashboard).not.toHaveBeenCalled();
+      expect(cliQuotaSchema.parse(JSON.parse(stdout.read()))).toMatchObject({
+        source: { kind: "scan" },
+        accounts: [{ limits: [expect.objectContaining({ usedPercent: 7 })] }],
+      });
+    });
+
+    it("says why it scans directly when the server cannot be used", async () => {
+      const stdout = writer();
+      const stderr = writer();
+      await runCli(["--json"], {
+        createScanner: () => () => Promise.resolve([fixture(7, observedAt)]),
+        readDashboard: () =>
+          Promise.resolve({
+            kind: "unusable",
+            url: serverUrl,
+            reason: "it reports a different account set",
+          }),
+        loadAccounts: configured,
+        createHistory: memoryHistory,
+        now,
+        stdout: stdout.sink,
+        stderr: stderr.sink,
+      });
+      expect(stderr.read()).toBe(
+        `Dashboard server ${serverUrl} was not used because it reports a different account set; scanning providers directly.\n`,
+      );
+      expect(JSON.parse(stdout.read())).toMatchObject({
+        source: { kind: "scan" },
+      });
+    });
+
+    it("marks a cached reading stale in forecast JSON, text and Markdown", async () => {
+      const run = async (flags: string[]) => {
+        const stdout = writer();
+        await runCli(flags, {
+          readDashboard: () =>
+            Promise.resolve({
+              kind: "server",
+              url: serverUrl,
+              snapshots: [cachedReading(fixture(42, observedAt), observedAt)],
+            }),
+          loadAccounts: configured,
+          createHistory: memoryHistory,
+          now,
+          timeZone: "UTC",
+          stdout: stdout.sink,
+          stderr: writer().sink,
+        });
+        return stdout.read();
+      };
+      expect(
+        cliForecastSchema.parse(
+          JSON.parse(await run(["--forecast", "--json"])),
+        ),
+      ).toMatchObject({
+        source: { kind: "server", url: serverUrl },
+        accounts: [
+          { stale: true, cachedAt: observedAt, ageSeconds: 40, status: "ok" },
+        ],
+      });
+      const text = await run(["--forecast"]);
+      expect(text).toContain(
+        `FROM — dashboard server ${serverUrl} (its latest scheduled scan)`,
+      );
+      expect(text).toContain(
+        `  STALE — cached reading from ${observedAt}, 40s old; usage may be higher now`,
+      );
+      const markdown = await run(["--forecast", "--format", "md"]);
+      expect(markdown).toContain(`FROM — dashboard server ${serverUrl}`);
+      expect(markdown).toContain(
+        `**STALE — cached reading from ${observedAt}, 40s old; usage may be higher now**`,
+      );
+    });
+
+    it("rejects --scan with --version or --init-config", async () => {
+      for (const flags of [
+        ["--scan", "--version"],
+        ["--scan", "--init-config"],
+      ]) {
+        expect(
+          await runCli(flags, { stdout: writer().sink, stderr: writer().sink }),
+        ).toBe(2);
+      }
+    });
   });
 
   it("records an injected scan when an explicit history service is supplied", async () => {

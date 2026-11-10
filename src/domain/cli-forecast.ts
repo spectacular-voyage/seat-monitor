@@ -9,6 +9,13 @@ import {
 
 const isoInstantSchema = z.iso.datetime({ offset: true });
 
+// Where the CLI's quota came from: a running dashboard server's latest
+// scheduled scan, or its own direct provider scan.
+export const quotaReadSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("server"), url: z.url() }).strict(),
+  z.object({ kind: z.literal("scan") }).strict(),
+]);
+
 const cliForecastLimitSchema = z
   .object({
     applicability: z.literal("not_applicable").optional(),
@@ -34,6 +41,9 @@ const cliForecastAccountSchema = z
     platform: platformSchema,
     plan: z.string().min(1).nullable(),
     observedAt: isoInstantSchema,
+    ageSeconds: z.number().int().nonnegative(),
+    stale: z.boolean(),
+    cachedAt: isoInstantSchema.nullable(),
     status: z.enum(["ok", "error"]),
     error: quotaErrorSchema.nullable(),
     limits: z.array(cliForecastLimitSchema),
@@ -71,6 +81,7 @@ export const cliQuotaSchema = z
   .object({
     apiVersion: z.literal(1),
     generatedAt: isoInstantSchema,
+    source: quotaReadSourceSchema,
     historyHealth: historyHealthSchema,
     accounts: publicQuotaArraySchema,
   })
@@ -83,4 +94,5 @@ export const cliForecastSchema = cliQuotaSchema.extend({
 });
 
 export type CliForecast = z.infer<typeof cliForecastSchema>;
+export type QuotaReadSource = z.infer<typeof quotaReadSourceSchema>;
 export type CliForecastLimit = z.infer<typeof cliForecastLimitSchema>;
