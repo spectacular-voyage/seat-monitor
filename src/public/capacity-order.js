@@ -18,28 +18,51 @@ function compareAccountIdentity(left, right) {
   );
 }
 
-export function sessionUtilizationPercent(account) {
-  // Keep this definition in step with the account-wide Session series used by
-  // history analytics. Codex Primary orders the trailing Codex group.
-  const key = account.platform === "Claude" ? "base.session" : "codex.primary";
+function limitUsedPercent(account, key) {
   const usedPercent = account.limits.find(
     (limit) => limit.key === key,
   )?.currentUsedPercent;
   return Number.isFinite(usedPercent) ? usedPercent : Number.NEGATIVE_INFINITY;
 }
 
-export function compareAccountsBySessionUtilization(left, right) {
+export function sessionUtilizationPercent(account) {
+  // Keep this definition in step with the account-wide Session series used by
+  // history analytics. Codex Primary orders the trailing Codex group.
+  return limitUsedPercent(
+    account,
+    account.platform === "Claude" ? "base.session" : "codex.primary",
+  );
+}
+
+export function weeklyUtilizationPercent(account) {
+  // Keep this definition in step with the canonical weekly limit used by fleet
+  // throughput: Codex reports its account-wide week as Codex Primary.
+  return limitUsedPercent(
+    account,
+    account.platform === "Claude" ? "base.weekly" : "codex.primary",
+  );
+}
+
+function compareAccountsByUtilization(left, right, utilizationPercent) {
   const leftIsCodex = left.platform === "Codex";
   const rightIsCodex = right.platform === "Codex";
   if (leftIsCodex !== rightIsCodex) {
     return leftIsCodex ? 1 : -1;
   }
-  const leftUsed = sessionUtilizationPercent(left);
-  const rightUsed = sessionUtilizationPercent(right);
+  const leftUsed = utilizationPercent(left);
+  const rightUsed = utilizationPercent(right);
   if (leftUsed !== rightUsed) {
     return rightUsed - leftUsed;
   }
   return compareAccountIdentity(left, right);
+}
+
+export function compareAccountsBySessionUtilization(left, right) {
+  return compareAccountsByUtilization(left, right, sessionUtilizationPercent);
+}
+
+export function compareAccountsByWeeklyUtilization(left, right) {
+  return compareAccountsByUtilization(left, right, weeklyUtilizationPercent);
 }
 
 export function weeklyResetTimestamp(account) {

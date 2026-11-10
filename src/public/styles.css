@@ -1111,12 +1111,26 @@ button:focus-visible,
 }
 
 .limit-heading {
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+
+.limit-identity {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
 }
 
 .limit-name {
   margin-bottom: 4px;
   font-size: 0.93rem;
+}
+
+.limit-identity .limit-name {
+  margin-bottom: 0;
 }
 
 .limit-reset {
@@ -1136,30 +1150,15 @@ button:focus-visible,
   text-align: right;
 }
 
-.usage-value,
-.usage-caption {
-  display: block;
-}
-
 .usage-value {
+  display: block;
   font-size: 1.22rem;
-}
-
-.usage-divider {
-  color: #6f7771;
 }
 
 .usage-series-label {
   font-size: 0.58em;
   font-weight: 700;
   letter-spacing: 0.02em;
-}
-
-.usage-caption {
-  margin-top: 2px;
-  color: #7f8781;
-  font-size: 0.67rem;
-  text-transform: uppercase;
 }
 
 .current-usage.healthy .usage-value {
@@ -1181,20 +1180,21 @@ button:focus-visible,
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 12px;
+  align-items: baseline;
+  gap: 4px 16px;
   color: #8b948d;
-  font-size: 0.68rem;
+  font-size: 0.73rem;
 }
 
 .legend-item {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
 }
 
 .legend-swatch {
   width: 18px;
+  align-self: center;
   height: 3px;
   border-radius: 99px;
   background: #8fd3ab;
@@ -1206,6 +1206,7 @@ button:focus-visible,
 
 .legend-value {
   color: #d6dad6;
+  font-size: 1.22rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1323,25 +1324,6 @@ button:focus-visible,
 .chart-tooltip-account,
 .chart-tooltip-time {
   display: block;
-}
-
-.compact-history .chart-legend {
-  display: none;
-}
-
-.compact-history .usage-primary-value::before,
-.compact-history .usage-overlay-value::before {
-  display: inline-block;
-  width: 12px;
-  height: 3px;
-  margin-right: 5px;
-  background: #8fd3ab;
-  vertical-align: middle;
-  content: "";
-}
-
-.compact-history .usage-overlay-value::before {
-  background: #d8ac76;
 }
 
 .compact-history .limit-metrics th,
