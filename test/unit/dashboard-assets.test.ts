@@ -37,6 +37,7 @@ describe("dashboard assets", () => {
     expect(html).toContain('id="range-controls"');
     expect(html).toContain('id="account-order-controls"');
     expect(html).toContain('data-account-order="session"');
+    expect(html).toContain('data-account-order="weekly"');
     expect(html).toContain('data-account-order="weekly-reset"');
     expect(html).toContain('data-periods="0.5"');
     expect(html).toContain('data-periods="10"');
@@ -84,10 +85,16 @@ describe("dashboard assets", () => {
       'compareFleetAccountsByWeeklyReset,\n  readingIsStale,\n  toneForLimit,\n} from "./capacity-order.js"',
     );
     expect(javascript).toContain("compareAccountsBySessionUtilization");
+    expect(javascript).toContain("compareAccountsByWeeklyUtilization");
     expect(javascript).toContain(
       "[...accounts].sort(compareFleetAccountsByWeeklyReset)",
     );
-    expect(javascript).toContain('accountHistoryOrder === "weekly-reset"');
+    expect(javascript).toContain(
+      '"weekly-reset": compareFleetAccountsByWeeklyReset',
+    );
+    expect(javascript).toContain(
+      "ACCOUNT_HISTORY_COMPARATORS[accountHistoryOrder]",
+    );
     expect(javascript).toContain("data-account-order");
     expect(javascript).toContain("latestAnalyticsPayload");
     expect(capacityOrderJavascript).toContain(
@@ -166,9 +173,13 @@ describe("dashboard assets", () => {
     expect(javascript).toContain(
       'stackedHistoryMedia.addEventListener("change"',
     );
-    expect(javascript).toContain("usage-overlay-value");
     expect(javascript).toContain('"usage-series-label", " all"');
-    expect(javascript).toContain('"usage-series-label", " fable"');
+    expect(javascript).toContain(
+      "heading.append(createChartLegend([limit, ...overlays]))",
+    );
+    expect(javascript).not.toContain("usage-overlay-value");
+    expect(javascript).not.toContain('"usage-caption", "used"');
+    expect(css).not.toContain(".compact-history .chart-legend");
     expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(css).toContain("grid-template-columns: minmax(0, 1fr) minmax(260px");

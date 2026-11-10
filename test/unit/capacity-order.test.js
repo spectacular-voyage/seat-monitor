@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   compareAccountsBySessionUtilization,
+  compareAccountsByWeeklyUtilization,
   compareFleetAccountsByWeeklyReset,
   READING_STALE_AFTER_SECONDS,
   readingIsStale,
   sessionUtilizationPercent,
   toneForLimit,
   weeklyResetTimestamp,
+  weeklyUtilizationPercent,
 } from "../../src/public/capacity-order.js";
 
 function account(accountAlias, platform, resetAt) {
@@ -31,6 +33,19 @@ function sessionAccount(accountAlias, platform, usedPercent) {
     limits: [
       {
         key: platform === "Claude" ? "base.session" : "codex.primary",
+        currentUsedPercent: usedPercent,
+      },
+    ],
+  };
+}
+
+function weeklyAccount(accountAlias, platform, usedPercent) {
+  return {
+    accountAlias,
+    platform,
+    limits: [
+      {
+        key: platform === "Claude" ? "base.weekly" : "codex.primary",
         currentUsedPercent: usedPercent,
       },
     ],
@@ -102,6 +117,51 @@ describe("Per-account history ordering", () => {
         .sort(compareAccountsBySessionUtilization)
         .map(({ platform, accountAlias }) => `${platform}:${accountAlias}`),
     ).toEqual(["Claude:alpha", "Claude:zeta", "Codex:beta"]);
+  });
+
+  it("orders Claude weekly utilization high to low and keeps Codex last", () => {
+    const accounts = [
+      weeklyAccount("missing", "Claude", null),
+      weeklyAccount("low", "Claude", 12),
+      weeklyAccount("codex-low", "Codex", 20),
+      weeklyAccount("high", "Claude", 71),
+      weeklyAccount("codex-high", "Codex", 84),
+    ];
+
+    expect(weeklyUtilizationPercent(accounts[0])).toBe(
+      Number.NEGATIVE_INFINITY,
+    );
+    expect(
+      accounts
+        .sort(compareAccountsByWeeklyUtilization)
+        .map(({ accountAlias }) => accountAlias),
+    ).toEqual(["high", "low", "missing", "codex-high", "codex-low"]);
+  });
+
+  it("orders weekly utilization by the weekly limit, not the session limit", () => {
+    const claudeAccount = (accountAlias, sessionUsed, weeklyUsed) => ({
+      accountAlias,
+      platform: "Claude",
+      limits: [
+        { key: "base.session", currentUsedPercent: sessionUsed },
+        { key: "base.weekly", currentUsedPercent: weeklyUsed },
+      ],
+    });
+    const accounts = [
+      claudeAccount("session-heavy", 90, 10),
+      claudeAccount("week-heavy", 5, 60),
+    ];
+    const order = (compare) =>
+      [...accounts].sort(compare).map(({ accountAlias }) => accountAlias);
+
+    expect(order(compareAccountsByWeeklyUtilization)).toEqual([
+      "week-heavy",
+      "session-heavy",
+    ]);
+    expect(order(compareAccountsBySessionUtilization)).toEqual([
+      "session-heavy",
+      "week-heavy",
+    ]);
   });
 });
 

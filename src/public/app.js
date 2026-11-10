@@ -1,6 +1,7 @@
 import {
   LONGEST_QUOTA_PERIOD_MINUTES,
   compareAccountsBySessionUtilization,
+  compareAccountsByWeeklyUtilization,
   compareFleetAccountsByWeeklyReset,
   readingIsStale,
   toneForLimit,
@@ -19,6 +20,11 @@ const RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const VENDOR_RATE_COLOR_CLASSES = {
   Claude: "throughput-color-claude",
   Codex: "throughput-color-codex",
+};
+const ACCOUNT_HISTORY_COMPARATORS = {
+  session: compareAccountsBySessionUtilization,
+  weekly: compareAccountsByWeeklyUtilization,
+  "weekly-reset": compareFleetAccountsByWeeklyReset,
 };
 
 const accountCards = document.querySelector("#account-cards");
@@ -1286,7 +1292,7 @@ function createChartLegend(limits) {
       element("span", "legend-label", limit.label),
       element(
         "strong",
-        "legend-value",
+        `legend-value ${toneForLimit(limit)}-text`,
         formatPercent(limit.currentUsedPercent),
       ),
     );
@@ -1356,7 +1362,7 @@ function createLimit(
     `limit ${limit.depth === 1 ? "nested-limit" : ""}`,
   );
   const heading = element("div", "limit-heading");
-  const identity = element("div");
+  const identity = element("div", "limit-identity");
   identity.append(element("h4", "limit-name", limit.label));
   const reset = element(
     "p",
@@ -1381,31 +1387,22 @@ function createLimit(
     reset.append(time);
   }
   identity.append(reset);
-  const usage = element("div", `current-usage ${toneForLimit(limit)}`);
-  const usageValue = element("strong", "usage-value");
-  const primaryUsage = element("span", "usage-primary-value");
-  primaryUsage.append(
-    element("span", "", formatPercent(limit.currentUsedPercent)),
-    element("span", "usage-series-label", " all"),
-  );
-  usageValue.append(primaryUsage);
-  for (const overlay of overlays) {
-    const overlayUsage = element(
-      "span",
-      `usage-overlay-value ${toneForLimit(overlay)}-text`,
-    );
-    overlayUsage.append(
-      element("span", "", formatPercent(overlay.currentUsedPercent)),
-      element("span", "usage-series-label", " fable"),
-    );
-    usageValue.append(element("span", "usage-divider", " / "), overlayUsage);
-  }
-  usage.append(usageValue, element("span", "usage-caption", "used"));
-  heading.append(identity, usage);
-  section.append(heading);
+  heading.append(identity);
   if (overlays.length > 0) {
-    section.append(createChartLegend([limit, ...overlays]));
+    // Each legend entry carries its series' current reading, so the legend
+    // takes the place of a separate usage figure.
+    heading.append(createChartLegend([limit, ...overlays]));
+  } else {
+    const usage = element("div", `current-usage ${toneForLimit(limit)}`);
+    const usageValue = element("strong", "usage-value");
+    usageValue.append(
+      element("span", "", formatPercent(limit.currentUsedPercent)),
+      element("span", "usage-series-label", " all"),
+    );
+    usage.append(usageValue);
+    heading.append(usage);
   }
+  section.append(heading);
   section.append(
     createUsageGraph(
       limit,
@@ -2054,9 +2051,7 @@ function renderAnalytics(payload) {
     );
   } else {
     const historyAccounts = [...accounts].sort(
-      accountHistoryOrder === "weekly-reset"
-        ? compareFleetAccountsByWeeklyReset
-        : compareAccountsBySessionUtilization,
+      ACCOUNT_HISTORY_COMPARATORS[accountHistoryOrder],
     );
     for (const account of historyAccounts) {
       accountCards.append(createAccountCard(account, rangeStart, rangeEnd));
