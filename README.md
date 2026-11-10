@@ -32,7 +32,7 @@ With pnpm 11 or 12:
 pnpm add --global seat-monitor
 ```
 
-If pnpm itself is not installed, [pnpm's current installation guide](https://pnpm.io/installation) uses `npx get-pnpm` for pnpm 11 or `npx get-pnpm next-12` for pnpm 12. Although pnpm 12 is stable, npm's `latest` tag still points to pnpm 11 as of 2026-08-30.
+If pnpm itself is not installed, follow [pnpm's installation guide](https://pnpm.io/installation). As of 2026-11-10, npm's `latest` tag points to pnpm 12 (12.18.0); `latest-11` still selects pnpm 11. Both versions install global commands into `$PNPM_HOME/bin` and refuse a global install until that directory is on `PATH`. If `pnpm add --global` reports that its global bin directory is not in `PATH`, run `pnpm setup`, start a new shell, and retry.
 
 Then initialize the account configuration:
 
