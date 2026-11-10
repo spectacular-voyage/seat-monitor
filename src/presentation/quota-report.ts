@@ -1,3 +1,4 @@
+import type { QuotaReadSource } from "../domain/cli-forecast.js";
 import type { Platform, PublicQuotaSnapshot } from "../domain/quota.js";
 import {
   MINIMUM_USABLE_HEADROOM_PERCENT,
@@ -40,6 +41,11 @@ export type QuotaReportAccount = {
   rows: QuotaReportRow[];
   error: { code: string; message: string } | null;
   soonestUsableResetMilliseconds: number | null;
+  observedAt: string;
+  // True for a cached fallback or an old reading; its rows never drive USE.
+  stale: boolean;
+  ageSeconds: number | null;
+  cachedAt: string | null;
 };
 
 export type UseRecommendation = {
@@ -63,6 +69,8 @@ export type WatchRecommendation = {
   resetAt: string | null;
   timeRemainingMinutes: number | null;
   constantSuspect: boolean;
+  // The watched reading's age when it is stale; null for a current reading.
+  staleAgeSeconds: number | null;
 };
 
 export type QuotaReport = {
@@ -73,6 +81,7 @@ export type QuotaReport = {
   use: UseRecommendation | null;
   watch: WatchRecommendation | null;
   usesLocalConstants: boolean;
+  source: QuotaReadSource;
 };
 
 type CapacityCandidate = UseRecommendation & {
@@ -326,7 +335,8 @@ function isIgnoredDecisionLimit(
 }
 
 function capacityCandidates(account: QuotaReportAccount): CapacityCandidate[] {
-  if (account.status === "error") {
+  // A stale percentage is only a lower bound, so its headroom is not usable.
+  if (account.status === "error" || account.stale) {
     return [];
   }
 
@@ -423,6 +433,7 @@ function watchForAccountRows(
         resetAt: clockRow?.resetAt ?? null,
         timeRemainingMinutes: clockRow?.timeRemainingMinutes ?? null,
         constantSuspect: clockRow?.constantSuspect ?? false,
+        staleAgeSeconds: account.stale ? account.ageSeconds : null,
       },
     ];
   });
@@ -461,7 +472,11 @@ function compareAccounts(
 
 export function buildQuotaReport(
   snapshots: readonly PublicQuotaSnapshot[],
-  options: { nowMilliseconds: number; timeZone: string },
+  options: {
+    nowMilliseconds: number;
+    timeZone: string;
+    source?: QuotaReadSource;
+  },
 ): QuotaReport {
   const accounts = snapshots.map((snapshot): QuotaReportAccount => {
     if (snapshot.status === "error") {
@@ -477,6 +492,10 @@ export function buildQuotaReport(
         rows: [],
         error: snapshot.error,
         soonestUsableResetMilliseconds: null,
+        observedAt: snapshot.observedAt,
+        stale: false,
+        ageSeconds: null,
+        cachedAt: null,
       };
     }
 
@@ -491,6 +510,10 @@ export function buildQuotaReport(
       ),
       error: null,
       soonestUsableResetMilliseconds: null,
+      observedAt: snapshot.observedAt,
+      stale: snapshot.stale,
+      ageSeconds: snapshot.ageSeconds,
+      cachedAt: snapshot.cachedAt,
     };
     account.soonestUsableResetMilliseconds =
       capacityCandidates(account).sort(compareCandidates)[0]
@@ -533,5 +556,6 @@ export function buildQuotaReport(
           row.subCapConstant !== null,
       ),
     ),
+    source: options.source ?? { kind: "scan" },
   };
 }

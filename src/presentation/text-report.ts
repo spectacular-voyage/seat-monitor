@@ -6,6 +6,8 @@ import {
   formatReportTimestamp,
   formatReset,
   formatRowPosition,
+  formatSourceLine,
+  formatStaleNote,
   formatUseLine,
   formatWatchLine,
 } from "./quota-format.js";
@@ -37,8 +39,10 @@ function rowStatus(row: QuotaReportRow): string {
 }
 
 export function renderTextReport(report: QuotaReport): string {
+  const source = formatSourceLine(report);
   const lines = [
     `QUOTA — ${formatReportTimestamp(report)}`,
+    ...(source === null ? [] : [source]),
     formatUseLine(report.use, report),
     formatWatchLine(report.watch, report),
     "",
@@ -68,6 +72,10 @@ export function renderTextReport(report: QuotaReport): string {
         "",
       );
       continue;
+    }
+    const staleNote = formatStaleNote(account, report);
+    if (staleNote !== null) {
+      lines.push(`  ${staleNote}`);
     }
 
     for (const row of account.rows) {

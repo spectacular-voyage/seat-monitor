@@ -260,6 +260,7 @@ export function createClaudeProvider(
             declaredPlan === "ultra");
         let observedAt = context.now();
         let httpSucceeded = false;
+        let cachedReading = false;
         if (account.auth.type === "claude_profile" && readHttpUsage !== null) {
           try {
             const usage = await readHttpUsage({
@@ -272,6 +273,7 @@ export function createClaudeProvider(
             limits = usage.limits;
             observedAt = new Date(usage.observedAt);
             httpSucceeded = true;
+            cachedReading = usage.source === "cache";
           } catch (error) {
             // Preserve native quota/refresh behavior if the undocumented HTTP
             // contract changes or is unavailable. Never fabricate partial quota.
@@ -316,6 +318,7 @@ export function createClaudeProvider(
           plan: ultraPlan ? "ultra" : (authStatus.subscriptionType ?? null),
           limits,
           observedAt: observedAt.toISOString(),
+          ...(cachedReading ? { source: "cache" as const } : {}),
         });
       } catch (error) {
         const observedAt = context.now().toISOString();

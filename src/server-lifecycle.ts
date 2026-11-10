@@ -7,11 +7,16 @@ import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 
 import { serverHostSchema } from "./config/server-network.js";
+import {
+  readServerSettings,
+  type ServerSettings,
+} from "./config/server-settings.js";
 
 const STARTUP_TIMEOUT_MILLISECONDS = 60_000;
 const STOP_TIMEOUT_MILLISECONDS = 5_000;
 const KILL_TIMEOUT_MILLISECONDS = 1_000;
 const POLL_INTERVAL_MILLISECONDS = 100;
+const STATUS_FALLBACK_PORT_COUNT = 32;
 
 const serverRuntimeStateSchema = z
   .object({
@@ -200,6 +205,62 @@ export async function probeForegroundServer(
     version: payload.version,
     url: new URL("/", url).toString(),
   };
+}
+
+export async function findExternallyManagedServer(
+  settings: ServerSettings = readServerSettings(),
+  probe: (
+    url: string,
+  ) => Promise<ExternalServerIdentity | null> = probeForegroundServer,
+): Promise<ExternalServerIdentity | null> {
+  const configuration = {
+    host: settings.host === "0.0.0.0" ? "127.0.0.1" : settings.host,
+    port: settings.port,
+  };
+  const candidateCount = settings.useDefaultPortFallback
+    ? Math.min(STATUS_FALLBACK_PORT_COUNT, 65_536 - configuration.port)
+    : 1;
+  const candidates = await Promise.all(
+    Array.from({ length: candidateCount }, (_value, index) =>
+      probe(
+        `http://${configuration.host}:${String(configuration.port + index)}/`,
+      ),
+    ),
+  );
+  return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
+/**
+ * The dashboard server this user's settings point at, if one is running: the
+ * managed background instance recorded in the runtime state, otherwise an
+ * externally managed foreground server on the configured (or default) port.
+ */
+export async function findRunningServer(
+  options: {
+    paths?: ServerRuntimePaths;
+    settings?: () => ServerSettings;
+  } = {},
+): Promise<ExternalServerIdentity | null> {
+  try {
+    const state = await readServerRuntimeState(
+      options.paths ?? resolveServerRuntimePaths(),
+    );
+    if (state !== null) {
+      const status = await fetchServerStatus(state.url);
+      if (
+        status?.mode === "background" &&
+        status.instanceId === state.instanceId &&
+        status.pid === state.pid
+      ) {
+        return { pid: status.pid, version: status.version, url: state.url };
+      }
+    }
+  } catch {
+    // An unreadable runtime record never hides a foreground server.
+  }
+  return findExternallyManagedServer(
+    (options.settings ?? readServerSettings)(),
+  );
 }
 
 async function launchDetached(

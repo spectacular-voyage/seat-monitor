@@ -7,22 +7,30 @@ import { parseArgs } from "node:util";
 import {
   AccountConfigurationError,
   defaultAccountsConfigPath,
+  loadConfiguredAccounts,
 } from "./config/accounts.js";
 import {
   readEffectiveScanConcurrency,
   ServerSettingsError,
 } from "./config/server-settings.js";
-import { cliQuotaSchema } from "./domain/cli-forecast.js";
+import { cliQuotaSchema, type QuotaReadSource } from "./domain/cli-forecast.js";
+import type { Platform, QuotaSnapshot } from "./domain/quota.js";
 import { isMainModule } from "./entry-point.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
-import { buildCliForecast } from "./history/cli-forecast.js";
+import {
+  buildCliForecast,
+  forecastAccountKey,
+} from "./history/cli-forecast.js";
 import { createRecordingScanner } from "./history/recording-scanner.js";
 import {
   createDefaultHistoryService,
   type HistoryService,
 } from "./history/service.js";
 import type { HistoryLimitSeries, HistoryResetEvent } from "./history/types.js";
-import { toPublicSnapshots } from "./presentation/public-dto.js";
+import {
+  toPublicSnapshots,
+  withoutLapsedLimits,
+} from "./presentation/public-dto.js";
 import { buildQuotaReport } from "./presentation/quota-report.js";
 import { renderMarkdownReport } from "./presentation/table.js";
 import { renderTextReport } from "./presentation/text-report.js";
@@ -31,18 +39,24 @@ import {
   renderTextForecast,
 } from "./presentation/cli-forecast.js";
 import {
+  createDashboardQuotaReader,
+  type ReadDashboardQuota,
+} from "./services/dashboard-quota.js";
+import {
   createDefaultScanner,
   type Scanner,
 } from "./services/scan-accounts.js";
 import { PACKAGE_VERSION } from "./version.js";
 
-const usage = `Usage: seat-monitor [--forecast] [--format text|md|json] [--json]
+const usage = `Usage: seat-monitor [--forecast] [--scan] [--format text|md|json] [--json]
        seat-monitor --init-config
 
 Options:
   --format text|md|json  Select output format (default: text)
   --json                 Alias for --format json
   --forecast             Include fleet burn, usage rates, and projections
+  --scan                 Scan providers directly even when a dashboard server
+                         is running (by default its latest scan is read)
   --init-config          Create a private example accounts.json
   --version              Show the Seat Monitor version
   --help                 Show this help
@@ -58,6 +72,11 @@ export type CliDependencies = {
   initializeConfig?: () => Promise<string>;
   history?: HistoryService;
   createHistory?: () => HistoryService;
+  // Reads a running dashboard server's latest scan. Defaults to discovery
+  // unless a scanner is injected; null always scans directly.
+  readDashboard?: ReadDashboardQuota | null;
+  // The configured accounts a dashboard server's scan must match exactly.
+  loadAccounts?: () => readonly { platform: Platform; accountAlias: string }[];
 };
 
 type OutputFormat = "text" | "md" | "json";
@@ -71,6 +90,7 @@ function parseFormat(arguments_: readonly string[]):
       format: OutputFormat;
       initializeConfig: boolean;
       forecast: boolean;
+      scan: boolean;
     } {
   const parsed = parseArgs({
     args: [...arguments_],
@@ -82,6 +102,7 @@ function parseFormat(arguments_: readonly string[]):
       help: { type: "boolean", short: "h", default: false },
       "init-config": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
+      scan: { type: "boolean", default: false },
       version: { type: "boolean", short: "V", default: false },
     },
   });
@@ -94,6 +115,7 @@ function parseFormat(arguments_: readonly string[]):
       parsed.values.json ||
       parsed.values.format !== undefined ||
       parsed.values.forecast ||
+      parsed.values.scan ||
       parsed.values["init-config"]
     ) {
       throw new TypeError("--version cannot be combined with other flags.");
@@ -107,7 +129,8 @@ function parseFormat(arguments_: readonly string[]):
     parsed.values["init-config"] &&
     (parsed.values.json ||
       parsed.values.format !== undefined ||
-      parsed.values.forecast)
+      parsed.values.forecast ||
+      parsed.values.scan)
   ) {
     throw new TypeError("--init-config cannot be combined with output flags.");
   }
@@ -120,6 +143,7 @@ function parseFormat(arguments_: readonly string[]):
       format: "md",
       initializeConfig: parsed.values["init-config"],
       forecast: parsed.values.forecast,
+      scan: parsed.values.scan,
     };
   }
   if (format !== "text" && format !== "md" && format !== "json") {
@@ -131,6 +155,7 @@ function parseFormat(arguments_: readonly string[]):
     format,
     initializeConfig: parsed.values["init-config"],
     forecast: parsed.values.forecast,
+    scan: parsed.values.scan,
   };
 }
 
@@ -183,15 +208,57 @@ export async function runCli(
     }
   }
 
-  let scan: Scanner;
+  const configurationFailure = (error: unknown): number => {
+    const message =
+      error instanceof AccountConfigurationError ||
+      error instanceof ServerSettingsError
+        ? error.message
+        : "Account configuration is invalid.";
+    stderr.write(`${message}\n`);
+    return 2;
+  };
+
+  // Prefer the running dashboard server's latest scan: a second, direct scan
+  // races it for the same rate-limited provider endpoints.
+  const readDashboard = selection.scan
+    ? null
+    : dependencies.readDashboard !== undefined
+      ? dependencies.readDashboard
+      : dependencies.scan === undefined &&
+          dependencies.createScanner === undefined
+        ? createDashboardQuotaReader()
+        : null;
+  let dashboardSnapshots: QuotaSnapshot[] | null = null;
+  let source: QuotaReadSource = { kind: "scan" };
+  if (readDashboard !== null) {
+    let accounts: readonly { platform: Platform; accountAlias: string }[];
+    try {
+      accounts = (dependencies.loadAccounts ?? loadConfiguredAccounts)();
+    } catch (error) {
+      return configurationFailure(error);
+    }
+    const dashboard = await readDashboard(accounts);
+    if (dashboard.kind === "server") {
+      dashboardSnapshots = dashboard.snapshots;
+      source = { kind: "server", url: dashboard.url };
+    } else if (dashboard.kind === "unusable") {
+      stderr.write(
+        `Dashboard server ${dashboard.url} was not used because ${dashboard.reason}; scanning providers directly.\n`,
+      );
+    }
+  }
+
+  let scan: Scanner | null;
   let history: HistoryService | null;
   let ownedHistory: HistoryService | null = null;
   try {
     const baseScan =
-      dependencies.scan ??
-      (dependencies.createScanner ?? createDefaultScanner)({
-        concurrency: readEffectiveScanConcurrency(process.env),
-      });
+      dashboardSnapshots !== null
+        ? null
+        : (dependencies.scan ??
+          (dependencies.createScanner ?? createDefaultScanner)({
+            concurrency: readEffectiveScanConcurrency(process.env),
+          }));
     history =
       dependencies.history ??
       (dependencies.scan === undefined ||
@@ -200,34 +267,35 @@ export async function runCli(
             dependencies.createHistory?.() ??
             createDefaultHistoryService(process.env, dependencies.now))
         : null);
+    // The server already records its own scans; only a direct scan is recorded.
     scan =
-      history === null
-        ? baseScan
-        : createRecordingScanner({
-            scan: baseScan,
-            history,
-            source: "cli",
-            ...(dependencies.now === undefined
-              ? {}
-              : { now: dependencies.now }),
-          });
+      baseScan === null
+        ? null
+        : history === null
+          ? baseScan
+          : createRecordingScanner({
+              scan: baseScan,
+              history,
+              source: "cli",
+              ...(dependencies.now === undefined
+                ? {}
+                : { now: dependencies.now }),
+            });
   } catch (error) {
-    const message =
-      error instanceof AccountConfigurationError ||
-      error instanceof ServerSettingsError
-        ? error.message
-        : "Account configuration is invalid.";
-    stderr.write(`${message}\n`);
-    return 2;
+    return configurationFailure(error);
   }
 
-  let snapshots;
-  try {
-    snapshots = await scan();
-  } catch {
-    stderr.write("Quota scan failed before producing account results.\n");
-    ownedHistory?.close();
-    return 2;
+  let snapshots: QuotaSnapshot[];
+  if (scan === null) {
+    snapshots = dashboardSnapshots ?? [];
+  } else {
+    try {
+      snapshots = await scan();
+    } catch {
+      stderr.write("Quota scan failed before producing account results.\n");
+      ownedHistory?.close();
+      return 2;
+    }
   }
   const now = (dependencies.now ?? (() => new Date()))();
   const nowMilliseconds = now.getTime();
@@ -259,7 +327,9 @@ export async function runCli(
       }
       forecast = buildCliForecast(
         buildHistoryAnalytics({
-          snapshots,
+          snapshots: snapshots.map((snapshot) =>
+            withoutLapsedLimits(snapshot, nowMilliseconds),
+          ),
           series,
           resetEvents,
           historyHealth: history?.health ?? "unavailable",
@@ -272,6 +342,19 @@ export async function runCli(
             dependencies.timeZone ??
             Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
+        {
+          source,
+          cachedAccounts: new Set(
+            snapshots
+              .filter(
+                (snapshot) =>
+                  snapshot.status === "ok" && snapshot.source === "cache",
+              )
+              .map((snapshot) =>
+                forecastAccountKey(snapshot.platform, snapshot.accountAlias),
+              ),
+          ),
+        },
       );
     } finally {
       ownedHistory?.close();
@@ -293,6 +376,7 @@ export async function runCli(
       const payload = cliQuotaSchema.parse({
         apiVersion: 1,
         generatedAt: now.toISOString(),
+        source,
         historyHealth,
         accounts: output,
       });
@@ -301,6 +385,7 @@ export async function runCli(
     }
     const report = buildQuotaReport(output, {
       nowMilliseconds,
+      source,
       timeZone:
         dependencies.timeZone ??
         Intl.DateTimeFormat().resolvedOptions().timeZone,

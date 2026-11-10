@@ -126,3 +126,14 @@ export function report(snapshots: readonly QuotaSnapshot[]) {
     timeZone: "America/Los_Angeles",
   });
 }
+
+/** The same reading, retained as a cached fallback observed at `observedAt`. */
+export function cachedReading(
+  snapshot: QuotaSnapshot,
+  observedAt: string,
+): QuotaSnapshot {
+  if (snapshot.status !== "ok") {
+    throw new TypeError("Only a successful reading can be cached.");
+  }
+  return { ...snapshot, observedAt, source: "cache" };
+}

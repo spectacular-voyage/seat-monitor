@@ -16,7 +16,6 @@ import { historyScansSchema } from "./domain/history.js";
 import {
   DEFAULT_SERVER_PORT,
   readServerSettings,
-  type ServerSettings,
 } from "./config/server-settings.js";
 import { serverNetworkSchema } from "./config/server-network.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
@@ -49,18 +48,18 @@ import {
   startDetachedServer,
   statusDetachedServer,
   stopDetachedServer,
-  probeForegroundServer,
+  findExternallyManagedServer,
   writeServerRuntimeState,
-  type ExternalServerIdentity,
   type LifecycleDependencies,
 } from "./server-lifecycle.js";
 import { PACKAGE_VERSION } from "./version.js";
+
+export { findExternallyManagedServer } from "./server-lifecycle.js";
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
-const STATUS_FALLBACK_PORT_COUNT = 32;
 const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
 
 With no command, Seat Monitor runs in the foreground.
@@ -577,29 +576,6 @@ export async function findServerPort(
     }
   }
   throw new Error("No available server port remains above the default.");
-}
-
-export async function findExternallyManagedServer(
-  settings: ServerSettings = readServerSettings(),
-  probe: (
-    url: string,
-  ) => Promise<ExternalServerIdentity | null> = probeForegroundServer,
-): Promise<ExternalServerIdentity | null> {
-  const configuration = {
-    host: settings.host === "0.0.0.0" ? "127.0.0.1" : settings.host,
-    port: settings.port,
-  };
-  const candidateCount = settings.useDefaultPortFallback
-    ? Math.min(STATUS_FALLBACK_PORT_COUNT, 65_536 - configuration.port)
-    : 1;
-  const candidates = await Promise.all(
-    Array.from({ length: candidateCount }, (_value, index) =>
-      probe(
-        `http://${configuration.host}:${String(configuration.port + index)}/`,
-      ),
-    ),
-  );
-  return candidates.find((candidate) => candidate !== null) ?? null;
 }
 
 async function runForegroundServer(instanceId?: string): Promise<void> {

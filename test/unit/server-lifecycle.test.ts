@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ServerSettings } from "../../src/config/server-settings.js";
 import {
+  findRunningServer,
   readServerRuntimeState,
   probeForegroundServer,
   resolveServerRuntimePaths,
@@ -496,5 +498,72 @@ describe("detached server lifecycle", () => {
     expect(statusOutput.read()).toContain("not running");
     expect(versionOutput.read()).toBe(`${PACKAGE_VERSION}\n`);
     expect(runForeground).not.toHaveBeenCalled();
+  });
+});
+
+describe("finding the running dashboard server for the CLI", () => {
+  const settings = (): ServerSettings => ({
+    host: "127.0.0.1",
+    allowedHosts: [],
+    scanIntervalSeconds: 60,
+    scanOnStartup: true,
+    scanConcurrency: 4,
+    port: 3_000,
+    useDefaultPortFallback: false,
+    history: {
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    },
+    dashboard: { showSpark: false },
+  });
+  function statusFetch(payloads: Record<string, unknown>) {
+    return vi.fn((input: URL | string) => {
+      const payload = payloads[String(input)];
+      return Promise.resolve(
+        payload === undefined
+          ? new Response(null, { status: 404 })
+          : Response.json(payload),
+      );
+    });
+  }
+
+  it("prefers the managed background instance its runtime state records", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    await writeServerRuntimeState(paths, runtimeState());
+    vi.stubGlobal(
+      "fetch",
+      statusFetch({
+        "http://127.0.0.1:3000/api/server/status": statusPayload("background"),
+      }),
+    );
+    await expect(findRunningServer({ paths, settings })).resolves.toEqual({
+      pid: 42_424,
+      version: "0.1.8",
+      url: "http://127.0.0.1:3000/",
+    });
+  });
+
+  it("falls back to a foreground server when the runtime state is not live", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    await writeServerRuntimeState(paths, runtimeState());
+    // The recorded instance answers as a different, foreground process.
+    vi.stubGlobal(
+      "fetch",
+      statusFetch({
+        "http://127.0.0.1:3000/api/server/status": statusPayload("foreground"),
+      }),
+    );
+    await expect(findRunningServer({ paths, settings })).resolves.toEqual({
+      pid: 42_424,
+      version: "0.1.8",
+      url: "http://127.0.0.1:3000/",
+    });
+  });
+
+  it("finds nothing when no server answers", async () => {
+    const paths = resolveServerRuntimePaths({ XDG_STATE_HOME: directory() });
+    vi.stubGlobal("fetch", statusFetch({}));
+    await expect(findRunningServer({ paths, settings })).resolves.toBeNull();
   });
 });
