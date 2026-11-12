@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Account details · Seat Monitor</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/accounts.js"></script>
+  </head>
+  <body>
+    <aside class="page-tools" aria-label="Navigation and filters">
+      <nav aria-label="Pages">
+        <p class="eyebrow">Pages</p>
+        <ul class="page-links">
+          <li><a href="/">Quota dashboard</a></li>
+          <li>
+            <a href="/accounts" aria-current="page">Account details</a>
+          </li>
+        </ul>
+      </nav>
+      <fieldset id="vendor-filters" aria-describedby="vendor-filter-help">
+        <legend>Show accounts</legend>
+        <label><input type="checkbox" value="Codex" checked /> Codex</label>
+        <label><input type="checkbox" value="Claude" checked /> Claude</label>
+      </fieldset>
+      <p id="vendor-filter-help">Filters account lists only.</p>
+    </aside>
+    <main class="shell">
+      <header class="masthead">
+        <div class="brand">
+          <p class="eyebrow">Local quota telemetry</p>
+          <h1>Seat Monitor</h1>
+          <p class="lede">Plans, tiers, and when each seat renews.</p>
+        </div>
+      </header>
+
+      <section
+        id="fleet-plans"
+        class="plans-section"
+        aria-labelledby="fleet-plans-heading"
+      >
+        <div class="section-heading">
+          <h2 id="fleet-plans-heading" class="eyebrow">Fleet plans</h2>
+          <p id="connection-status" class="connection" role="status">
+            Connecting…
+          </p>
+        </div>
+        <div id="plan-summary" class="plan-summary" aria-live="polite">
+          <p class="plans-empty">Loading account plans…</p>
+        </div>
+      </section>
+
+      <section
+        id="renewals"
+        class="plans-section"
+        aria-labelledby="renewals-heading"
+      >
+        <div class="section-heading">
+          <h2 id="renewals-heading" class="eyebrow">Accounts and renewals</h2>
+          <div
+            id="plan-order-controls"
+            class="range-controls"
+            aria-label="Account sort order"
+          >
+            <button type="button" data-plan-order="renewal" aria-pressed="true">
+              Next billing
+            </button>
+            <button type="button" data-plan-order="tier">Tier</button>
+            <button type="button" data-plan-order="account">Account</button>
+          </div>
+        </div>
+        <div id="plan-table" class="plan-table-wrap" aria-live="polite">
+          <p class="plans-empty">Loading account plans…</p>
+        </div>
+      </section>
+
+      <p class="footnote">
+        Tiers and Codex renewals come from each provider; billing checks run at
+        most once every six hours per account and stay on this device. Claude
+        does not report renewal dates or cancellations to Claude Code, so a
+        Claude date marked <strong>est.</strong> is the monthly anniversary of
+        the subscription start. To record a Claude billing day or a
+        cancellation, add
+        <code>"billing": {"renewalDay": 14, "autoRenew": false}</code> to that
+        account in <code>accounts.json</code>.
+      </p>
+      <p class="last-checked">
+        Seat Monitor <span id="app-version">version unavailable</span> · Last
+        checked: <time id="last-checked">Waiting…</time>
+      </p>
+      <noscript
+        >This page requires JavaScript to retrieve account plans.</noscript
+      >
+    </main>
+  </body>
+</html>

@@ -232,6 +232,60 @@ describe("loadAccounts", () => {
     expect(loadAccounts(definitions, {}, "/profiles")).toHaveLength(1);
   });
 
+  it("carries optional billing declarations for every account type", () => {
+    const accounts = loadAccounts(
+      [
+        {
+          accountAlias: "claude-user@example.com",
+          platform: "Claude",
+          billing: { renewalDay: 14, autoRenew: false },
+          auth: {
+            type: "claude_profile",
+            profile: "claude-user",
+            expectedEmail: "user@example.com",
+          },
+        },
+        {
+          accountAlias: "codex-user@example.com",
+          platform: "Codex",
+          billing: { autoRenew: true },
+          auth: { type: "codex_profile", profile: "codex-user" },
+        },
+        {
+          accountAlias: "codex-plain@example.com",
+          platform: "Codex",
+          auth: { type: "codex_profile", profile: "codex-plain" },
+        },
+      ],
+      {},
+      "/codex-profiles",
+      "/claude-profiles",
+    );
+    expect(accounts.map((account) => account.billing)).toEqual([
+      { renewalDay: 14, autoRenew: false },
+      { autoRenew: true },
+      undefined,
+    ]);
+    expect(accounts[2]).not.toHaveProperty("billing");
+  });
+
+  it.each([
+    { renewalDay: 0 },
+    { renewalDay: 32 },
+    { renewalDay: 1.5 },
+    { autoRenew: "no" },
+    { renewsOn: "2026-12-01" },
+  ])("rejects invalid billing declaration %o", (billing) => {
+    expect(
+      accountDefinitionSchema.safeParse({
+        accountAlias: "codex-user@example.com",
+        platform: "Codex",
+        billing,
+        auth: { type: "codex_profile", profile: "codex-user" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects duplicate enabled aliases case-insensitively", () => {
     const definitions: AccountDefinition[] = [
       {

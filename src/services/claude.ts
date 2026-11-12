@@ -15,6 +15,11 @@ import {
   ClaudeUsageHttpError,
   type ReadClaudeHttpUsage,
 } from "./claude-usage-http.js";
+import {
+  isUltraDisplayName,
+  readClaudeProfileState,
+  type ReadClaudeProfileState,
+} from "./claude-profile-state.js";
 import { createFailureSnapshot } from "./failure.js";
 import {
   minimalChildEnvironment,
@@ -58,6 +63,7 @@ export type ClaudeProviderDependencies = {
   profileIsReady?: (claudeConfigDir: string) => Promise<boolean>;
   managedMcpIsConfigured?: () => Promise<boolean>;
   readHttpUsage?: ReadClaudeHttpUsage | null;
+  readProfileState?: ReadClaudeProfileState;
 };
 
 async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
@@ -151,6 +157,8 @@ export function createClaudeProvider(
     return cliVersion;
   }
   const isProfileReady = dependencies.profileIsReady ?? profileIsReady;
+  const readProfileState =
+    dependencies.readProfileState ?? readClaudeProfileState;
   const hasManagedMcpConfig =
     dependencies.managedMcpIsConfigured ?? managedMcpIsConfigured;
 
@@ -253,11 +261,22 @@ export function createClaudeProvider(
         let limits = unsupportedClaudeLimits;
         const nativePlan = authStatus.subscriptionType?.toLowerCase() ?? null;
         const declaredPlan = "plan" in account ? account.plan : undefined;
+        // Claude Code still reports Ultra as `max`; its cached profile fetch
+        // names the plan. Either that provider label or an operator
+        // declaration upgrades native `max`; legacy `max` alone never does.
         const ultraPlan =
           nativePlan === "ultra" ||
           (nativePlan === "max" &&
             account.auth.type === "claude_profile" &&
-            declaredPlan === "ultra");
+            (declaredPlan === "ultra" ||
+              isUltraDisplayName(
+                (
+                  await readProfileState({
+                    ...account,
+                    auth: account.auth,
+                  })
+                )?.planDisplayName ?? null,
+              )));
         let observedAt = context.now();
         let httpSucceeded = false;
         let cachedReading = false;

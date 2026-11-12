@@ -65,6 +65,15 @@ function zonedParts(
   };
 }
 
+/** The calendar date (YYYY-MM-DD) an instant falls on in a time zone. */
+export function calendarDateInTimeZone(
+  instantMilliseconds: number,
+  timeZone: string,
+): string {
+  const { year, month, day } = zonedParts(instantMilliseconds, timeZone);
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function zonedTimeToInstant(parts: ZonedDateParts, timeZone: string): number {
   const targetAsUtc = Date.UTC(
     parts.year,

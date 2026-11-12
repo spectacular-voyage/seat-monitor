@@ -77,6 +77,35 @@ button {
   text-underline-offset: 3px;
 }
 
+.page-links {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.page-links a {
+  display: block;
+  padding: 6px 8px;
+  margin-inline: -8px;
+  border-radius: 7px;
+  color: #b8c9bf;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.page-links a:hover {
+  color: #f7f6f2;
+  background: #1c231e;
+}
+
+.page-links a[aria-current="page"] {
+  color: #effaf3;
+  background: #293a30;
+  font-weight: 700;
+}
+
 .page-tools :is(a, input):focus-visible {
   outline: 2px solid #8fd3ab;
   outline-offset: 3px;
@@ -144,11 +173,16 @@ button {
     margin: 10px 12px;
   }
 
-  .section-links {
+  .section-links,
+  .page-links {
     display: flex;
     flex-wrap: wrap;
     column-gap: 18px;
     margin-bottom: 12px;
+  }
+
+  .page-links a {
+    margin-inline: 0;
   }
 
   #vendor-filters {
@@ -599,11 +633,39 @@ button:focus-visible,
   white-space: nowrap;
 }
 
-.fleet-plan {
+.tier-pill {
+  display: inline-flex;
   flex: 0 0 auto;
-  color: #7f8781;
-  font-size: 0.72rem;
-  text-transform: lowercase;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid #3a423c;
+  border-radius: 999px;
+  color: #c9d0cb;
+  background: #1a1f1c;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.tier-pill.tier-ultra {
+  border-color: rgb(186 150 255 / 55%);
+  color: #e2d5ff;
+  background: rgb(124 88 214 / 26%);
+}
+
+.tier-pill.tier-max {
+  border-color: rgb(229 141 164 / 40%);
+  color: #f3c1cd;
+  background: rgb(229 141 164 / 10%);
+}
+
+.tier-pill.tier-other {
+  border-color: rgb(120 167 255 / 40%);
+  color: #bcd1ff;
+  background: rgb(120 167 255 / 10%);
 }
 
 .capacity-limits {
@@ -1726,4 +1788,265 @@ noscript {
   color: #aab1ab;
   font-size: 0.75rem;
   line-height: 1.5;
+}
+
+/* Account details page */
+
+.plans-section {
+  margin-top: 8px;
+  padding: 12px 8px;
+  border: 1px solid #282e2a;
+  border-radius: 18px;
+  background: rgb(20 23 21 / 91%);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 16%);
+}
+
+.plans-empty {
+  margin: 0;
+  padding: 16px 8px;
+  color: #a7ada8;
+  font-size: 0.86rem;
+}
+
+.plan-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  border: 1px solid #282e2a;
+  border-radius: 14px;
+  background: rgb(23 27 24 / 82%);
+  overflow: hidden;
+}
+
+.plan-summary-tile {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+  padding: 14px 16px;
+  border-right: 1px solid #282e2a;
+}
+
+.plan-summary-tile:last-child {
+  border-right: 0;
+}
+
+.plan-summary-tile > strong {
+  font-size: 1.08rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tier-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.tier-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+
+.plan-subtle {
+  display: block;
+  color: #8f9791;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plan-table-wrap {
+  border: 1px solid #303732;
+  border-radius: 14px;
+  background: #101310;
+  overflow: hidden;
+}
+
+.plan-table {
+  width: 100%;
+  border-spacing: 0;
+  font-size: 0.8rem;
+}
+
+.plan-table thead th {
+  padding: 9px 12px;
+  border-bottom: 1px solid #2a322d;
+  color: #89918b;
+  font-size: 0.61rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.plan-table tbody :is(th, td) {
+  padding: 10px 12px;
+  border-bottom: 1px solid #222a25;
+  text-align: left;
+  vertical-align: top;
+}
+
+.plan-table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.plan-table tbody tr:hover {
+  background: #141915;
+}
+
+.plan-account {
+  font-weight: 400;
+}
+
+.plan-alias {
+  display: block;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.plan-vendor {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.62rem;
+  font-weight: 780;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.plan-vendor.vendor-claude {
+  color: #e58da4;
+}
+
+.plan-vendor.vendor-codex {
+  color: #78a7ff;
+}
+
+.plan-date-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.plan-date-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.plan-date-relative {
+  display: block;
+  margin-top: 2px;
+  color: #8f9791;
+  font-size: 0.72rem;
+}
+
+.plan-date-relative.warning-text {
+  color: #e2bb7b;
+}
+
+.plan-tier,
+.plan-renewal {
+  white-space: nowrap;
+}
+
+.plan-tier .source-tag,
+.plan-renewal .source-tag {
+  margin-left: 6px;
+}
+
+.source-tag {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px dashed #4a554d;
+  border-radius: 5px;
+  color: #a7b0a9;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: help;
+}
+
+.source-tag.estimated {
+  border-color: rgb(226 187 123 / 45%);
+  color: #e2c48f;
+}
+
+.footnote code {
+  color: #a7b0a9;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 1080px) {
+  .plan-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .plan-summary-tiers {
+    grid-column: 1 / -1;
+    border-right: 0;
+    border-bottom: 1px solid #282e2a;
+  }
+}
+
+@media (max-width: 780px) {
+  .plan-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-summary-tile {
+    border-right: 0;
+    border-bottom: 1px solid #282e2a;
+  }
+
+  .plan-summary-tile:last-child {
+    border-bottom: 0;
+  }
+
+  .plan-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .plan-table,
+  .plan-table tbody,
+  .plan-table tr {
+    display: block;
+  }
+
+  .plan-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    padding: 12px;
+    border-bottom: 1px solid #222a25;
+  }
+
+  .plan-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .plan-table tbody :is(th, td) {
+    padding: 0;
+    border-bottom: 0;
+    white-space: normal;
+  }
+
+  .plan-table tbody th {
+    grid-column: 1 / -1;
+  }
+
+  .plan-table tbody td::before {
+    display: block;
+    margin-bottom: 3px;
+    color: #89918b;
+    content: attr(data-label);
+    font-size: 0.6rem;
+    font-weight: 750;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
 }

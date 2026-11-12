@@ -36,9 +36,20 @@ async function scan(
   declared = false,
   output = usage,
   exitCode = 0,
+  planDisplayName: string | null = null,
 ) {
   const provider = createClaudeProvider({
     readHttpUsage: null,
+    readProfileState: () =>
+      Promise.resolve(
+        planDisplayName === null
+          ? null
+          : {
+              planDisplayName,
+              rateLimitTier: "default_claude_max_20x",
+              subscriptionCreatedAt: null,
+            },
+      ),
     profileIsReady: () => Promise.resolve(true),
     managedMcpIsConfigured: () => Promise.resolve(false),
     run: ({ args }) =>
@@ -103,6 +114,28 @@ describe("verified Ultra applicability", () => {
         plan: "ultra",
         limits: expectNA(),
       });
+    },
+  );
+
+  it("accepts native max when Claude Code's cached profile names the plan Ultra", async () => {
+    const snapshot = await scan("max", false, usage, 0, "Ultra");
+    expect(snapshot).toMatchObject({
+      status: "ok",
+      plan: "ultra",
+      limits: expectNA(),
+    });
+  });
+
+  it.each([
+    ["max", "Max"],
+    ["pro", "Ultra"],
+    [null, "Ultra"],
+  ] as const)(
+    "does not upgrade native %s with profile plan %s",
+    async (plan, planDisplayName) => {
+      const snapshot = await scan(plan, false, usage, 0, planDisplayName);
+      expect(snapshot.plan).not.toBe("ultra");
+      expect(snapshot.limits[0]).not.toHaveProperty("applicability");
     },
   );
 
