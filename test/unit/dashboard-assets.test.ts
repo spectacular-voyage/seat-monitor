@@ -18,6 +18,14 @@ const css = readFileSync(
   new URL("../../src/public/styles.css", import.meta.url),
   "utf8",
 );
+const accountsHtml = readFileSync(
+  new URL("../../src/public/accounts.html", import.meta.url),
+  "utf8",
+);
+const accountsJavascript = readFileSync(
+  new URL("../../src/public/accounts.js", import.meta.url),
+  "utf8",
+);
 const capacityLimitSource = javascript.slice(
   javascript.indexOf("function createCapacityLimit("),
   javascript.indexOf("function createCapacityLimitGroup("),
@@ -241,6 +249,52 @@ describe("dashboard assets", () => {
   it("keeps provider-controlled rendering on textContent", () => {
     expect(javascript).toContain("value.textContent = text");
     expect(javascript).not.toContain("innerHTML");
+  });
+
+  it("links the dashboard and the accounts page from shared page navigation", () => {
+    for (const [page, current] of [
+      [html, '<a href="/" aria-current="page">'],
+      [accountsHtml, '<a href="/accounts" aria-current="page">'],
+    ] as const) {
+      expect(page).toContain('<nav aria-label="Pages">');
+      expect(page).toContain('href="/accounts"');
+      expect(page).toContain(current);
+      expect(page).toContain('id="vendor-filters"');
+    }
+    expect(html).toContain('<li><a href="/accounts">Account details</a></li>');
+    expect(html.indexOf('<nav aria-label="Pages">')).toBeLessThan(
+      html.indexOf('<nav aria-label="Page sections">'),
+    );
+    expect(accountsHtml).toContain(
+      "<title>Account details · Seat Monitor</title>",
+    );
+    expect(accountsHtml).toContain('<script type="module" src="/accounts.js">');
+    expect(accountsHtml).toContain('id="plan-table"');
+    expect(accountsHtml).toContain('data-plan-order="renewal"');
+    expect(css).toContain('.page-links a[aria-current="page"]');
+  });
+
+  it("labels Claude tiers on the dashboard from account plans", () => {
+    expect(javascript).toContain('requestJson("/api/accounts")');
+    expect(javascript).toContain("function createTierPill(account)");
+    expect(javascript).not.toContain("fleet-plan");
+    expect(javascript).not.toContain("`${account.plan} plan`");
+    for (const tone of [".tier-pill.tier-ultra", ".tier-pill.tier-max"]) {
+      expect(css).toContain(tone);
+    }
+  });
+
+  it("renders account plans with textContent, source labels and a shared vendor filter", () => {
+    expect(accountsJavascript).toContain('requestJson("/api/accounts")');
+    expect(accountsJavascript).toContain("value.textContent = text");
+    expect(accountsJavascript).not.toContain("innerHTML");
+    expect(accountsJavascript).toContain(
+      'const VENDOR_FILTER_STORAGE_KEY = "seat-monitor:visible-vendors"',
+    );
+    expect(accountsJavascript).toContain('"source-tag estimated", "est."');
+    expect(accountsJavascript).toContain('"pill stale", "Set to expire"');
+    expect(accountsJavascript).toContain("cell.dataset.label");
+    expect(css).toContain("content: attr(data-label)");
   });
 
   describe("a missing current quota reading (SEAT-MON-72, #74)", () => {

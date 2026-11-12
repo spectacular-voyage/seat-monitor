@@ -11,9 +11,21 @@ const credentialEnvironmentSchema = z.string().regex(/^[A-Z][A-Z0-9_]*$/);
 const emailSchema = z.email();
 const profileNameSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
 
+/** Operator-declared billing facts for providers that do not report them:
+ * the monthly billing day and whether the subscription renews on it. */
+export const accountBillingSchema = z
+  .object({
+    renewalDay: z.number().int().min(1).max(31).optional(),
+    autoRenew: z.boolean().optional(),
+  })
+  .strict();
+
+export type AccountBilling = z.infer<typeof accountBillingSchema>;
+
 const commonShape = {
   accountAlias: accountAliasSchema,
   enabled: z.boolean().optional().default(true),
+  billing: accountBillingSchema.optional(),
 } as const;
 
 const claudeSetupTokenDefinitionSchema = z
@@ -88,6 +100,7 @@ export type AccountDefinition = z.input<typeof accountDefinitionSchema>;
 type LoadedAccountBase = {
   accountAlias: string;
   platform: Platform;
+  billing?: AccountBilling;
 };
 
 export type LoadedClaudeSetupTokenAccount = LoadedAccountBase & {
@@ -277,10 +290,13 @@ export function loadAccounts(
   }
 
   return enabled.map((definition): LoadedAccount => {
+    const billing =
+      definition.billing === undefined ? {} : { billing: definition.billing };
     if (definition.auth.type === "claude_profile") {
       return {
         accountAlias: definition.accountAlias,
         platform: "Claude",
+        ...billing,
         ...("plan" in definition && definition.plan !== undefined
           ? { plan: definition.plan }
           : {}),
@@ -297,6 +313,7 @@ export function loadAccounts(
       return {
         accountAlias: definition.accountAlias,
         platform: "Codex",
+        ...billing,
         auth: {
           type: "codex_profile",
           profile: definition.auth.profile,
@@ -309,6 +326,7 @@ export function loadAccounts(
       return {
         accountAlias: definition.accountAlias,
         platform: "Claude",
+        ...billing,
         auth: {
           type: "claude_setup_token",
           credentialEnv: definition.auth.credentialEnv,
@@ -320,6 +338,7 @@ export function loadAccounts(
     return {
       accountAlias: definition.accountAlias,
       platform: "Codex",
+      ...billing,
       auth: {
         type: "codex_access_token",
         credentialEnv: definition.auth.credentialEnv,

@@ -12,6 +12,7 @@ import Fastify, {
 import { z } from "zod";
 
 import { loadConfiguredAccounts } from "./config/accounts.js";
+import type { AccountPlansResponse } from "./domain/account-plans.js";
 import { historyScansSchema } from "./domain/history.js";
 import {
   DEFAULT_SERVER_PORT,
@@ -27,6 +28,7 @@ import {
 } from "./history/service.js";
 import type { HistoryResetEvent } from "./history/types.js";
 import { toPublicSnapshots } from "./presentation/public-dto.js";
+import { createAccountPlanReader } from "./services/account-plans.js";
 import { createClaudeResetReader } from "./services/claude-reset-cache.js";
 import type { ClaudeAccountResets } from "./services/claude-resets.js";
 import {
@@ -107,6 +109,8 @@ type DashboardAssets = {
   capacityOrder: string;
   sessionApplicability: string;
   css: string;
+  accountsHtml: string;
+  accountsJavascript: string;
 };
 
 type DashboardAssetLoader = () => Promise<DashboardAssets>;
@@ -116,6 +120,7 @@ export type ServerOptions = {
   scanConcurrency?: number;
   readClaudeResets?: () => Promise<ClaudeAccountResets[]>;
   readCodexResets?: () => Promise<CachedCodexResetOffers[]>;
+  readAccountPlans?: () => Promise<AccountPlansResponse>;
   now?: () => Date;
   freshnessMilliseconds?: number;
   host?: string;
@@ -140,18 +145,34 @@ export type ServerOptions = {
 };
 
 async function loadDashboardAssets(): Promise<DashboardAssets> {
-  const [html, javascript, capacityOrder, sessionApplicability, css] =
-    await Promise.all([
-      readFile(new URL("./public/index.html", import.meta.url), "utf8"),
-      readFile(new URL("./public/app.js", import.meta.url), "utf8"),
-      readFile(new URL("./public/capacity-order.js", import.meta.url), "utf8"),
-      readFile(
-        new URL("./public/session-applicability.js", import.meta.url),
-        "utf8",
-      ),
-      readFile(new URL("./public/styles.css", import.meta.url), "utf8"),
-    ]);
-  return { html, javascript, capacityOrder, sessionApplicability, css };
+  const asset = (name: string) =>
+    readFile(new URL(`./public/${name}`, import.meta.url), "utf8");
+  const [
+    html,
+    javascript,
+    capacityOrder,
+    sessionApplicability,
+    css,
+    accountsHtml,
+    accountsJavascript,
+  ] = await Promise.all([
+    asset("index.html"),
+    asset("app.js"),
+    asset("capacity-order.js"),
+    asset("session-applicability.js"),
+    asset("styles.css"),
+    asset("accounts.html"),
+    asset("accounts.js"),
+  ]);
+  return {
+    html,
+    javascript,
+    capacityOrder,
+    sessionApplicability,
+    css,
+    accountsHtml,
+    accountsJavascript,
+  };
 }
 
 function requestIsAllowed(
@@ -296,6 +317,21 @@ export async function buildServer(
           now,
         })
       : () => Promise.resolve([]));
+  const readAccountPlans =
+    options.readAccountPlans ??
+    createAccountPlanReader({
+      accounts: resetAccounts,
+      snapshots: () => cache.peekLatest(),
+      now,
+      ...(options.scan === undefined
+        ? {}
+        : {
+            storage: {
+              load: () => Promise.resolve({}),
+              save: () => Promise.resolve(),
+            },
+          }),
+    }).read;
   const scheduler =
     options.scheduler === undefined
       ? null
@@ -387,6 +423,24 @@ export async function buildServer(
     const currentAssets = await readDashboardAssets();
     reply.header("Cache-Control", "no-store");
     return reply.type("text/css; charset=utf-8").send(currentAssets.css);
+  });
+  server.get("/accounts", async (_request, reply) => {
+    const currentAssets = await readDashboardAssets();
+    reply.header("Cache-Control", "no-store");
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(currentAssets.accountsHtml);
+  });
+  server.get("/accounts.js", async (_request, reply) => {
+    const currentAssets = await readDashboardAssets();
+    reply.header("Cache-Control", "no-store");
+    return reply
+      .type("text/javascript; charset=utf-8")
+      .send(currentAssets.accountsJavascript);
+  });
+  server.get("/api/accounts", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return readAccountPlans();
   });
   server.get("/api/server/status", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");

@@ -30,6 +30,8 @@ const assets = {
   capacityOrder: "export const order = 1;",
   sessionApplicability: "export const applicable = true;",
   css: "body {}",
+  accountsHtml: "<!doctype html><title>Accounts</title>",
+  accountsJavascript: "void 1;",
 };
 
 function snapshot() {
@@ -342,6 +344,8 @@ describe("HTTP server", () => {
       capacityOrder: "export const version = 1;",
       sessionApplicability: "export const applicableVersion = 1;",
       css: "body { --version: 1; }",
+      accountsHtml: "<!doctype html><title>Accounts 1</title>",
+      accountsJavascript: "window.accountsVersion = 1;",
     };
     const dashboardAssetLoader = vi.fn(() => Promise.resolve(currentAssets));
     const server = await buildServer({
@@ -357,6 +361,8 @@ describe("HTTP server", () => {
         "/capacity-order.js",
         "/session-applicability.js",
         "/styles.css",
+        "/accounts",
+        "/accounts.js",
       ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
@@ -367,6 +373,8 @@ describe("HTTP server", () => {
       capacityOrder: "export const version = 2;",
       sessionApplicability: "export const applicableVersion = 2;",
       css: "body { --version: 2; }",
+      accountsHtml: "<!doctype html><title>Accounts 2</title>",
+      accountsJavascript: "window.accountsVersion = 2;",
     };
     const second = await Promise.all(
       [
@@ -375,6 +383,8 @@ describe("HTTP server", () => {
         "/capacity-order.js",
         "/session-applicability.js",
         "/styles.css",
+        "/accounts",
+        "/accounts.js",
       ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
@@ -387,6 +397,8 @@ describe("HTTP server", () => {
       "export const version = 1;",
       "export const applicableVersion = 1;",
       "body { --version: 1; }",
+      "<!doctype html><title>Accounts 1</title>",
+      "window.accountsVersion = 1;",
     ]);
     expect(second.map((response) => response.body)).toEqual([
       "<!doctype html><title>Version 2</title>",
@@ -394,13 +406,15 @@ describe("HTTP server", () => {
       "export const version = 2;",
       "export const applicableVersion = 2;",
       "body { --version: 2; }",
+      "<!doctype html><title>Accounts 2</title>",
+      "window.accountsVersion = 2;",
     ]);
     expect(
       second.every(
         (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
-    expect(dashboardAssetLoader).toHaveBeenCalledTimes(10);
+    expect(dashboardAssetLoader).toHaveBeenCalledTimes(14);
   });
 
   it("serves the actual shared applicability module imported by the dashboard", async () => {
@@ -436,6 +450,8 @@ describe("HTTP server", () => {
         "/capacity-order.js",
         "/session-applicability.js",
         "/styles.css",
+        "/accounts",
+        "/accounts.js",
       ].map((url) =>
         server.inject({ method: "GET", url, headers: allowedHeaders }),
       ),
@@ -448,12 +464,83 @@ describe("HTTP server", () => {
       assets.capacityOrder,
       assets.sessionApplicability,
       assets.css,
+      assets.accountsHtml,
+      assets.accountsJavascript,
     ]);
     expect(
       responses.every(
         (response) => response.headers["cache-control"] === "no-store",
       ),
     ).toBe(true);
+  });
+
+  it("serves account plans from the injected reader with no-store", async () => {
+    const plans = {
+      apiVersion: 1 as const,
+      generatedAt: "2026-11-12T18:00:00.000Z",
+      timeZone: "America/Los_Angeles",
+      accounts: [],
+    };
+    const readAccountPlans = vi.fn(() => Promise.resolve(plans));
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      readAccountPlans,
+    });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/accounts",
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual(plans);
+      expect(readAccountPlans).toHaveBeenCalledOnce();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("lists no account plans for an injected scanner without provider requests", async () => {
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([snapshot()]),
+      now: () => new Date("2026-11-12T18:00:00.000Z"),
+    });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/accounts",
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        apiVersion: 1,
+        generatedAt: "2026-11-12T18:00:00.000Z",
+        accounts: [],
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects cross-site reads of account plans", async () => {
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([]),
+      readAccountPlans: () => Promise.reject(new Error("must not be read")),
+    });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/accounts",
+        headers: { ...allowedHeaders, "sec-fetch-site": "cross-site" },
+      });
+      expect(response.statusCode).toBe(403);
+    } finally {
+      await server.close();
+    }
   });
 
   it("serves the shared public DTO with fresh countdowns and no-store", async () => {

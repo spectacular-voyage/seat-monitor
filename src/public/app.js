@@ -58,6 +58,7 @@ let throughputRangeDays = 1;
 let accountHistoryOrder = "session";
 let latestAnalyticsPayload = null;
 let latestResetAccounts = [];
+let latestAccountPlans = new Map();
 
 function restoreVendorFilters() {
   try {
@@ -1600,6 +1601,26 @@ function createCapacityLimitGroup(parent, children) {
   return group;
 }
 
+function tierClass(tier) {
+  if (/^ultra$/iu.test(tier)) return "tier-ultra";
+  if (/^max\b/iu.test(tier)) return "tier-max";
+  return "tier-other";
+}
+
+// Tier from /api/accounts (for example "Ultra" or "Max 5x"); the scan's raw
+// plan is the fallback when account plans are unavailable.
+function createTierPill(account) {
+  const tier =
+    latestAccountPlans.get(`${account.platform}\0${account.accountAlias}`)
+      ?.tier ?? account.plan;
+  if (tier === null || tier === undefined) {
+    return null;
+  }
+  const pill = element("span", `tier-pill ${tierClass(tier)}`, tier);
+  pill.title = `${account.platform} plan`;
+  return pill;
+}
+
 function accountHistoryId(account) {
   return `account-history-${account.platform}-${account.accountAlias}`;
 }
@@ -1616,14 +1637,11 @@ function createFleetAccount(account) {
   item.dataset.platform = account.platform;
   const header = element("header", "fleet-account-header");
   const identity = element("div", "fleet-identity");
-  identity.append(
-    element("strong", "fleet-alias", account.accountAlias),
-    element(
-      "span",
-      "fleet-plan",
-      account.plan === null ? "" : `· ${account.plan}`,
-    ),
-  );
+  identity.append(element("strong", "fleet-alias", account.accountAlias));
+  const fleetTier = createTierPill(account);
+  if (fleetTier !== null) {
+    identity.append(fleetTier);
+  }
   header.append(identity);
   const staleFleetPill = staleReadingPill(account);
   if (staleFleetPill !== null) {
@@ -1883,10 +1901,14 @@ function createAccountCard(account, rangeStart, rangeEnd) {
   identity.append(
     element("span", "account-vendor", account.platform),
     element("h3", "account-name", account.accountAlias),
+  );
+  const cardTier = createTierPill(account);
+  identity.append(
+    cardTier ?? element("span", "account-meta", "· plan not reported"),
     element(
       "span",
       "account-meta",
-      `· ${account.plan === null ? "plan not reported" : `${account.plan} plan`} · ${
+      `· ${
         account.lastActivityAt === null || account.lastActivityAt === undefined
           ? "no recent usage change"
           : `active ${formatDateTime(account.lastActivityAt)}`
@@ -2209,6 +2231,22 @@ async function requestJson(url) {
   return response.json();
 }
 
+async function loadAccountPlans() {
+  try {
+    const plans = await requestJson("/api/accounts");
+    if (Array.isArray(plans.accounts)) {
+      latestAccountPlans = new Map(
+        plans.accounts.map((account) => [
+          `${account.platform}\0${account.accountAlias}`,
+          account,
+        ]),
+      );
+    }
+  } catch {
+    // Keep the last known tiers; the raw scan plan remains the fallback.
+  }
+}
+
 async function loadServerVersion() {
   try {
     const status = await requestJson("/api/server/status");
@@ -2248,6 +2286,7 @@ async function fetchDashboard(forceRefresh = false) {
             .filter((account) => account.platform === providers[index])
             .map((account) => ({ ...account, status: "unavailable" })),
     );
+    await loadAccountPlans();
     renderResetOffers(
       resetResponses.every((result) => result.status === "rejected") &&
         resetAccounts.length === 0

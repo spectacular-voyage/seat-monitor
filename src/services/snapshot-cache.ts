@@ -50,6 +50,11 @@ export class SnapshotCache {
     return this.#inFlight;
   }
 
+  /** The last completed scan, or null before one exists. Never scans. */
+  public peekLatest(): QuotaSnapshot[] | null {
+    return this.#cached?.snapshots ?? null;
+  }
+
   public async readLatest(): Promise<QuotaSnapshot[]> {
     if (this.#inFlight !== null) {
       return this.#inFlight;
