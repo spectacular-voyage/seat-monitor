@@ -187,6 +187,27 @@ describe("Codex subscription billing", () => {
     });
   });
 
+  it("rejects an unreadable cancellation instead of reporting a renewal", () => {
+    expect(() =>
+      parseCodexSubscription(
+        codexSubscription({}, { cancels_at: "next Tuesday-ish" }),
+      ),
+    ).toThrow();
+    expect(() =>
+      parseCodexSubscription(codexSubscription({ entitlement: "corrupt" })),
+    ).toThrow();
+  });
+
+  it("rejects a response with no recognizable billing facts", () => {
+    expect(() => parseCodexSubscription({})).toThrow();
+    expect(() =>
+      parseClaudeProfile(
+        { account: { email: "synthetic@example.com" }, organization: {} },
+        "synthetic@example.com",
+      ),
+    ).toThrow();
+  });
+
   it("reports delinquent subscriptions", () => {
     expect(
       parseCodexSubscription(codexSubscription({ is_delinquent: true })),
@@ -299,7 +320,7 @@ describe("account billing fetcher", () => {
       auth: {
         type: "codex_profile",
         profile: "missing",
-        codexHome: join(tmpdir(), "seat-monitor-billing-does-not-exist"),
+        codexHome: join(await profileDirectory({}), "does-not-exist"),
       },
     };
     const never = vi.fn<typeof globalThis.fetch>();
@@ -327,6 +348,10 @@ describe("account billing fetcher", () => {
       ],
       [
         () => Promise.resolve(new Response("<html>", { status: 200 })),
+        { status: "unavailable", httpStatus: 200, reason: "invalid_response" },
+      ],
+      [
+        () => Promise.resolve(jsonResponse({})),
         { status: "unavailable", httpStatus: 200, reason: "invalid_response" },
       ],
       [

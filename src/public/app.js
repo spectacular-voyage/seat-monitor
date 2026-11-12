@@ -59,6 +59,8 @@ let accountHistoryOrder = "session";
 let latestAnalyticsPayload = null;
 let latestResetAccounts = [];
 let latestAccountPlans = new Map();
+let accountPlansLoading = false;
+const ACCOUNT_PLANS_TIMEOUT_MILLISECONDS = 10_000;
 
 function restoreVendorFilters() {
   try {
@@ -2231,19 +2233,47 @@ async function requestJson(url) {
   return response.json();
 }
 
+function tierSignature(plans) {
+  return JSON.stringify(
+    [...plans].map(([key, account]) => [key, account.tier]),
+  );
+}
+
+// Tier labels are optional decoration: they load beside the quota refresh,
+// never block it, and re-render the cards only when a tier changes.
 async function loadAccountPlans() {
+  if (accountPlansLoading) {
+    return;
+  }
+  accountPlansLoading = true;
   try {
-    const plans = await requestJson("/api/accounts");
-    if (Array.isArray(plans.accounts)) {
-      latestAccountPlans = new Map(
-        plans.accounts.map((account) => [
-          `${account.platform}\0${account.accountAlias}`,
-          account,
-        ]),
-      );
+    const response = await fetch("/api/accounts", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(ACCOUNT_PLANS_TIMEOUT_MILLISECONDS),
+    });
+    if (!response.ok) {
+      return;
+    }
+    const plans = await response.json();
+    if (!Array.isArray(plans.accounts)) {
+      return;
+    }
+    const next = new Map(
+      plans.accounts.map((account) => [
+        `${account.platform}\0${account.accountAlias}`,
+        account,
+      ]),
+    );
+    const changed = tierSignature(next) !== tierSignature(latestAccountPlans);
+    latestAccountPlans = next;
+    if (changed && latestAnalyticsPayload !== null) {
+      renderAnalytics(latestAnalyticsPayload);
     }
   } catch {
     // Keep the last known tiers; the raw scan plan remains the fallback.
+  } finally {
+    accountPlansLoading = false;
   }
 }
 
@@ -2286,7 +2316,7 @@ async function fetchDashboard(forceRefresh = false) {
             .filter((account) => account.platform === providers[index])
             .map((account) => ({ ...account, status: "unavailable" })),
     );
-    await loadAccountPlans();
+    void loadAccountPlans();
     renderResetOffers(
       resetResponses.every((result) => result.status === "rejected") &&
         resetAccounts.length === 0

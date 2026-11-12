@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -91,14 +92,18 @@ const fileStore: AccountBillingStore = {
   },
 };
 
+/** The credential location and pinned identity the cached facts were read
+ * for, hashed so the private cache never stores an email address. */
 function identity(account: LoadedAccount): string | null {
-  if (account.auth.type === "claude_profile") {
-    return `claude\n${account.auth.profile}\n${account.auth.expectedEmail.toLowerCase()}`;
-  }
-  if (account.auth.type === "codex_profile") {
-    return `codex\n${account.auth.profile}`;
-  }
-  return null;
+  const source =
+    account.auth.type === "claude_profile"
+      ? `claude\n${account.auth.claudeConfigDir}\n${account.auth.expectedEmail.toLowerCase()}`
+      : account.auth.type === "codex_profile"
+        ? `codex\n${account.auth.codexHome}`
+        : null;
+  return source === null
+    ? null
+    : createHash("sha256").update(source).digest("base64url");
 }
 
 function titleCase(value: string): string {
@@ -110,12 +115,20 @@ function titleCase(value: string): string {
 }
 
 /** Anthropic names Ultra directly. Max carries its multiplier only in the
- * rate-limit tier, for example `default_claude_max_5x`. */
+ * rate-limit tier, for example `default_claude_max_5x`. A known plan other
+ * than Max or Ultra is never relabelled from possibly stale profile facts. */
 export function claudeTierLabel(options: {
   plan: string | null;
   planDisplayName: string | null;
   rateLimitTier: string | null;
 }): string | null {
+  if (
+    options.plan !== null &&
+    options.plan !== "max" &&
+    options.plan !== "ultra"
+  ) {
+    return titleCase(options.plan);
+  }
   const multiplier = /max_(\d+)x/u.exec(options.rateLimitTier ?? "")?.[1];
   const displayName = options.planDisplayName;
   if (displayName !== null && !/^max$/iu.test(displayName)) {
@@ -238,6 +251,14 @@ export function resolveRenewal(inputs: RenewalInputs): AccountPlan["renewal"] {
       ...renewalFields,
     };
   }
+  // Provider facts win: an inactive subscription has no next billing date,
+  // and one that will not renew has ended once its end date passes.
+  if (
+    billing?.subscriptionStatus === "inactive" ||
+    billing?.willRenew === false
+  ) {
+    return { date: null, at: null, dateSource: null, ...renewalFields };
+  }
   if (declared?.renewalDay !== undefined) {
     return {
       date: nextDeclaredBillingDate(
@@ -255,11 +276,7 @@ export function resolveRenewal(inputs: RenewalInputs): AccountPlan["renewal"] {
     billing?.billingPeriod === null ||
     billing?.billingPeriod === undefined ||
     billing.billingPeriod === "monthly";
-  if (
-    anchor !== null &&
-    monthly &&
-    billing?.subscriptionStatus !== "inactive"
-  ) {
+  if (anchor !== null && monthly) {
     return {
       date: calendarDateInTimeZone(
         nextMonthlyAnniversary(Date.parse(anchor), nowMilliseconds),
@@ -400,11 +417,23 @@ export function createAccountPlanReader(options: {
         setTimeout(resolve, milliseconds);
       }));
   let entries: Record<string, Entry> | null = null;
+  let loading: Promise<Record<string, Entry>> | null = null;
   let refreshing: Promise<void> | null = null;
 
-  async function load(): Promise<Record<string, Entry>> {
-    entries ??= await storage.load();
-    return entries;
+  // Concurrent first reads share one load, so every reader and the refresh
+  // mutate the same in-memory entries.
+  function load(): Promise<Record<string, Entry>> {
+    loading ??= storage.load().then(
+      (loaded) => {
+        entries = loaded;
+        return loaded;
+      },
+      (error: unknown) => {
+        loading = null;
+        throw error;
+      },
+    );
+    return loading;
   }
 
   function isDue(account: LoadedAccount, nowMilliseconds: number): boolean {
@@ -453,7 +482,18 @@ export function createAccountPlanReader(options: {
                   ? null
                   : (known?.billing ?? null),
             };
-      await storage.save(current);
+      try {
+        await storage.save(current);
+      } catch (error) {
+        // An unsaved check must stay due rather than look complete in memory.
+        if (prior === undefined) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete current[account.accountAlias];
+        } else {
+          current[account.accountAlias] = prior;
+        }
+        throw error;
+      }
     }
   }
 

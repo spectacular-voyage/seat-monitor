@@ -275,7 +275,12 @@ describe("dashboard assets", () => {
   });
 
   it("labels Claude tiers on the dashboard from account plans", () => {
-    expect(javascript).toContain('requestJson("/api/accounts")');
+    expect(javascript).toContain('fetch("/api/accounts"');
+    expect(javascript).toContain("void loadAccountPlans();");
+    expect(javascript).not.toContain("await loadAccountPlans()");
+    expect(javascript).toContain(
+      "signal: AbortSignal.timeout(ACCOUNT_PLANS_TIMEOUT_MILLISECONDS)",
+    );
     expect(javascript).toContain("function createTierPill(account)");
     expect(javascript).not.toContain("fleet-plan");
     expect(javascript).not.toContain("`${account.plan} plan`");

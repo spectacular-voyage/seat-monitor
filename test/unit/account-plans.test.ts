@@ -131,6 +131,23 @@ describe("Claude tier labels", () => {
     [{ plan: "max", planDisplayName: null, rateLimitTier: null }, "Max"],
     [{ plan: "pro", planDisplayName: null, rateLimitTier: null }, "Pro"],
     [{ plan: null, planDisplayName: null, rateLimitTier: null }, null],
+    // A known non-Max plan is never relabelled from stale profile facts.
+    [
+      {
+        plan: "pro",
+        planDisplayName: "Ultra",
+        rateLimitTier: "default_claude_max_20x",
+      },
+      "Pro",
+    ],
+    [
+      {
+        plan: "pro",
+        planDisplayName: null,
+        rateLimitTier: "default_claude_max_5x",
+      },
+      "Pro",
+    ],
   ] as const)("labels %o as %s", (input, expected) => {
     expect(claudeTierLabel(input)).toBe(expected);
   });
@@ -288,6 +305,38 @@ describe("renewal precedence", () => {
         subscribedAt: null,
       }),
     ).toMatchObject({ date: "2026-11-16", at: null, dateSource: "estimated" });
+  });
+
+  it("gives an inactive subscription no date, even with a declared day", () => {
+    expect(
+      resolveRenewal({
+        ...base,
+        account: { ...codex, billing: { renewalDay: 20 } },
+        billing: billing({ subscriptionStatus: "inactive" }),
+        subscribedAt: null,
+      }),
+    ).toMatchObject({ date: null, dateSource: null });
+  });
+
+  it("never advances a cancellation whose end date has passed", () => {
+    expect(
+      resolveRenewal({
+        ...base,
+        account: codex,
+        billing: billing({
+          endsAt: "2026-11-01T07:30:35.000Z",
+          willRenew: false,
+          billingPeriod: "monthly",
+        }),
+        subscribedAt: null,
+      }),
+    ).toEqual({
+      date: null,
+      at: null,
+      dateSource: null,
+      autoRenew: false,
+      autoRenewSource: "provider",
+    });
   });
 
   it("does not estimate annual, inactive, or anchorless subscriptions", () => {
@@ -511,6 +560,120 @@ describe("account plan reader", () => {
       tier: null,
       billingCheck: { status: "unavailable" },
     });
+  });
+
+  it("persists hashed identities without emails or profile paths", async () => {
+    const storage = memoryStore();
+    const reader = createAccountPlanReader({
+      accounts: [claude, codex],
+      snapshots: () => null,
+      now: () => new Date(now),
+      timeZone,
+      storage,
+      fetchBilling: () => Promise.resolve(ok(billing({ plan: "max" }))),
+      readProfileState: () => Promise.resolve(null),
+      sleep: () => Promise.resolve(),
+    });
+    await reader.refreshDue();
+    const persisted = JSON.stringify(storage.entries);
+    expect(Object.keys(storage.entries)).toEqual([
+      claude.accountAlias,
+      codex.accountAlias,
+    ]);
+    for (const secretish of [
+      "ultra@example.com",
+      "/synthetic-claude-ultra",
+      "/synthetic-codex-pro",
+    ]) {
+      expect(persisted).not.toContain(secretish);
+    }
+  });
+
+  it("treats a moved profile directory as a different identity", async () => {
+    const storage = memoryStore();
+    const fetchBilling = vi.fn(() =>
+      Promise.resolve(ok(billing({ plan: "pro", willRenew: true }))),
+    );
+    const options = {
+      snapshots: () => null,
+      now: () => new Date(now),
+      timeZone,
+      storage,
+      fetchBilling,
+      sleep: () => Promise.resolve(),
+    };
+    await createAccountPlanReader({
+      ...options,
+      accounts: [codex],
+    }).refreshDue();
+    const moved: LoadedAccount = {
+      ...codex,
+      auth: {
+        type: "codex_profile",
+        profile: "pro",
+        codexHome: "/elsewhere/pro",
+      },
+    };
+    const reader = createAccountPlanReader({ ...options, accounts: [moved] });
+    expect((await reader.read()).accounts[0]?.billingCheck.status).toBe(
+      "pending",
+    );
+    await reader.refreshDue();
+    expect(fetchBilling).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one store load across concurrent first reads", async () => {
+    let resolveLoad: (entries: StoredEntries) => void = () => undefined;
+    const load = vi.fn(
+      () =>
+        new Promise<StoredEntries>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const fetchBilling = vi.fn(() =>
+      Promise.resolve(ok(billing({ plan: "pro", willRenew: true }))),
+    );
+    const reader = createAccountPlanReader({
+      accounts: [codex],
+      snapshots: () => null,
+      now: () => new Date(now),
+      timeZone,
+      storage: { load, save: () => Promise.resolve() },
+      fetchBilling,
+    });
+    const reads = Promise.all([reader.read(), reader.read()]);
+    resolveLoad({});
+    await reads;
+    await reader.refreshDue();
+    expect(load).toHaveBeenCalledOnce();
+    expect((await reader.read()).accounts[0]?.billingCheck.status).toBe("ok");
+    await reader.refreshDue();
+    expect(fetchBilling).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a check due when its result could not be saved", async () => {
+    const save = vi
+      .fn<AccountBillingStore["save"]>()
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    const fetchBilling = vi.fn(() =>
+      Promise.resolve(ok(billing({ plan: "pro", willRenew: true }))),
+    );
+    const reader = createAccountPlanReader({
+      accounts: [codex],
+      snapshots: () => null,
+      now: () => new Date(now),
+      timeZone,
+      storage: { load: () => Promise.resolve({}), save },
+      fetchBilling,
+    });
+    await reader.refreshDue();
+    expect((await reader.read()).accounts[0]?.billingCheck.status).toBe(
+      "pending",
+    );
+    await reader.refreshDue();
+    expect(fetchBilling).toHaveBeenCalledTimes(2);
+    expect((await reader.read()).accounts[0]?.billingCheck.status).toBe("ok");
   });
 
   it("marks a declared Ultra plan as declared when the provider does not name it", async () => {

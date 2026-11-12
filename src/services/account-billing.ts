@@ -52,14 +52,19 @@ export type FetchAccountBilling = (
 const shortText = z.string().trim().min(1).max(64);
 const optionalText = shortText.nullable().optional().catch(null);
 const optionalBoolean = z.boolean().nullable().optional().catch(null);
-const optionalInstant = z
+const instant = z
   .string()
   .max(64)
   .refine((value) => Number.isFinite(Date.parse(value)))
-  .transform((value) => new Date(Date.parse(value)).toISOString())
-  .nullable()
-  .optional()
-  .catch(null);
+  .transform((value) => new Date(Date.parse(value)).toISOString());
+const optionalInstant = instant.nullable().optional().catch(null);
+
+class NoBillingFactsError extends TypeError {
+  public constructor() {
+    super("The provider response carried no recognizable billing facts.");
+    this.name = "NoBillingFactsError";
+  }
+}
 
 const claudeProfileSchema = z.object({
   account: z.object({ email: z.email() }),
@@ -83,7 +88,7 @@ export function parseClaudeProfile(
     return "identity_mismatch";
   }
   const organizationType = organization.organization_type ?? null;
-  return {
+  const billing = {
     plan:
       organizationType === null
         ? null
@@ -91,6 +96,13 @@ export function parseClaudeProfile(
     planDisplayName: organization.plan_display_name ?? null,
     rateLimitTier: organization.rate_limit_tier ?? null,
     subscriptionStatus: organization.subscription_status ?? null,
+  };
+  // An empty organization must not replace previously confirmed facts.
+  if (Object.values(billing).every((value) => value === null)) {
+    throw new NoBillingFactsError();
+  }
+  return {
+    ...billing,
     billingPeriod: null,
     subscribedAt: organization.subscription_created_at ?? null,
     renewsAt: null,
@@ -111,13 +123,14 @@ const codexSubscriptionSchema = z.object({
     .object({
       has_active_subscription: optionalBoolean,
       renews_at: optionalInstant,
-      cancels_at: optionalInstant,
+      // Strict: an unreadable cancellation must fail the response, never
+      // fall through to a reported renewal.
+      cancels_at: instant.nullable().optional(),
       billing_period: optionalText,
       is_delinquent: optionalBoolean,
     })
     .nullable()
-    .optional()
-    .catch(null),
+    .optional(),
   last_active_subscription: z
     .object({ will_renew: optionalBoolean })
     .nullable()
@@ -142,6 +155,14 @@ export function parseCodexSubscription(payload: unknown): ProviderBilling {
     entitlement?.has_active_subscription ?? subscription.is_active ?? null;
   const delinquent =
     (subscription.is_delinquent ?? entitlement?.is_delinquent) === true;
+  if (
+    (subscription.plan_type ?? null) === null &&
+    active === null &&
+    periodEnd === null &&
+    reportedRenewal === null
+  ) {
+    throw new NoBillingFactsError();
+  }
   return {
     plan: subscription.plan_type ?? null,
     planDisplayName: null,
