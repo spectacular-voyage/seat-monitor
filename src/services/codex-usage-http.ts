@@ -190,6 +190,8 @@ export function createCodexHttpUsageReader(
 ): ReadCodexHttpUsage {
   const fetchImplementation = dependencies.fetch ?? fetch;
   return async ({ codexHome, timeoutMilliseconds }) => {
+    // Both requests share one deadline, so a read never exceeds the scan's.
+    const deadline = Date.now() + timeoutMilliseconds;
     let tokens: CodexTokens;
     try {
       tokens = await readCodexTokens(codexHome);
@@ -214,14 +216,19 @@ export function createCodexHttpUsageReader(
       throw new CodexUsageHttpError("invalid_response", response.status);
     }
     // The usage payload only counts reset credits; their titles and expiry
-    // need the list, which is skipped when there is nothing to list.
+    // need the list, which is skipped when there is nothing to list or no
+    // time left (the count alone is still reported).
     let creditsPayload: unknown = null;
-    if ((usage.data.rate_limit_reset_credits?.available_count ?? 0) > 0) {
+    const remainingMilliseconds = deadline - Date.now();
+    if (
+      (usage.data.rate_limit_reset_credits?.available_count ?? 0) > 0 &&
+      remainingMilliseconds > 0
+    ) {
       const credits = await requestJson(
         fetchImplementation,
         CODEX_RESET_CREDITS_URL,
         headers,
-        timeoutMilliseconds,
+        remainingMilliseconds,
       );
       if (credits.kind === "ok") creditsPayload = credits.payload;
     }

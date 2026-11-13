@@ -260,6 +260,36 @@ describe("createCodexHttpUsageReader", () => {
     expect(urls).toEqual([CODEX_USAGE_URL]);
   });
 
+  it("keeps the credit count when the usage read spends the deadline", async () => {
+    const urls: string[] = [];
+    const read = createCodexHttpUsageReader({
+      fetch: (input) => {
+        urls.push(input instanceof Request ? input.url : String(input));
+        // Answers after the deadline without observing the abort signal.
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve(jsonResponse(usagePayload()));
+          }, 30);
+        });
+      },
+    });
+
+    const result = await read({
+      codexHome: await codexHome(auth),
+      timeoutMilliseconds: 5,
+    });
+    expect(urls).toEqual([CODEX_USAGE_URL]);
+    const snapshot = normalizeCodexResult(
+      "codex-personal",
+      result,
+      OBSERVED_AT,
+    );
+    if (snapshot.status !== "ok") throw new TypeError("Expected quota.");
+    expect(snapshot.resetOffers).toEqual([
+      { label: "Reset credit", count: 2, expiresAt: null },
+    ]);
+  });
+
   it("rejects a profile without ChatGPT tokens before any request", async () => {
     let fetched = false;
     const read = createCodexHttpUsageReader({
