@@ -1,11 +1,16 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { z } from "zod";
 
-import { quotaSuccessSchema, type QuotaLimit } from "../domain/quota.js";
+import {
+  quotaSuccessSchema,
+  type QuotaLimit,
+  type QuotaSnapshot,
+} from "../domain/quota.js";
 import {
   ClaudeUsageUnavailableError,
   parseClaudeUsageOutput,
@@ -36,6 +41,64 @@ const claudeAuthStatusSchema = z.looseObject({
   subscriptionType: z.string().min(1).nullable().optional(),
 });
 
+type AuthStatus = z.infer<typeof claudeAuthStatusSchema>;
+
+/**
+ * `claude auth status` starts the whole Claude CLI (a ~300 MB binary), so a
+ * profile's identity check is reused between scans. A login as another
+ * account rewrites `.credentials.json`, so a changed file is checked again at
+ * once; the check is also repeated hourly, and shortly before the access
+ * token expires, because the CLI refreshes an expired token while answering.
+ */
+const IDENTITY_RECHECK_MILLISECONDS = 3_600_000;
+const TOKEN_REFRESH_MARGIN_MILLISECONDS = 5 * 60_000;
+const MAX_CREDENTIAL_BYTES = 1_000_000;
+
+export type ClaudeCredentialState = {
+  /** SHA-256 of the file; kept in memory only. */
+  fingerprint: string;
+  expiresAtMilliseconds: number | null;
+};
+
+type VerifiedProfile = {
+  fingerprint: string;
+  verifiedAtMilliseconds: number;
+  subscriptionType: string | null;
+};
+
+type AuthCheck =
+  | { kind: "verified"; status: AuthStatus }
+  | { kind: "failed"; snapshot: QuotaSnapshot };
+
+const credentialExpirySchema = z.object({
+  claudeAiOauth: z.object({
+    expiresAt: z.number().int().positive().optional(),
+  }),
+});
+
+export async function readClaudeCredentialState(
+  claudeConfigDir: string,
+): Promise<ClaudeCredentialState> {
+  const file = await open(join(claudeConfigDir, ".credentials.json"), "r");
+  try {
+    if ((await file.stat()).size > MAX_CREDENTIAL_BYTES) {
+      throw new RangeError("Claude credentials file is too large.");
+    }
+    const bytes = await file.readFile();
+    const expiry = credentialExpirySchema.safeParse(
+      JSON.parse(bytes.toString("utf8")) as unknown,
+    );
+    return {
+      fingerprint: createHash("sha256").update(bytes).digest("hex"),
+      expiresAtMilliseconds: expiry.success
+        ? (expiry.data.claudeAiOauth.expiresAt ?? null)
+        : null,
+    };
+  } finally {
+    await file.close();
+  }
+}
+
 const unsupportedClaudeLimits: readonly QuotaLimit[] = [
   {
     key: "base",
@@ -64,6 +127,9 @@ export type ClaudeProviderDependencies = {
   managedMcpIsConfigured?: () => Promise<boolean>;
   readHttpUsage?: ReadClaudeHttpUsage | null;
   readProfileState?: ReadClaudeProfileState;
+  readCredentialState?: (
+    claudeConfigDir: string,
+  ) => Promise<ClaudeCredentialState>;
 };
 
 async function profileIsReady(claudeConfigDir: string): Promise<boolean> {
@@ -161,6 +227,10 @@ export function createClaudeProvider(
     dependencies.readProfileState ?? readClaudeProfileState;
   const hasManagedMcpConfig =
     dependencies.managedMcpIsConfigured ?? managedMcpIsConfigured;
+  const readCredentials =
+    dependencies.readCredentialState ?? readClaudeCredentialState;
+  // Successful identity checks per profile and expected email.
+  const verifiedProfiles = new Map<string, VerifiedProfile>();
 
   return {
     async scan(account, context) {
@@ -173,15 +243,22 @@ export function createClaudeProvider(
         );
       }
 
-      let temporaryDirectory: string | null = null;
-
-      try {
+      const scratch: { directory: string | null } = { directory: null };
+      // Created only when a Claude CLI command runs: most profile scans reuse
+      // an identity check and read quota over HTTP without one.
+      const workDirectory = async (): Promise<string> => {
         // A quota probe has no project context. Avoid loading workspace files.
-        temporaryDirectory = await mkdtemp(
+        scratch.directory ??= await mkdtemp(
           join(tmpdir(), "seat-monitor-claude-"),
         );
+        return scratch.directory;
+      };
+
+      try {
         let environment: NodeJS.ProcessEnv;
         const readsQuota = account.auth.type === "claude_profile";
+        const profile =
+          account.auth.type === "claude_profile" ? account.auth : null;
         if (account.auth.type === "claude_profile") {
           if (!(await isProfileReady(account.auth.claudeConfigDir))) {
             return createFailureSnapshot(
@@ -202,60 +279,122 @@ export function createClaudeProvider(
         } else {
           environment = minimalChildEnvironment({
             CLAUDE_CODE_OAUTH_TOKEN: account.auth.credential,
-            CLAUDE_CONFIG_DIR: temporaryDirectory,
+            CLAUDE_CONFIG_DIR: await workDirectory(),
             CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
             DISABLE_AUTOUPDATER: "1",
             DISABLE_ERROR_REPORTING: "1",
             DISABLE_TELEMETRY: "1",
           });
         }
+        const identityKey =
+          profile === null
+            ? null
+            : `${profile.claudeConfigDir}\0${profile.expectedEmail.toLocaleLowerCase("en-US")}`;
 
-        const authResult = await run({
-          command,
-          args: ["auth", "status", "--json"],
-          environment,
-          cwd: temporaryDirectory,
-          timeoutMilliseconds: context.timeoutMilliseconds,
-        });
-        if (authResult.exitCode !== 0) {
-          return createFailureSnapshot(
-            account,
-            "unauthorized",
-            "Claude CLI could not authenticate this account.",
-            context.now().toISOString(),
+        const readCredentialsOrNull = (claudeConfigDir: string) =>
+          readCredentials(claudeConfigDir).catch(() => null);
+
+        // A held check answers only while the credentials file is unchanged,
+        // the check is under an hour old and the token is not about to expire.
+        const reuseIdentityCheck = async (): Promise<AuthStatus | null> => {
+          if (profile === null || identityKey === null) return null;
+          const held = verifiedProfiles.get(identityKey);
+          if (held === undefined) return null;
+          const nowMilliseconds = context.now().getTime();
+          const age = nowMilliseconds - held.verifiedAtMilliseconds;
+          if (age < 0 || age >= IDENTITY_RECHECK_MILLISECONDS) return null;
+          const credentials = await readCredentialsOrNull(
+            profile.claudeConfigDir,
           );
-        }
+          if (
+            credentials?.fingerprint !== held.fingerprint ||
+            (credentials.expiresAtMilliseconds !== null &&
+              credentials.expiresAtMilliseconds - nowMilliseconds <=
+                TOKEN_REFRESH_MARGIN_MILLISECONDS)
+          ) {
+            return null;
+          }
+          return {
+            loggedIn: true,
+            email: profile.expectedEmail,
+            subscriptionType: held.subscriptionType,
+          };
+        };
 
-        const authStatus = parseAuthStatus(authResult.stdout);
-        if (!authStatus.loggedIn) {
-          return createFailureSnapshot(
-            account,
-            "unauthorized",
-            "Claude account is not authenticated.",
-            context.now().toISOString(),
-          );
-        }
-
-        if (account.auth.type === "claude_profile") {
-          if (authStatus.email === undefined) {
-            return createFailureSnapshot(
+        // Runs `claude auth status`, which also refreshes an expired access
+        // token, and checks the profile's identity.
+        const checkIdentity = async (): Promise<AuthCheck> => {
+          if (identityKey !== null) verifiedProfiles.delete(identityKey);
+          const failed = (
+            code: "unauthorized" | "invalid_response" | "identity_mismatch",
+            message: string,
+          ): AuthCheck => ({
+            kind: "failed",
+            snapshot: createFailureSnapshot(
               account,
+              code,
+              message,
+              context.now().toISOString(),
+            ),
+          });
+          const authResult = await run({
+            command,
+            args: ["auth", "status", "--json"],
+            environment,
+            cwd: await workDirectory(),
+            timeoutMilliseconds: context.timeoutMilliseconds,
+          });
+          if (authResult.exitCode !== 0) {
+            return failed(
+              "unauthorized",
+              "Claude CLI could not authenticate this account.",
+            );
+          }
+          const status = parseAuthStatus(authResult.stdout);
+          if (!status.loggedIn) {
+            return failed(
+              "unauthorized",
+              "Claude account is not authenticated.",
+            );
+          }
+          if (profile === null || identityKey === null) {
+            return { kind: "verified", status };
+          }
+          if (status.email === undefined) {
+            return failed(
               "invalid_response",
               "Claude CLI did not report an authenticated email for identity verification.",
-              context.now().toISOString(),
             );
           }
           if (
-            authStatus.email.toLocaleLowerCase("en-US") !==
-            account.auth.expectedEmail.toLocaleLowerCase("en-US")
+            status.email.toLocaleLowerCase("en-US") !==
+            profile.expectedEmail.toLocaleLowerCase("en-US")
           ) {
-            return createFailureSnapshot(
-              account,
+            return failed(
               "identity_mismatch",
-              `Claude profile ${account.auth.profile} is authenticated as ${authStatus.email}, expected ${account.auth.expectedEmail}. Run: seat-monitor-claude-login '${account.accountAlias}'`,
-              context.now().toISOString(),
+              `Claude profile ${profile.profile} is authenticated as ${status.email}, expected ${profile.expectedEmail}. Run: seat-monitor-claude-login '${account.accountAlias}'`,
             );
           }
+          // Read after the check: it may have just refreshed the token.
+          const credentials = await readCredentialsOrNull(
+            profile.claudeConfigDir,
+          );
+          if (credentials !== null) {
+            verifiedProfiles.set(identityKey, {
+              fingerprint: credentials.fingerprint,
+              verifiedAtMilliseconds: context.now().getTime(),
+              subscriptionType: status.subscriptionType ?? null,
+            });
+          }
+          return { kind: "verified", status };
+        };
+
+        let authStatus = await reuseIdentityCheck();
+        const reusedIdentity = authStatus !== null;
+        if (authStatus === null) {
+          const checked = await checkIdentity();
+          if (checked.kind === "failed") return checked.snapshot;
+          authStatus = checked.status;
         }
 
         let limits = unsupportedClaudeLimits;
@@ -280,15 +419,33 @@ export function createClaudeProvider(
         let observedAt = context.now();
         let httpSucceeded = false;
         let cachedReading = false;
-        if (account.auth.type === "claude_profile" && readHttpUsage !== null) {
-          try {
-            const usage = await readHttpUsage({
-              account: { ...account, auth: account.auth },
+        if (profile !== null && readHttpUsage !== null) {
+          const readUsage = async () =>
+            readHttpUsage({
+              account: { ...account, auth: profile },
               ultraPlan,
               cliVersion: await version(context.timeoutMilliseconds),
               now: context.now,
               timeoutMilliseconds: context.timeoutMilliseconds,
             });
+          try {
+            let usage: Awaited<ReturnType<typeof readUsage>>;
+            try {
+              usage = await readUsage();
+            } catch (error) {
+              // A held identity check can outlive its token: check again,
+              // which refreshes the token, and retry once.
+              if (
+                !reusedIdentity ||
+                !(error instanceof ClaudeUsageHttpError) ||
+                (error.status !== 401 && error.status !== 403)
+              ) {
+                throw error;
+              }
+              const checked = await checkIdentity();
+              if (checked.kind === "failed") return checked.snapshot;
+              usage = await readUsage();
+            }
             limits = usage.limits;
             observedAt = new Date(usage.observedAt);
             httpSucceeded = true;
@@ -311,7 +468,7 @@ export function createClaudeProvider(
             command,
             args: usageArguments,
             environment,
-            cwd: temporaryDirectory,
+            cwd: await workDirectory(),
             timeoutMilliseconds: context.timeoutMilliseconds,
           });
           observedAt = context.now();
@@ -380,8 +537,8 @@ export function createClaudeProvider(
           observedAt,
         );
       } finally {
-        if (temporaryDirectory !== null) {
-          await rm(temporaryDirectory, { force: true, recursive: true });
+        if (scratch.directory !== null) {
+          await rm(scratch.directory, { force: true, recursive: true });
         }
       }
     },
