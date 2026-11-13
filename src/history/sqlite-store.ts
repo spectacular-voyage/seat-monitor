@@ -23,8 +23,17 @@ import type {
   SeriesHistoryQuery,
   StoredScanRun,
 } from "./types.js";
+import { sameResetEpoch } from "./reset-epochs.js";
 
 const HISTORY_PAGE_CACHE_KIB = 16_384;
+// Reset events already compacted are revisited this far back, so an event
+// recorded just before the last compaction can still merge with its run.
+const RESET_COMPACTION_OVERLAP_MILLISECONDS = 3_600_000;
+// Space freed by compaction is returned to the file system only when it is a
+// large share of the file, which in practice means once, after the first
+// compaction of an uncompacted history.
+const VACUUM_MINIMUM_FREE_BYTES = 8 * 1_048_576;
+const VACUUM_MINIMUM_FREE_SHARE = 0.25;
 const DAY_MILLISECONDS = 86_400_000;
 const HOUR_MILLISECONDS = 3_600_000;
 const MAINTENANCE_INTERVAL_MILLISECONDS = 5 * 60_000;
@@ -82,6 +91,19 @@ type RollupRow = {
   maximum_used_percent: number | null;
   last_reset_at_ms: number | null;
   last_window_duration_minutes: number | null;
+};
+
+type LatestResetRow = {
+  id: number;
+  reset_at_ms: number;
+  last_seen_at_ms: number;
+};
+
+type CompactionRow = LatestResetRow & {
+  account_key: string;
+  limit_key: string;
+  kind: string;
+  first_seen_at_ms: number;
 };
 
 type ResetRow = {
@@ -489,6 +511,20 @@ export class SqliteHistoryStore implements HistoryStore {
     database.exec(`PRAGMA cache_size = -${String(HISTORY_PAGE_CACHE_KIB)};`);
     createSchema(database);
     ensureSessionApplicability(database);
+    // Finds a limit's latest reset event without reading its older ones. An
+    // index needs no schema version, so older releases still open the file.
+    if (
+      database
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reset_events'",
+        )
+        .get() !== undefined
+    ) {
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS reset_events_latest_idx
+          ON reset_events(account_key, limit_key, kind, last_seen_at_ms);
+      `);
+    }
   }
 
   public recordScan(
@@ -511,6 +547,18 @@ export class SqliteHistoryStore implements HistoryStore {
         account_snapshot_id, limit_key, label, scope, availability,
         used_percent, window_duration_minutes, reset_at_ms, applicability
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const readLatestReset = this.#database.prepare(`
+      SELECT rowid AS id, reset_at_ms, last_seen_at_ms FROM reset_events
+      WHERE account_key = ? AND limit_key = ? AND kind = 'provider'
+      ORDER BY last_seen_at_ms DESC, reset_at_ms DESC LIMIT 1
+    `);
+    // Moves a limit's latest event to the newly reported reset time. A row
+    // already holding that time belongs to an older run and is replaced.
+    const advanceReset = this.#database.prepare(`
+      UPDATE OR REPLACE reset_events
+      SET account_alias = ?, reset_at_ms = ?, last_seen_at_ms = ?
+      WHERE rowid = ?
     `);
     const insertReset = this.#database.prepare(`
       INSERT INTO reset_events(
@@ -559,15 +607,44 @@ export class SqliteHistoryStore implements HistoryStore {
               limit.applicability ?? null,
             );
             if (limit.resetAt !== null) {
-              insertReset.run(
-                key,
-                snapshot.accountAlias,
-                snapshot.platform,
-                limit.key,
-                Date.parse(limit.resetAt),
-                Date.parse(snapshot.observedAt),
-                Date.parse(snapshot.observedAt),
-              );
+              const resetAt = Date.parse(limit.resetAt);
+              const observedAt = Date.parse(snapshot.observedAt);
+              const latest = readLatestReset.get(key, limit.key) as
+                LatestResetRow | undefined;
+              // Only the latest event per limit is ever read, so a reset time
+              // that jitters or rolls forward with an unstarted window updates
+              // one event instead of adding one per scan.
+              if (
+                latest !== undefined &&
+                latest.reset_at_ms !== resetAt &&
+                sameResetEpoch(
+                  {
+                    resetAtMilliseconds: latest.reset_at_ms,
+                    seenAtMilliseconds: latest.last_seen_at_ms,
+                  },
+                  {
+                    resetAtMilliseconds: resetAt,
+                    seenAtMilliseconds: observedAt,
+                  },
+                )
+              ) {
+                advanceReset.run(
+                  snapshot.accountAlias,
+                  resetAt,
+                  observedAt,
+                  latest.id,
+                );
+              } else {
+                insertReset.run(
+                  key,
+                  snapshot.accountAlias,
+                  snapshot.platform,
+                  limit.key,
+                  resetAt,
+                  observedAt,
+                  observedAt,
+                );
+              }
             }
           }
         }
@@ -884,6 +961,7 @@ export class SqliteHistoryStore implements HistoryStore {
       this.#database
         .prepare("DELETE FROM reset_events WHERE reset_at_ms < ?")
         .run(totalCutoff);
+      this.#compactResetEvents(nowMilliseconds);
       this.#database
         .prepare(
           `INSERT OR REPLACE INTO history_metadata(key, value)
@@ -896,6 +974,98 @@ export class SqliteHistoryStore implements HistoryStore {
       throw error;
     }
     this.#database.exec("PRAGMA wal_checkpoint(PASSIVE); PRAGMA optimize;");
+    this.#vacuumIfMostlyFree();
+  }
+
+  /**
+   * Collapses each run of reset events that describe one reset into its
+   * latest event, keeping the run's first sighting. Histories written before
+   * events were merged on insert (or by an older release after a rollback)
+   * held one row per scan for an unstarted window: 180k rows and most of a
+   * 70 MB file on one fleet. Reads only use each limit's latest event, which
+   * compaction keeps unchanged.
+   */
+  #compactResetEvents(nowMilliseconds: number): void {
+    const watermarkRow = this.#database
+      .prepare(
+        "SELECT value FROM history_metadata WHERE key = 'reset_events_compacted_ms'",
+      )
+      .get() as { value?: string } | undefined;
+    const watermark = Number(watermarkRow?.value ?? Number.NaN);
+    const since = Number.isFinite(watermark)
+      ? watermark - RESET_COMPACTION_OVERLAP_MILLISECONDS
+      : Number.MIN_SAFE_INTEGER;
+    const rows = this.#database
+      .prepare(
+        `SELECT rowid AS id, account_key, limit_key, kind, reset_at_ms,
+                first_seen_at_ms, last_seen_at_ms
+         FROM reset_events WHERE last_seen_at_ms >= ?
+         ORDER BY account_key, limit_key, kind, last_seen_at_ms, reset_at_ms`,
+      )
+      .all(since) as unknown as CompactionRow[];
+    const remove = this.#database.prepare(
+      "DELETE FROM reset_events WHERE rowid = ?",
+    );
+    const keepFirstSeen = this.#database.prepare(
+      "UPDATE reset_events SET first_seen_at_ms = ? WHERE rowid = ?",
+    );
+    let previous: CompactionRow | undefined;
+    let runFirstSeen = 0;
+    for (const row of rows) {
+      if (
+        previous?.account_key === row.account_key &&
+        previous.limit_key === row.limit_key &&
+        previous.kind === row.kind &&
+        sameResetEpoch(
+          {
+            resetAtMilliseconds: previous.reset_at_ms,
+            seenAtMilliseconds: previous.last_seen_at_ms,
+          },
+          {
+            resetAtMilliseconds: row.reset_at_ms,
+            seenAtMilliseconds: row.last_seen_at_ms,
+          },
+        )
+      ) {
+        remove.run(previous.id);
+        if (row.first_seen_at_ms > runFirstSeen) {
+          keepFirstSeen.run(runFirstSeen, row.id);
+        } else {
+          runFirstSeen = row.first_seen_at_ms;
+        }
+      } else {
+        runFirstSeen = row.first_seen_at_ms;
+      }
+      previous = row;
+    }
+    this.#database
+      .prepare(
+        `INSERT OR REPLACE INTO history_metadata(key, value)
+         VALUES ('reset_events_compacted_ms', ?)`,
+      )
+      .run(String(nowMilliseconds));
+  }
+
+  #vacuumIfMostlyFree(): void {
+    const pragma = (name: string): number =>
+      Number(
+        Object.values(
+          this.#database.prepare(`PRAGMA ${name}`).get() ?? {},
+        )[0] ?? 0,
+      );
+    const freePages = pragma("freelist_count");
+    const freeBytes = freePages * pragma("page_size");
+    if (
+      freeBytes < VACUUM_MINIMUM_FREE_BYTES ||
+      freePages < pragma("page_count") * VACUUM_MINIMUM_FREE_SHARE
+    ) {
+      return;
+    }
+    try {
+      this.#database.exec("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
+    } catch {
+      // Another connection held the file; the next maintenance retries.
+    }
   }
 
   public close(): void {

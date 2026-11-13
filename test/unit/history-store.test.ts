@@ -198,6 +198,181 @@ describe("SQLite history store", () => {
     store.close();
   });
 
+  it("keeps one reset event per reset, however its time jitters or rolls", () => {
+    const database = new DatabaseSync(":memory:");
+    const store = new SqliteHistoryStore(database, {
+      filePath: ":memory:",
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    });
+    const start = Date.parse("2026-09-01T00:00:00.000Z");
+    const record = (minute: number, resetAt: number) => {
+      const observedAt = new Date(start + minute * 60_000).toISOString();
+      store.recordScan(
+        "server",
+        [snapshot(observedAt, 10, new Date(resetAt).toISOString())],
+        new Date(observedAt),
+      );
+    };
+    // An unstarted window reports "now plus the window" on every scan.
+    for (let minute = 0; minute < 10; minute += 1) {
+      record(minute, start + minute * 60_000 + 7 * 86_400_000);
+    }
+    // Once started, the reset is fixed but its reported time jitters.
+    const fixed = start + 9 * 60_000 + 7 * 86_400_000;
+    for (let minute = 10; minute < 20; minute += 1) {
+      record(minute, fixed + (minute % 2 === 0 ? 0 : 975));
+    }
+    const rows = () =>
+      database
+        .prepare(
+          "SELECT reset_at_ms, first_seen_at_ms, last_seen_at_ms FROM reset_events ORDER BY last_seen_at_ms",
+        )
+        .all();
+    expect(rows()).toEqual([
+      {
+        reset_at_ms: fixed + 975,
+        first_seen_at_ms: start,
+        last_seen_at_ms: start + 19 * 60_000,
+      },
+    ]);
+
+    // The next week's reset is a new event.
+    record(7 * 24 * 60 + 30, fixed + 7 * 86_400_000);
+    expect(rows()).toHaveLength(2);
+    expect(
+      store.listResetEvents({
+        fromMilliseconds: start,
+        toMilliseconds: start + 30 * 86_400_000,
+        resolution: "auto",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        resetAt: new Date(fixed + 975).toISOString(),
+      }),
+      expect.objectContaining({
+        resetAt: new Date(fixed + 7 * 86_400_000).toISOString(),
+      }),
+    ]);
+    store.close();
+  });
+
+  it("compacts reset events written one per scan without changing the latest", () => {
+    const database = new DatabaseSync(":memory:");
+    const store = new SqliteHistoryStore(database, {
+      filePath: ":memory:",
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    });
+    const start = Date.parse("2026-09-01T00:00:00.000Z");
+    const insert = database.prepare(`
+      INSERT INTO reset_events(
+        account_key, account_alias, platform, limit_key, reset_at_ms,
+        first_seen_at_ms, last_seen_at_ms, kind
+      ) VALUES (?, 'alias', 'Codex', ?, ?, ?, ?, 'provider')
+    `);
+    // Rows as older releases wrote them: one per scan of an unstarted
+    // window, then a fixed reset, then the next window.
+    for (let minute = 0; minute < 300; minute += 1) {
+      const seen = start + minute * 60_000;
+      insert.run("account", "codex.primary", seen + 18_000_000, seen, seen);
+    }
+    const nextWindow = start + 299 * 60_000 + 18_000_000;
+    insert.run(
+      "account",
+      "codex.primary",
+      nextWindow + 18_000_000,
+      nextWindow + 60_000,
+      nextWindow + 60_000,
+    );
+    insert.run("other", "codex.primary", start, start, start);
+    const latestBefore = store.listResetEvents({
+      fromMilliseconds: 0,
+      toMilliseconds: start + 86_400_000,
+      resolution: "auto",
+    });
+
+    store.maintain(new Date(start + 86_400_000));
+
+    expect(
+      database
+        .prepare(
+          "SELECT account_key, reset_at_ms, first_seen_at_ms, last_seen_at_ms FROM reset_events ORDER BY account_key, last_seen_at_ms",
+        )
+        .all(),
+    ).toEqual([
+      {
+        account_key: "account",
+        reset_at_ms: start + 299 * 60_000 + 18_000_000,
+        first_seen_at_ms: start,
+        last_seen_at_ms: start + 299 * 60_000,
+      },
+      {
+        account_key: "account",
+        reset_at_ms: nextWindow + 18_000_000,
+        first_seen_at_ms: nextWindow + 60_000,
+        last_seen_at_ms: nextWindow + 60_000,
+      },
+      {
+        account_key: "other",
+        reset_at_ms: start,
+        first_seen_at_ms: start,
+        last_seen_at_ms: start,
+      },
+    ]);
+    const latestAfter = store.listResetEvents({
+      fromMilliseconds: 0,
+      toMilliseconds: start + 86_400_000,
+      resolution: "auto",
+    });
+    expect(latestAfter.at(-1)).toEqual(latestBefore.at(-1));
+    expect(
+      database
+        .prepare(
+          "SELECT value FROM history_metadata WHERE key = 'reset_events_compacted_ms'",
+        )
+        .get(),
+    ).toEqual({ value: String(start + 86_400_000) });
+    store.close();
+  });
+
+  it("returns the space compaction frees to the file system", () => {
+    const filePath = join(directory(), "history.sqlite3");
+    const database = new DatabaseSync(filePath);
+    database.exec("PRAGMA journal_mode = WAL;");
+    const store = new SqliteHistoryStore(database, {
+      filePath,
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    });
+    const start = Date.parse("2026-09-01T00:00:00.000Z");
+    const insert = database.prepare(`
+      INSERT INTO reset_events(
+        account_key, account_alias, platform, limit_key, reset_at_ms,
+        first_seen_at_ms, last_seen_at_ms, kind
+      ) VALUES (?, 'alias', 'Claude', 'base.session', ?, ?, ?, 'provider')
+    `);
+    database.exec("BEGIN");
+    for (let minute = 0; minute < 40_000; minute += 1) {
+      const seen = start + minute * 60_000;
+      insert.run("a".repeat(64), seen + 18_000_000, seen, seen);
+    }
+    database.exec("COMMIT; PRAGMA wal_checkpoint(TRUNCATE);");
+    const before = statSync(filePath).size;
+
+    store.maintain(new Date(start + 40_000 * 60_000));
+
+    expect(
+      database.prepare("SELECT COUNT(*) AS count FROM reset_events").get(),
+    ).toEqual({ count: 1 });
+    expect(before).toBeGreaterThan(8 * 1_048_576);
+    expect(statSync(filePath).size).toBeLessThan(1_048_576);
+    store.close();
+  });
+
   it("refuses to downgrade a newer database schema", () => {
     const database = new DatabaseSync(":memory:");
     database.exec("PRAGMA user_version = 3");
