@@ -8,6 +8,8 @@ import {
   type QuotaSnapshot,
 } from "../domain/quota.js";
 import { createClaudeProvider } from "./claude.js";
+import { createClaudeHttpUsageReader } from "./claude-usage-http.js";
+import { createClaudeUsageFileStore } from "./claude-usage-store.js";
 import { createCodexProvider } from "./codex.js";
 import { createFailureSnapshot } from "./failure.js";
 import type { QuotaProvider } from "./provider.js";
@@ -121,13 +123,24 @@ export function createDefaultScanner(
   options: {
     pausedAccountAlias?: () => string | null;
     concurrency?: number;
+    /**
+     * Save the last successful Claude readings for 429 fallbacks after a
+     * restart. Only the long-running server sets this: a one-shot CLI scan
+     * exits before a coalesced save would run.
+     */
+    persistClaudeUsage?: boolean;
   } = {},
 ): Scanner {
+  const { persistClaudeUsage = false, ...scannerOptions } = options;
   return createScanner({
     accounts: loadConfiguredAccounts(),
-    ...options,
+    ...scannerOptions,
     providers: {
-      Claude: createClaudeProvider(),
+      Claude: createClaudeProvider({
+        readHttpUsage: createClaudeHttpUsageReader(
+          persistClaudeUsage ? { store: createClaudeUsageFileStore() } : {},
+        ),
+      }),
       Codex: createCodexProvider(),
     },
   });

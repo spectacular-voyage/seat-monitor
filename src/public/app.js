@@ -14,8 +14,9 @@ import {
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const PERIOD_CONTEXT_MULTIPLIER = 1.05;
 const ACCOUNT_SERIES_COLOR_COUNT = 8;
-const DEFAULT_USAGE_CHART_HEIGHT = 176;
-const CODEX_USAGE_CHART_HEIGHT = 100;
+// Every per-account history chart shares one height, so Claude cards with a
+// session chart line up with weekly-only Claude cards and Codex cards.
+const USAGE_CHART_HEIGHT = 100;
 const RESET_BADGE_LAST_SEEN_MAX_AGE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const VENDOR_RATE_COLOR_CLASSES = {
   Claude: "throughput-color-claude",
@@ -47,10 +48,14 @@ const vendorCheckboxes = [...vendorFilters.querySelectorAll("input")];
 const VENDOR_FILTER_STORAGE_KEY = "seat-monitor:visible-vendors";
 const rangeControls = document.querySelector("#range-controls");
 const accountOrderControls = document.querySelector("#account-order-controls");
+const showSessionCheckbox = document.querySelector("#show-session");
+const SHOW_SESSION_STORAGE_KEY = "seat-monitor:show-session";
 const throughputRangeControls = document.querySelector(
   "#throughput-range-controls",
 );
 const stackedHistoryMedia = window.matchMedia("(max-width: 780px)");
+// Above 1080 px the history grid has three columns (styles.css).
+const threeColumnHistoryMedia = window.matchMedia("(min-width: 1081px)");
 
 let loading = false;
 let periodMultiplier = 1;
@@ -75,6 +80,17 @@ function restoreVendorFilters() {
     }
   } catch {
     // Filtering still works when browser storage is unavailable.
+  }
+}
+
+function restoreShowSession() {
+  try {
+    const saved = localStorage.getItem(SHOW_SESSION_STORAGE_KEY);
+    if (saved === "true" || saved === "false") {
+      showSessionCheckbox.checked = saved === "true";
+    }
+  } catch {
+    // Session charts stay visible when browser storage is unavailable.
   }
 }
 
@@ -569,7 +585,7 @@ function createUsageGraph(
   rangeEnd,
   overlays = [],
   chartWidth = 640,
-  chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  chartHeight = USAGE_CHART_HEIGHT,
   accountLabel = null,
 ) {
   const wrapper = element("div", "chart-wrap");
@@ -1355,7 +1371,7 @@ function createLimit(
   rangeEnd,
   overlays = [],
   chartWidth = 640,
-  chartHeight = DEFAULT_USAGE_CHART_HEIGHT,
+  chartHeight = USAGE_CHART_HEIGHT,
   accountLabel = null,
 ) {
   const notApplicable = createNotApplicableSession(limit, element);
@@ -1435,17 +1451,13 @@ function panelClass(limit) {
   return "provider-panel";
 }
 
-function hasSessionUsage(account) {
-  return account.limits.some(
-    (limit) =>
-      limit.key === "base.session" && Number.isFinite(limit.currentUsedPercent),
-  );
-}
-
 function createWindowPanels(account, rangeStart, rangeEnd) {
   const panels = element("div", "window-grid");
   const entries = [];
   for (const limit of account.limits) {
+    if (limit.key === "base.session" && !showSessionCheckbox.checked) {
+      continue;
+    }
     if (
       limit.key === "base.session" &&
       limit.currentUsedPercent === null &&
@@ -1469,16 +1481,16 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
       "div",
       `window-panel ${panelClass(entry.limit)} ${entry.overlays.length > 0 ? "combined-panel" : ""}`,
     );
+    // The viewBox width follows the columns a panel spans, so every chart
+    // renders at the same height: a lone panel fills all three columns.
     const chartWidth =
-      entry.limit.key === "base.session" &&
-      entries.length > 1 &&
-      !stackedHistoryMedia.matches
-        ? 304
-        : 640;
-    const chartHeight =
-      account.platform === "Codex" || !hasSessionUsage(account)
-        ? CODEX_USAGE_CHART_HEIGHT
-        : DEFAULT_USAGE_CHART_HEIGHT;
+      entries.length === 1 && threeColumnHistoryMedia.matches
+        ? 960
+        : entry.limit.key === "base.session" &&
+            entries.length > 1 &&
+            !stackedHistoryMedia.matches
+          ? 304
+          : 640;
     panel.append(
       createLimit(
         entry.limit,
@@ -1486,7 +1498,7 @@ function createWindowPanels(account, rangeStart, rangeEnd) {
         rangeEnd,
         entry.overlays,
         chartWidth,
-        chartHeight,
+        USAGE_CHART_HEIGHT,
         account.accountAlias,
       ),
     );
@@ -1887,14 +1899,7 @@ function createAccountCard(account, rangeStart, rangeEnd) {
       : account.platform === "Codex"
         ? "codex-history"
         : "";
-  const compactClass =
-    account.platform === "Claude" && !hasSessionUsage(account)
-      ? " compact-history"
-      : "";
-  const card = element(
-    "article",
-    `account-card ${providerClass}${compactClass}`,
-  );
+  const card = element("article", `account-card ${providerClass}`);
   card.id = accountHistoryId(account);
   card.dataset.accountPlatform = account.platform;
   card.tabIndex = -1;
@@ -2401,6 +2406,21 @@ vendorFilters.addEventListener("change", () => {
   }
 });
 
+restoreShowSession();
+showSessionCheckbox.addEventListener("change", () => {
+  try {
+    localStorage.setItem(
+      SHOW_SESSION_STORAGE_KEY,
+      String(showSessionCheckbox.checked),
+    );
+  } catch {
+    // Keep the current choice even if it cannot be saved.
+  }
+  if (latestAnalyticsPayload !== null) {
+    renderAnalytics(latestAnalyticsPayload);
+  }
+});
+
 rangeControls.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-periods]");
   if (!button) {
@@ -2440,6 +2460,11 @@ throughputRangeControls.addEventListener("click", (event) => {
 });
 stackedHistoryMedia.addEventListener("change", () => {
   void fetchDashboard(false);
+});
+threeColumnHistoryMedia.addEventListener("change", () => {
+  if (latestAnalyticsPayload !== null) {
+    renderAnalytics(latestAnalyticsPayload);
+  }
 });
 setInterval(updateCountdowns, 1_000);
 setInterval(() => {

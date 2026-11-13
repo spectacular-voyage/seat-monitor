@@ -752,6 +752,81 @@ describe("HTTP server", () => {
     await server.close();
   });
 
+  it("builds live analytics once per recorded scan", async () => {
+    let clock = Date.parse("2026-08-26T18:00:01.000Z");
+    const historyService = history("2026-08-26T18:00:01.000Z");
+    historyService.recordScan("server", [snapshot()], new Date(clock));
+    const readSeries = vi.spyOn(historyService, "readSeries");
+    const server = await buildServer({
+      assets,
+      scan: () => Promise.resolve([snapshot()]),
+      history: historyService,
+      now: () => new Date(clock),
+    });
+    const live = async (query: Record<string, string> = {}) => {
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/history/analytics?${new URLSearchParams({
+          from: new Date(clock - 7 * 86_400_000).toISOString(),
+          to: new Date(clock).toISOString(),
+          ...query,
+        }).toString()}`,
+        headers: allowedHeaders,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.headers["cache-control"]).toBe("no-store");
+      return response.body;
+    };
+
+    const first = await live();
+    clock += 5_000;
+    // The dashboard's moving "now" still reads the same scan.
+    expect(await live()).toBe(first);
+    expect(readSeries).toHaveBeenCalledTimes(1);
+    await live({ periods: "0.5" });
+    expect(readSeries).toHaveBeenCalledTimes(2);
+
+    // A past range, one ending before the newest scan, and a range shorter
+    // than an hour are never cached.
+    const uncached = [
+      {
+        from: new Date(clock - 8 * 86_400_000).toISOString(),
+        to: new Date(clock - 86_400_000).toISOString(),
+      },
+      {
+        from: new Date(clock - 7 * 86_400_000 - 10_000).toISOString(),
+        to: new Date(clock - 10_000).toISOString(),
+      },
+      {
+        from: new Date(clock - 60_000).toISOString(),
+        to: new Date(clock).toISOString(),
+      },
+    ];
+    for (const range of uncached) {
+      await live(range);
+      await live(range);
+    }
+    expect(readSeries).toHaveBeenCalledTimes(8);
+
+    // A new scan replaces the answer.
+    historyService.recordScan("server", [snapshot()], new Date(clock));
+    const rescanned = await live();
+    expect(readSeries).toHaveBeenCalledTimes(9);
+    expect(
+      historyAnalyticsSchema.parse(JSON.parse(rescanned)).generatedAt,
+    ).toBe(new Date(clock).toISOString());
+
+    // Without new scans, an answer is rebuilt after one scan interval.
+    clock += 59_000;
+    await live();
+    expect(readSeries).toHaveBeenCalledTimes(9);
+    clock += 1_000;
+    await live();
+    expect(readSeries).toHaveBeenCalledTimes(10);
+    await server.close();
+  });
+
   it("uses retained reset events outside the selected chart range", async () => {
     const now = "2026-09-10T18:00:00.000Z";
     const historyService = history(now);
@@ -827,12 +902,20 @@ describe("HTTP server", () => {
       url: "/api/history/analytics",
       headers: allowedHeaders,
     });
+    const readSeries = vi.spyOn(historyService, "readSeries");
+    await server.inject({
+      method: "GET",
+      url: "/api/history/analytics",
+      headers: allowedHeaders,
+    });
     await server.close();
 
     expect(analytics.statusCode).toBe(200);
     expect(
       historyAnalyticsSchema.parse(analytics.json()).accounts,
     ).toHaveLength(1);
+    // An answer without its reset events is rebuilt, not held for the scan.
+    expect(readSeries).toHaveBeenCalledTimes(1);
   });
 
   it("bounds historical queries and redacts unavailable history", async () => {

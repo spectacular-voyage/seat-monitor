@@ -784,6 +784,27 @@ button:focus-visible,
   min-width: 0;
 }
 
+.session-toggle {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #303732;
+  border-radius: 11px;
+  color: #c9d0cb;
+  background: #111411;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.session-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #8fd3ab;
+}
+
 .throughput-heading {
   align-items: flex-end;
 }
@@ -1291,13 +1312,11 @@ button:focus-visible,
   overflow: visible;
 }
 
-.account-card.compact-history .chart-wrap,
-.account-card.codex-history .chart-wrap {
+.account-card .chart-wrap {
   min-height: 58px;
 }
 
-.account-card.compact-history .chart-empty,
-.account-card.codex-history .chart-empty {
+.account-card .chart-empty {
   min-height: 54px;
 }
 
@@ -1388,8 +1407,8 @@ button:focus-visible,
   display: block;
 }
 
-.compact-history .limit-metrics th,
-.compact-history .limit-metrics td {
+.claude-history .limit-metrics th,
+.claude-history .limit-metrics td {
   padding-top: 2px;
   padding-bottom: 2px;
 }
@@ -1598,8 +1617,7 @@ noscript {
 }
 
 @media (min-width: 781px) {
-  .account-card.compact-history .chart-time-label,
-  .account-card.codex-history .chart-time-label {
+  .account-card .chart-time-label {
     font-size: 6px;
   }
 }
@@ -1685,13 +1703,13 @@ noscript {
 }
 
 @media (max-width: 520px) {
-  .compact-history .limit {
+  .claude-history .limit {
     padding-top: 10px;
     padding-bottom: 10px;
   }
 
-  .compact-history .limit-metrics th,
-  .compact-history .limit-metrics td {
+  .claude-history .limit-metrics th,
+  .claude-history .limit-metrics td {
     padding-top: 0;
     padding-bottom: 0;
   }
@@ -1726,7 +1744,8 @@ noscript {
     grid-column: auto;
   }
 
-  .range-controls {
+  .range-controls,
+  .session-toggle {
     width: 100%;
   }
 

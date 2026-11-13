@@ -184,6 +184,20 @@ describe("SQLite history store", () => {
     expect(JSON.stringify(series)).not.toContain("accountKey");
   });
 
+  it("holds an analytics read's pages in its own cache", () => {
+    const database = new DatabaseSync(":memory:");
+    const store = new SqliteHistoryStore(database, {
+      filePath: ":memory:",
+      rawRetentionHours: 6,
+      hourlyRetentionDays: 30,
+      retentionDays: 365,
+    });
+    expect(database.prepare("PRAGMA cache_size").get()).toEqual({
+      cache_size: -16_384,
+    });
+    store.close();
+  });
+
   it("refuses to downgrade a newer database schema", () => {
     const database = new DatabaseSync(":memory:");
     database.exec("PRAGMA user_version = 3");
