@@ -323,8 +323,8 @@ export function createClaudeProvider(
 
         // Runs `claude auth status`, which also refreshes an expired access
         // token, and checks the profile's identity.
-        const checkIdentity = async (): Promise<AuthCheck> => {
-          if (identityKey !== null) verifiedProfiles.delete(identityKey);
+        // One `claude auth status` run, checked against the expected identity.
+        const runAuthStatus = async (): Promise<AuthCheck> => {
           const failed = (
             code: "unauthorized" | "invalid_response" | "identity_mismatch",
             message: string,
@@ -357,7 +357,7 @@ export function createClaudeProvider(
               "Claude account is not authenticated.",
             );
           }
-          if (profile === null || identityKey === null) {
+          if (profile === null) {
             return { kind: "verified", status };
           }
           if (status.email === undefined) {
@@ -375,18 +375,40 @@ export function createClaudeProvider(
               `Claude profile ${profile.profile} is authenticated as ${status.email}, expected ${profile.expectedEmail}. Run: seat-monitor-claude-login '${account.accountAlias}'`,
             );
           }
-          // Read after the check: it may have just refreshed the token.
-          const credentials = await readCredentialsOrNull(
-            profile.claudeConfigDir,
-          );
-          if (credentials !== null) {
-            verifiedProfiles.set(identityKey, {
-              fingerprint: credentials.fingerprint,
-              verifiedAtMilliseconds: context.now().getTime(),
-              subscriptionType: status.subscriptionType ?? null,
-            });
-          }
           return { kind: "verified", status };
+        };
+
+        // Runs the check and holds it only for the credentials file it saw:
+        // the file must read the same before and after, so a login racing the
+        // check is never held under this identity. A run that refreshed the
+        // token changed the file, so the check runs once more against it.
+        const checkIdentity = async (): Promise<AuthCheck> => {
+          if (profile === null || identityKey === null) {
+            return runAuthStatus();
+          }
+          verifiedProfiles.delete(identityKey);
+          for (let attempt = 1; ; attempt += 1) {
+            const before = await readCredentialsOrNull(profile.claudeConfigDir);
+            const checked = await runAuthStatus();
+            if (checked.kind === "failed") return checked;
+            const after = await readCredentialsOrNull(profile.claudeConfigDir);
+            if (
+              before !== null &&
+              after !== null &&
+              before.fingerprint === after.fingerprint
+            ) {
+              verifiedProfiles.set(identityKey, {
+                fingerprint: after.fingerprint,
+                verifiedAtMilliseconds: context.now().getTime(),
+                subscriptionType: checked.status.subscriptionType ?? null,
+              });
+              return checked;
+            }
+            // Unreadable, or still changing: verified, but not held.
+            if (before === null || after === null || attempt >= 2) {
+              return checked;
+            }
+          }
         };
 
         let authStatus = await reuseIdentityCheck();
@@ -398,64 +420,75 @@ export function createClaudeProvider(
         }
 
         let limits = unsupportedClaudeLimits;
-        const nativePlan = authStatus.subscriptionType?.toLowerCase() ?? null;
         const declaredPlan = "plan" in account ? account.plan : undefined;
         // Claude Code still reports Ultra as `max`; its cached profile fetch
         // names the plan. Either that provider label or an operator
         // declaration upgrades native `max`; legacy `max` alone never does.
-        const ultraPlan =
-          nativePlan === "ultra" ||
-          (nativePlan === "max" &&
-            account.auth.type === "claude_profile" &&
-            (declaredPlan === "ultra" ||
-              isUltraDisplayName(
-                (
-                  await readProfileState({
-                    ...account,
-                    auth: account.auth,
-                  })
-                )?.planDisplayName ?? null,
-              )));
+        const classifyUltra = async (status: AuthStatus): Promise<boolean> => {
+          const nativePlan = status.subscriptionType?.toLowerCase() ?? null;
+          return (
+            nativePlan === "ultra" ||
+            (nativePlan === "max" &&
+              profile !== null &&
+              (declaredPlan === "ultra" ||
+                isUltraDisplayName(
+                  (
+                    await readProfileState({
+                      ...account,
+                      auth: profile,
+                    })
+                  )?.planDisplayName ?? null,
+                )))
+          );
+        };
+        let ultraPlan = await classifyUltra(authStatus);
         let observedAt = context.now();
         let httpSucceeded = false;
         let cachedReading = false;
         if (profile !== null && readHttpUsage !== null) {
-          const readUsage = async () =>
-            readHttpUsage({
-              account: { ...account, auth: profile },
-              ultraPlan,
-              cliVersion: await version(context.timeoutMilliseconds),
-              now: context.now,
-              timeoutMilliseconds: context.timeoutMilliseconds,
-            });
-          try {
-            let usage: Awaited<ReturnType<typeof readUsage>>;
-            try {
-              usage = await readUsage();
-            } catch (error) {
-              // A held identity check can outlive its token: check again,
-              // which refreshes the token, and retry once.
-              if (
-                !reusedIdentity ||
-                !(error instanceof ClaudeUsageHttpError) ||
-                (error.status !== 401 && error.status !== 403)
-              ) {
-                throw error;
-              }
-              const checked = await checkIdentity();
-              if (checked.kind === "failed") return checked.snapshot;
-              usage = await readUsage();
-            }
-            limits = usage.limits;
-            observedAt = new Date(usage.observedAt);
-            httpSucceeded = true;
-            cachedReading = usage.source === "cache";
-          } catch (error) {
+          const reportFallback = (error: unknown) => {
             // Preserve native quota/refresh behavior if the undocumented HTTP
             // contract changes or is unavailable. Never fabricate partial quota.
             process.stderr.write(
               `${JSON.stringify({ event: "claude-usage-fallback", httpStatus: error instanceof ClaudeUsageHttpError ? (error.status ?? null) : null })}\n`,
             );
+          };
+          const readUsage = async () => {
+            try {
+              return await readHttpUsage({
+                account: { ...account, auth: profile },
+                ultraPlan,
+                cliVersion: await version(context.timeoutMilliseconds),
+                now: context.now,
+                timeoutMilliseconds: context.timeoutMilliseconds,
+              });
+            } catch (error) {
+              return { error };
+            }
+          };
+          let usage = await readUsage();
+          // A held identity check can outlive its token: check again, which
+          // refreshes the token, and retry once. The check's own errors reach
+          // the scan's handler, never the native quota fallback.
+          if (
+            "error" in usage &&
+            reusedIdentity &&
+            usage.error instanceof ClaudeUsageHttpError &&
+            (usage.error.status === 401 || usage.error.status === 403)
+          ) {
+            const checked = await checkIdentity();
+            if (checked.kind === "failed") return checked.snapshot;
+            authStatus = checked.status;
+            ultraPlan = await classifyUltra(authStatus);
+            usage = await readUsage();
+          }
+          if ("error" in usage) {
+            reportFallback(usage.error);
+          } else {
+            limits = usage.limits;
+            observedAt = new Date(usage.observedAt);
+            httpSucceeded = true;
+            cachedReading = usage.source === "cache";
           }
         }
         if (readsQuota && !httpSucceeded) {

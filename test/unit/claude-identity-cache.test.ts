@@ -37,9 +37,18 @@ const weekly: QuotaLimit = {
   resetAt: "2026-09-05T00:00:00.000Z",
 };
 const START = Date.parse("2026-08-30T00:00:00.000Z");
+let setCredentialsDuringAuth: (
+  next: ClaudeCredentialState | null,
+) => void = () => undefined;
 const MINUTE = 60_000;
 
-function harness(options: { email?: string } = {}) {
+function harness(
+  options: {
+    email?: string;
+    authStdout?: () => string | null;
+    duringAuth?: (check: number) => void;
+  } = {},
+) {
   let clock = START;
   let credentials: ClaudeCredentialState | null = {
     fingerprint: "first",
@@ -57,13 +66,16 @@ function harness(options: { email?: string } = {}) {
     }
     if (command.args[0] === "auth") {
       authChecks.push(clock);
+      options.duringAuth?.(authChecks.length);
       return Promise.resolve({
         exitCode: 0,
-        stdout: JSON.stringify({
-          loggedIn: true,
-          email: options.email ?? "profile@example.com",
-          subscriptionType: "max",
-        }),
+        stdout:
+          options.authStdout?.() ??
+          JSON.stringify({
+            loggedIn: true,
+            email: options.email ?? "profile@example.com",
+            subscriptionType: "max",
+          }),
         stderr: "",
       });
     }
@@ -79,6 +91,9 @@ function harness(options: { email?: string } = {}) {
       observedAt: new Date(clock).toISOString(),
       source: "http",
     });
+  };
+  setCredentialsDuringAuth = (next) => {
+    credentials = next;
   };
   const provider = createClaudeProvider({
     run,
@@ -173,6 +188,72 @@ describe("Claude identity checks between scans", () => {
       limits: [weekly],
     });
     expect(profile.authChecks).toEqual([START, START + MINUTE]);
+  });
+
+  it("checks again after a run that refreshed the token, then holds it", async () => {
+    const profile = harness({
+      duringAuth: (check) => {
+        if (check === 1) {
+          setCredentialsDuringAuth({
+            fingerprint: "refreshed",
+            expiresAtMilliseconds: START + 8 * 60 * MINUTE,
+          });
+        }
+      },
+    });
+    await profile.scan();
+    expect(profile.authChecks).toHaveLength(2);
+    profile.advance(MINUTE);
+    await profile.scan();
+    expect(profile.authChecks).toHaveLength(2);
+  });
+
+  it("never holds a check whose credentials changed while it ran", async () => {
+    let login = 0;
+    const profile = harness({
+      duringAuth: () => {
+        login += 1;
+        setCredentialsDuringAuth({
+          fingerprint: `login-${String(login)}`,
+          expiresAtMilliseconds: START + 8 * 60 * MINUTE,
+        });
+      },
+    });
+    expect(await profile.scan()).toMatchObject({ status: "ok" });
+    expect(profile.authChecks).toHaveLength(2);
+    profile.advance(MINUTE);
+    await profile.scan();
+    expect(profile.authChecks).toHaveLength(4);
+  });
+
+  it("reports a failed re-check after a rejected token instead of falling back", async () => {
+    let stdout: string | null = null;
+    const profile = harness({ authStdout: () => stdout });
+    await profile.scan();
+    profile.advance(MINUTE);
+    profile.httpStatuses.push(401);
+    stdout = "not json";
+    expect(await profile.scan()).toMatchObject({
+      status: "error",
+      error: { code: "invalid_response" },
+    });
+  });
+
+  it("reports the plan the re-check found", async () => {
+    let plan = "max";
+    const profile = harness({
+      authStdout: () =>
+        JSON.stringify({
+          loggedIn: true,
+          email: "profile@example.com",
+          subscriptionType: plan,
+        }),
+    });
+    await profile.scan();
+    profile.advance(MINUTE);
+    profile.httpStatuses.push(401);
+    plan = "ultra";
+    expect(await profile.scan()).toMatchObject({ status: "ok", plan: "ultra" });
   });
 
   it("never holds a failed identity check", async () => {
