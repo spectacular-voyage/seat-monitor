@@ -44,7 +44,7 @@ The package exposes `seat-monitor`, `seat-monitor-server`, `seat-monitor-claude-
 
 ## Prerequisites
 
-- Node.js 24 LTS or newer
+- Node.js 24 LTS or newer (`engines.node`). `.node-version` pins the runtime the galactica deployment runs, currently 26.7.0.
 - 1Password CLI (`op`) only when using optional environment-token modes
 - Claude Code CLI 2.1.251 or newer for enabled Claude accounts
 - Codex CLI with App Server support for enabled Codex accounts (used for login, token-injected accounts, and as the fallback quota reader)
