@@ -17,6 +17,11 @@ import {
   type CodexAppServerResult,
   type ReadCodexAppServer,
 } from "./codex-app-server.js";
+import {
+  CodexUsageHttpError,
+  createCodexHttpUsageReader,
+  type ReadCodexHttpUsage,
+} from "./codex-usage-http.js";
 import { createFailureSnapshot } from "./failure.js";
 import {
   minimalChildEnvironment,
@@ -109,6 +114,8 @@ function resetOffers(
 export type CodexProviderDependencies = {
   command?: string;
   read?: ReadCodexAppServer;
+  /** Direct quota read for persistent profiles; null always uses the App Server. */
+  readHttpUsage?: ReadCodexHttpUsage | null;
   profileIsReady?: (codexHome: string) => Promise<boolean>;
 };
 
@@ -203,6 +210,10 @@ export function createCodexProvider(
 ): QuotaProvider {
   const command = dependencies.command ?? "codex";
   const read = dependencies.read ?? readCodexAppServer;
+  const readHttpUsage =
+    dependencies.readHttpUsage === null
+      ? null
+      : (dependencies.readHttpUsage ?? createCodexHttpUsageReader());
   const isProfileReady = dependencies.profileIsReady ?? profileIsReady;
 
   return {
@@ -220,6 +231,7 @@ export function createCodexProvider(
 
       try {
         let environment: NodeJS.ProcessEnv;
+        let result: CodexAppServerResult | null = null;
         if (account.auth.type === "codex_profile") {
           if (!(await isProfileReady(account.auth.codexHome))) {
             return createFailureSnapshot(
@@ -228,6 +240,28 @@ export function createCodexProvider(
               `Codex profile ${account.auth.profile} is not logged in. Run: seat-monitor-codex-login '${account.accountAlias}'`,
               context.now().toISOString(),
             );
+          }
+          if (readHttpUsage !== null) {
+            try {
+              result = await readHttpUsage({
+                codexHome: account.auth.codexHome,
+                timeoutMilliseconds: context.timeoutMilliseconds,
+              });
+            } catch (error) {
+              // An expired bearer, contract change or outage falls back to the
+              // App Server, which can also refresh the profile's login.
+              process.stderr.write(
+                `${JSON.stringify({
+                  event: "codex-usage-fallback",
+                  reason:
+                    error instanceof CodexUsageHttpError
+                      ? error.reason
+                      : "invalid_response",
+                  httpStatus:
+                    error instanceof CodexUsageHttpError ? error.status : null,
+                })}\n`,
+              );
+            }
           }
           environment = minimalChildEnvironment({
             CODEX_HOME: account.auth.codexHome,
@@ -242,7 +276,7 @@ export function createCodexProvider(
           });
         }
 
-        const result = await read({
+        result ??= await read({
           command,
           environment,
           timeoutMilliseconds: context.timeoutMilliseconds,

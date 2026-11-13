@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { LoadedCodexProfileAccount } from "../../src/config/accounts.js";
 import { publicQuotaArraySchema } from "../../src/domain/quota.js";
@@ -11,6 +11,7 @@ import {
   createCodexProvider,
   normalizeCodexResult,
 } from "../../src/services/codex.js";
+import { CodexUsageHttpError } from "../../src/services/codex-usage-http.js";
 
 async function loadFixture() {
   return JSON.parse(
@@ -150,6 +151,7 @@ describe("normalizeCodexResult", () => {
     let receivedEnvironment: NodeJS.ProcessEnv | undefined;
     const fixture = await loadFixture();
     const provider = createCodexProvider({
+      readHttpUsage: null,
       read: (options) => {
         receivedEnvironment = options.environment;
         return Promise.resolve(fixture);
@@ -205,5 +207,117 @@ describe("normalizeCodexResult", () => {
       "Codex profile personal is not logged in. Run: seat-monitor-codex-login 'codex-personal@example.com'",
     );
     expect(readCalled).toBe(false);
+  });
+  const profileAccount: LoadedCodexProfileAccount = {
+    accountAlias: "codex-personal@example.com",
+    platform: "Codex",
+    auth: {
+      type: "codex_profile",
+      profile: "personal",
+      codexHome: "/profiles/personal",
+    },
+  };
+  const scanContext = {
+    now: () => new Date("2026-08-26T18:00:00.000Z"),
+    timeoutMilliseconds: 8_000,
+  };
+
+  it("reads profile quota over HTTP without starting App Server", async () => {
+    const fixture = await loadFixture();
+    let readCalled = false;
+    let httpHome: string | undefined;
+    const provider = createCodexProvider({
+      profileIsReady: () => Promise.resolve(true),
+      readHttpUsage: (options) => {
+        httpHome = options.codexHome;
+        return Promise.resolve(fixture);
+      },
+      read: () => {
+        readCalled = true;
+        return Promise.reject(new Error("should not run"));
+      },
+    });
+
+    const snapshot = await provider.scan(profileAccount, scanContext);
+    expect(snapshot.status).toBe("ok");
+    expect(httpHome).toBe("/profiles/personal");
+    expect(readCalled).toBe(false);
+  });
+
+  it("falls back to App Server when the direct read fails", async () => {
+    const fixture = await loadFixture();
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    let receivedEnvironment: NodeJS.ProcessEnv | undefined;
+    const provider = createCodexProvider({
+      profileIsReady: () => Promise.resolve(true),
+      readHttpUsage: () =>
+        Promise.reject(new CodexUsageHttpError("http_error", 401)),
+      read: (options) => {
+        receivedEnvironment = options.environment;
+        return Promise.resolve(fixture);
+      },
+    });
+
+    try {
+      const snapshot = await provider.scan(profileAccount, scanContext);
+      expect(snapshot.status).toBe("ok");
+      expect(receivedEnvironment?.CODEX_HOME).toBe("/profiles/personal");
+      expect(stderr).toHaveBeenCalledWith(
+        `${JSON.stringify({ event: "codex-usage-fallback", reason: "http_error", httpStatus: 401 })}\n`,
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("reports a direct answer with no quota windows without App Server", async () => {
+    let readCalled = false;
+    const provider = createCodexProvider({
+      profileIsReady: () => Promise.resolve(true),
+      readHttpUsage: () =>
+        Promise.resolve({
+          accountResult: { account: { planType: "free" } },
+          rateLimitsResult: { rateLimitsByLimitId: {} },
+        }),
+      read: () => {
+        readCalled = true;
+        return Promise.reject(new Error("should not run"));
+      },
+    });
+
+    const snapshot = await provider.scan(profileAccount, scanContext);
+    expect(snapshot.status).toBe("error");
+    if (snapshot.status !== "error") throw new TypeError("Expected an error.");
+    expect(snapshot.error.code).toBe("unsupported");
+    expect(readCalled).toBe(false);
+  });
+
+  it("never reads token-injected accounts over HTTP", async () => {
+    const fixture = await loadFixture();
+    let httpCalled = false;
+    const provider = createCodexProvider({
+      readHttpUsage: () => {
+        httpCalled = true;
+        return Promise.reject(new Error("should not run"));
+      },
+      read: () => Promise.resolve(fixture),
+    });
+
+    const snapshot = await provider.scan(
+      {
+        accountAlias: "codex-token",
+        platform: "Codex",
+        auth: {
+          type: "codex_access_token",
+          credentialEnv: "CODEX_TOKEN",
+          credential: "token-value",
+        },
+      },
+      scanContext,
+    );
+    expect(snapshot.status).toBe("ok");
+    expect(httpCalled).toBe(false);
   });
 });
