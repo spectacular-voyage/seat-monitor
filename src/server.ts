@@ -20,6 +20,7 @@ import {
 } from "./config/server-settings.js";
 import { serverNetworkSchema } from "./config/server-network.js";
 import { buildHistoryAnalytics } from "./history/analytics.js";
+import { AnalyticsResponseCache } from "./history/analytics-cache.js";
 import { createRecordingScanner } from "./history/recording-scanner.js";
 import {
   createDefaultHistoryService,
@@ -62,6 +63,11 @@ export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
+// A range ending this close to the server's clock is a live view: the
+// dashboard sends its own "now" as `to`, so the exact value differs on every
+// refresh while the answer only changes when a scan is recorded.
+const LIVE_ANALYTICS_TOLERANCE_MILLISECONDS = 120_000;
+const MINIMUM_ANALYTICS_CACHE_AGE_MILLISECONDS = 60_000;
 const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
 
 With no command, Seat Monitor runs in the foreground.
@@ -247,6 +253,12 @@ export async function buildServer(
   );
 
   const now = options.now ?? (() => new Date());
+  const analyticsCache = new AnalyticsResponseCache(
+    Math.max(
+      MINIMUM_ANALYTICS_CACHE_AGE_MILLISECONDS,
+      options.scheduler?.intervalMilliseconds ?? 0,
+    ),
+  );
   let pausedResetAccountAlias: string | null = null;
   const baseScan =
     options.scan ??
@@ -538,6 +550,24 @@ export async function buildServer(
       toMilliseconds: nowMilliseconds,
       limit: 1,
     })[0];
+    const cacheKey =
+      latest !== undefined &&
+      Math.abs(range.toMilliseconds - nowMilliseconds) <=
+        LIVE_ANALYTICS_TOLERANCE_MILLISECONDS
+        ? JSON.stringify([
+            range.toMilliseconds - range.fromMilliseconds,
+            query.resolution,
+            query.periods ?? null,
+            query.account ?? null,
+            options.history.health,
+          ])
+        : null;
+    if (cacheKey !== null && latest !== undefined) {
+      const cached = analyticsCache.read(cacheKey, latest.id, nowMilliseconds);
+      if (cached !== undefined) {
+        return reply.type("application/json; charset=utf-8").send(cached);
+      }
+    }
     const snapshots =
       latest?.snapshots.filter(
         (snapshot) =>
@@ -547,6 +577,7 @@ export async function buildServer(
           }) === 0,
       ) ?? [];
     let resetEvents: HistoryResetEvent[] = [];
+    let resetEventsRead = true;
     try {
       resetEvents = options.history.listResetEvents({
         fromMilliseconds: nowMilliseconds - RESET_EVENT_LOOKAROUND_MILLISECONDS,
@@ -558,27 +589,42 @@ export async function buildServer(
       if (!(error instanceof HistoryUnavailableError)) {
         throw error;
       }
+      resetEventsRead = false;
     }
-    return buildHistoryAnalytics({
-      snapshots,
-      series: options.history.readSeries(historyQuery),
-      resetEvents,
-      historyHealth: options.history.health,
-      nowMilliseconds,
-      ...range,
-      requestedResolution: query.resolution,
-      ...(query.periods === undefined
-        ? {}
-        : { periodMultiplier: query.periods }),
-      ...(latest === undefined ? {} : { lastScanAt: latest.completedAt }),
-      ...(options.scheduler === undefined
-        ? {}
-        : {
-            scanIntervalSeconds: options.scheduler.intervalMilliseconds / 1_000,
-          }),
-      showSpark: options.analytics?.showSpark ?? true,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
+    const body = JSON.stringify(
+      buildHistoryAnalytics({
+        snapshots,
+        series: options.history.readSeries(historyQuery),
+        resetEvents,
+        historyHealth: options.history.health,
+        nowMilliseconds,
+        ...range,
+        requestedResolution: query.resolution,
+        ...(query.periods === undefined
+          ? {}
+          : { periodMultiplier: query.periods }),
+        ...(latest === undefined ? {} : { lastScanAt: latest.completedAt }),
+        ...(options.scheduler === undefined
+          ? {}
+          : {
+              scanIntervalSeconds:
+                options.scheduler.intervalMilliseconds / 1_000,
+            }),
+        showSpark: options.analytics?.showSpark ?? true,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    );
+    // An answer missing its reset events is rebuilt on the next request
+    // instead of being held for the rest of the scan.
+    if (cacheKey !== null && latest !== undefined && resetEventsRead) {
+      analyticsCache.write({
+        key: cacheKey,
+        scanId: latest.id,
+        builtAtMilliseconds: nowMilliseconds,
+        body,
+      });
+    }
+    return reply.type("application/json; charset=utf-8").send(body);
   });
 
   if (options.history !== undefined || scheduler !== null) {

@@ -1,11 +1,19 @@
+import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { LoadedClaudeProfileAccount } from "../config/accounts.js";
 import type { QuotaLimit } from "../domain/quota.js";
+import type {
+  ClaudeUsageStore,
+  ClaudeUsageStoreEntry,
+} from "./claude-usage-store.js";
 import { ProcessTimeoutError } from "./process.js";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+const MAX_RETAINED_ACCOUNTS = 64;
+// Saves are coalesced: one write per minute at most, whatever the fleet size.
+const DEFAULT_SAVE_DELAY_MILLISECONDS = 60_000;
 const credentialsSchema = z.object({
   claudeAiOauth: z.object({ accessToken: z.string().min(1) }),
 });
@@ -190,17 +198,57 @@ export function createClaudeHttpUsageReader(
     fetch?: typeof fetch;
     accessToken?: (directory: string) => Promise<string>;
     nativeCache?: (directory: string) => Promise<unknown>;
+    /** Keeps the last successful readings across restarts; memory only when absent. */
+    store?: ClaudeUsageStore;
+    saveDelayMilliseconds?: number;
   } = {},
 ): ReadClaudeHttpUsage {
   // Last successful normalized quota only, never unbounded history or bearer data.
-  const previous = new Map<string, ClaudeHttpUsage>();
+  const previous = new Map<string, ClaudeUsageStoreEntry>();
+  const store = dependencies.store;
+  let restored: Promise<void> | undefined;
+  let saveTimer: NodeJS.Timeout | undefined;
+
+  // Loaded once, before the first save, so a save never drops restored entries.
+  function restore(): Promise<void> {
+    restored ??=
+      store === undefined
+        ? Promise.resolve()
+        : store.load().then(
+            (entries) => {
+              for (const [key, entry] of entries) {
+                if (previous.size >= MAX_RETAINED_ACCOUNTS) break;
+                if (!previous.has(key)) previous.set(key, entry);
+              }
+            },
+            () => undefined,
+          );
+    return restored;
+  }
+
+  function scheduleSave(): void {
+    if (store === undefined || saveTimer !== undefined) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined;
+      store.save(new Map(previous)).catch(() => {
+        /* The next successful reading schedules another save. */
+      });
+    }, dependencies.saveDelayMilliseconds ?? DEFAULT_SAVE_DELAY_MILLISECONDS);
+    saveTimer.unref();
+  }
+
   return async (options) => {
     if (!/^\d+\.\d+\.\d+$/u.test(options.cliVersion))
       throw new ClaudeUsageHttpError();
+    await restore();
     const accessToken = await (dependencies.accessToken ?? readAccessToken)(
       options.account.auth.claudeConfigDir,
     );
-    const cacheKey = `${options.account.auth.claudeConfigDir}\0${options.account.auth.expectedEmail.toLowerCase()}`;
+    const cacheKey = createHash("sha256")
+      .update(options.account.auth.claudeConfigDir)
+      .update("\0")
+      .update(options.account.auth.expectedEmail.toLowerCase())
+      .digest("hex");
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -246,18 +294,32 @@ export function createClaudeHttpUsageReader(
         source: "http",
       };
       previous.delete(cacheKey);
-      if (previous.size >= 64) {
+      if (previous.size >= MAX_RETAINED_ACCOUNTS) {
         const oldest = previous.keys().next().value;
         if (oldest !== undefined) previous.delete(oldest);
       }
-      previous.set(cacheKey, result);
+      previous.set(cacheKey, {
+        observedAt: result.observedAt,
+        ultraPlan: options.ultraPlan,
+        limits: result.limits,
+      });
+      scheduleSave();
       return result;
     } catch (error) {
       if (
         error instanceof ClaudeUsageHttpError &&
         (error.status === 429 || error.status === 529)
       ) {
-        let retained = previous.get(cacheKey);
+        const stored = previous.get(cacheKey);
+        // A reading labelled for the other plan would mislabel the limits.
+        let retained: ClaudeHttpUsage | undefined =
+          stored?.ultraPlan === options.ultraPlan
+            ? {
+                limits: stored.limits,
+                observedAt: stored.observedAt,
+                source: "cache",
+              }
+            : undefined;
         try {
           const payload = await (
             dependencies.nativeCache ??
@@ -284,9 +346,10 @@ export function createClaudeHttpUsageReader(
       // A rejected bearer must never revive an earlier successful observation.
       if (
         error instanceof ClaudeUsageHttpError &&
-        (error.status === 401 || error.status === 403)
+        (error.status === 401 || error.status === 403) &&
+        previous.delete(cacheKey)
       )
-        previous.delete(cacheKey);
+        scheduleSave();
       if (controller.signal.aborted && !(error instanceof ClaudeUsageHttpError))
         throw new ProcessTimeoutError();
       if (error instanceof ClaudeUsageHttpError) throw error;

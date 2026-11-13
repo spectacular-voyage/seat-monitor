@@ -134,7 +134,8 @@ describe("dashboard assets", () => {
     expect(javascript).not.toContain('"Quota is exhausted."');
     expect(javascript).not.toContain("History begins after the next scan.");
     expect(javascript).toContain("createChartLegend");
-    expect(javascript).toContain("CODEX_USAGE_CHART_HEIGHT = 100");
+    expect(javascript).toContain("const USAGE_CHART_HEIGHT = 100;");
+    expect(javascript).not.toContain("compact-history");
     expect(javascript).toContain('account.platform === "Codex"');
     expect(javascript).toContain("createLimitMetrics");
     expect(javascript).toContain('element("table", "limit-metrics")');
@@ -187,7 +188,7 @@ describe("dashboard assets", () => {
     );
     expect(javascript).not.toContain("usage-overlay-value");
     expect(javascript).not.toContain('"usage-caption", "used"');
-    expect(css).not.toContain(".compact-history .chart-legend");
+    expect(css).not.toContain(".claude-history .chart-legend");
     expect(javascript).toContain("entry.measured.length > 0");
     expect(css).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(css).toContain("grid-template-columns: minmax(0, 1fr) minmax(260px");
@@ -209,9 +210,10 @@ describe("dashboard assets", () => {
     expect(css).toContain(".account-card.claude-history");
     expect(css).toContain("--history-card-background: #241419");
     expect(css).toContain(".account-card.codex-history");
-    expect(css).toContain(".account-card.codex-history .chart-wrap");
+    // Every history card shares the compact chart: one height for all.
+    expect(css).toMatch(/\.account-card \.chart-wrap \{\s*min-height: 58px;/u);
     expect(css).toMatch(
-      /\.account-card\.codex-history \.chart-time-label\s*\{[^}]*font-size: 6px;/u,
+      /\.account-card \.chart-time-label\s*\{[^}]*font-size: 6px;/u,
     );
     expect(css).toContain("--history-card-background: #152039");
     expect(css).not.toContain("--history-panel-background");
@@ -243,6 +245,30 @@ describe("dashboard assets", () => {
     expect(css).toContain(".pill.stale");
     expect(capacityOrderJavascript).toContain(
       "export const READING_STALE_AFTER_SECONDS = 300;",
+    );
+  });
+
+  it("lets the viewer hide session charts, shown by default and remembered", () => {
+    expect(html).toMatch(
+      /<label class="session-toggle">\s*<input id="show-session" type="checkbox" checked \/>\s*Show session\s*<\/label>/u,
+    );
+    expect(html.indexOf('id="show-session"')).toBeLessThan(
+      html.indexOf('id="account-order-controls"'),
+    );
+    expect(javascript).toContain(
+      'const SHOW_SESSION_STORAGE_KEY = "seat-monitor:show-session";',
+    );
+    expect(javascript).toContain(
+      'if (limit.key === "base.session" && !showSessionCheckbox.checked) {',
+    );
+    expect(javascript).toContain("restoreShowSession();");
+    expect(css).toContain(".session-toggle {");
+  });
+
+  it("sizes each history chart by the columns its panel spans", () => {
+    expect(javascript).toContain('window.matchMedia("(min-width: 1081px)")');
+    expect(javascript).toMatch(
+      /entries\.length === 1 && threeColumnHistoryMedia\.matches\s*\? 960/u,
     );
   });
 

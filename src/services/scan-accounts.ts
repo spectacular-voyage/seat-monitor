@@ -8,6 +8,8 @@ import {
   type QuotaSnapshot,
 } from "../domain/quota.js";
 import { createClaudeProvider } from "./claude.js";
+import { createClaudeHttpUsageReader } from "./claude-usage-http.js";
+import { createClaudeUsageFileStore } from "./claude-usage-store.js";
 import { createCodexProvider } from "./codex.js";
 import { createFailureSnapshot } from "./failure.js";
 import type { QuotaProvider } from "./provider.js";
@@ -127,7 +129,11 @@ export function createDefaultScanner(
     accounts: loadConfiguredAccounts(),
     ...options,
     providers: {
-      Claude: createClaudeProvider(),
+      Claude: createClaudeProvider({
+        readHttpUsage: createClaudeHttpUsageReader({
+          store: createClaudeUsageFileStore(),
+        }),
+      }),
       Codex: createCodexProvider(),
     },
   });
