@@ -270,7 +270,7 @@ Claude tiers appear immediately from each profile's identity-checked `.claude.js
 `GET /api/quota` retains its runtime-validated array response. CLI JSON wraps that account array in an object. Each successful account carries the same `ageSeconds`, `stale`, and `cachedAt` freshness fields as CLI JSON. Historical data is additive:
 
 - `GET /api/history/scans` returns paginated normalized scan batches retained at raw resolution.
-- `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration. A range ending within two minutes of the server's clock is a live view: its answer is built once per recorded scan and served from memory to every tab and refresh until the next scan is recorded, or for at most one scan interval (at least 60 seconds), so its `generatedAt` can trail the request by up to that long. Ranges ending in the past are always built fresh.
+- `GET /api/history/analytics` returns bounded chart series, fleet Session-throughput aggregates, reset markers, projections, and general, fleet-watch, and Fable-aware recommendations. The optional `periods=0.5|1|2|5|10` query filters and downsamples every series against its own effective quota duration. A range of at least an hour that ends after the newest recorded scan and within two minutes of the server's clock is a live view. Its answer is built once per recorded scan and served from memory to every tab and refresh until the next scan is recorded, or for at most one scan interval (at least 60 seconds). Its `generatedAt` can therefore trail the request by up to that long, and its start by up to four minutes. Other ranges are always built fresh.
 - `GET /api/claude-resets` returns current or last confirmed reset offers for verified Claude profiles. Its per-account cache is stored privately at `~/.local/state/seat-monitor/claude-resets.json` and never rechecks an account before 20 minutes, including on manual refresh. It does not include credentials or grant identifiers.
 - `GET /api/codex-resets` returns current or last confirmed Codex reset credits from the scheduled quota scan. Its private cache is stored at `~/.local/state/seat-monitor/codex-resets.json`. It makes no additional provider request and does not include credentials or credit IDs.
 - `GET /api/accounts` (`apiVersion` 1) returns every configured account's `plan`, display `tier` and `tierSource`, `subscriptionStatus`, `billingPeriod`, `subscribedAt`, and `renewal` (`date` as a server-local `YYYY-MM-DD`, the provider instant `at` when reported, `dateSource` of `provider`, `declared`, or `estimated`, and `autoRenew` with its source), plus the latest scan status and `billingCheck` state. It answers from cached facts and starts any due billing checks in the background.
@@ -394,16 +394,17 @@ verified Ultra session applicability. It does not use local usage advice or
 fall back to the native CLI rather than guessing.
 
 On HTTP 429/529, the reader can use its bounded last-success cache (64 profiles)
-or the CLI's identity-matched persisted usage cache. The last-success cache is
-saved at most once a minute to `~/.local/state/seat-monitor/claude-usage.json`
-(mode `0600`), so a restarted server can still answer a 429 instead of failing the
-account. It holds only normalized limits, observation times and the Ultra flag,
+or the CLI's identity-matched persisted usage cache. The dashboard server
+saves its last-success cache at most once a minute to
+`~/.local/state/seat-monitor/claude-usage.json` (mode `0600`), so after a restart
+it can still answer a 429 instead of failing the account. A one-shot CLI scan
+keeps the cache in memory only. It holds only normalized limits, observation times and the Ultra flag,
 keyed by a SHA-256 hash of the profile location and expected email; it never
 stores tokens, email addresses or paths, and readings older than seven days are
 not restored. The original observation time
 is retained, so old readings display **STALE** and do not become newly dated historical
 observations. Authorization errors never use this HTTP cache, and they remove the
-profile's saved reading. Native compatibility
+profile's saved reading immediately. Native compatibility
 fallback remains logged as `claude-usage-fallback` and can exceed the measured
 memory budget. No provider credentials or account identifiers appear in these
 memory/fallback logs.

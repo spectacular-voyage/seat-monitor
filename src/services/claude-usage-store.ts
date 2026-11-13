@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -73,7 +74,7 @@ export function createClaudeUsageFileStore(
     },
     async save(entries) {
       await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-      const temporary = `${filePath}.${String(process.pid)}.tmp`;
+      const temporary = `${filePath}.${String(process.pid)}.${randomUUID()}.tmp`;
       await writeFile(
         temporary,
         `${JSON.stringify({ version: 1, accounts: Object.fromEntries(entries) })}\n`,

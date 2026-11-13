@@ -123,16 +123,23 @@ export function createDefaultScanner(
   options: {
     pausedAccountAlias?: () => string | null;
     concurrency?: number;
+    /**
+     * Save the last successful Claude readings for 429 fallbacks after a
+     * restart. Only the long-running server sets this: a one-shot CLI scan
+     * exits before a coalesced save would run.
+     */
+    persistClaudeUsage?: boolean;
   } = {},
 ): Scanner {
+  const { persistClaudeUsage = false, ...scannerOptions } = options;
   return createScanner({
     accounts: loadConfiguredAccounts(),
-    ...options,
+    ...scannerOptions,
     providers: {
       Claude: createClaudeProvider({
-        readHttpUsage: createClaudeHttpUsageReader({
-          store: createClaudeUsageFileStore(),
-        }),
+        readHttpUsage: createClaudeHttpUsageReader(
+          persistClaudeUsage ? { store: createClaudeUsageFileStore() } : {},
+        ),
       }),
       Codex: createCodexProvider(),
     },

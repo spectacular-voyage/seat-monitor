@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,8 +75,13 @@ describe("Claude usage file store", () => {
     expect(await store.load()).toEqual(
       new Map([[KEY, entry("2026-08-30T00:20:00.000Z")]]),
     );
-    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
-    expect(await readFile(filePath, "utf8")).not.toContain("synthetic");
+    const handle = await open(filePath);
+    try {
+      expect((await handle.stat()).mode & 0o777).toBe(0o600);
+      expect(await handle.readFile("utf8")).not.toContain("synthetic");
+    } finally {
+      await handle.close();
+    }
   });
 
   it("drops readings from the future or older than a week", async () => {
@@ -183,7 +188,7 @@ describe("restart-safe throttling fallback", () => {
 
     status = 401;
     await expect(read(options)).rejects.toMatchObject({ status: 401 });
-    await vi.advanceTimersByTimeAsync(1_000);
+    // Saved at once, not after the save delay.
     expect(memory.saved().size).toBe(0);
     status = 429;
     await expect(read(options)).rejects.toMatchObject({ status: 429 });

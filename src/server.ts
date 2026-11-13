@@ -63,10 +63,13 @@ export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = DEFAULT_SERVER_PORT;
 export const DEFAULT_FRESHNESS_MILLISECONDS = 30_000;
 const RESET_EVENT_LOOKAROUND_MILLISECONDS = 8 * 86_400_000;
-// A range ending this close to the server's clock is a live view: the
-// dashboard sends its own "now" as `to`, so the exact value differs on every
-// refresh while the answer only changes when a scan is recorded.
+// A range ending this close to the server's clock, after the newest scan, is
+// a live view: the dashboard sends its own "now" as `to`, so the exact value
+// differs on every refresh while the answer only changes when a scan is
+// recorded. Two such requests can start up to twice this far apart, so only
+// ranges of at least an hour share an answer.
 const LIVE_ANALYTICS_TOLERANCE_MILLISECONDS = 120_000;
+const MINIMUM_CACHED_ANALYTICS_RANGE_MILLISECONDS = 3_600_000;
 const MINIMUM_ANALYTICS_CACHE_AGE_MILLISECONDS = 60_000;
 const serverUsage = `Usage: seat-monitor-server [start|stop|restart|status]
 
@@ -264,6 +267,7 @@ export async function buildServer(
     options.scan ??
     createDefaultScanner({
       pausedAccountAlias: () => pausedResetAccountAlias,
+      persistClaudeUsage: true,
       ...(options.scanConcurrency === undefined
         ? {}
         : { concurrency: options.scanConcurrency }),
@@ -553,7 +557,10 @@ export async function buildServer(
     const cacheKey =
       latest !== undefined &&
       Math.abs(range.toMilliseconds - nowMilliseconds) <=
-        LIVE_ANALYTICS_TOLERANCE_MILLISECONDS
+        LIVE_ANALYTICS_TOLERANCE_MILLISECONDS &&
+      range.toMilliseconds >= Date.parse(latest.completedAt) &&
+      range.toMilliseconds - range.fromMilliseconds >=
+        MINIMUM_CACHED_ANALYTICS_RANGE_MILLISECONDS
         ? JSON.stringify([
             range.toMilliseconds - range.fromMilliseconds,
             query.resolution,

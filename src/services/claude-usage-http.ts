@@ -208,6 +208,8 @@ export function createClaudeHttpUsageReader(
   const store = dependencies.store;
   let restored: Promise<void> | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
+  // Saves run one after another, each writing the map as it is then.
+  let saving: Promise<void> = Promise.resolve();
 
   // Loaded once, before the first save, so a save never drops restored entries.
   function restore(): Promise<void> {
@@ -226,14 +228,24 @@ export function createClaudeHttpUsageReader(
     return restored;
   }
 
+  function saveNow(): Promise<void> {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    if (store === undefined) return saving;
+    saving = saving
+      .then(() => store.save(new Map(previous)))
+      .catch(() => {
+        /* The next change schedules another save. */
+      });
+    return saving;
+  }
+
   function scheduleSave(): void {
     if (store === undefined || saveTimer !== undefined) return;
-    saveTimer = setTimeout(() => {
-      saveTimer = undefined;
-      store.save(new Map(previous)).catch(() => {
-        /* The next successful reading schedules another save. */
-      });
-    }, dependencies.saveDelayMilliseconds ?? DEFAULT_SAVE_DELAY_MILLISECONDS);
+    saveTimer = setTimeout(
+      () => void saveNow(),
+      dependencies.saveDelayMilliseconds ?? DEFAULT_SAVE_DELAY_MILLISECONDS,
+    );
     saveTimer.unref();
   }
 
@@ -349,7 +361,8 @@ export function createClaudeHttpUsageReader(
         (error.status === 401 || error.status === 403) &&
         previous.delete(cacheKey)
       )
-        scheduleSave();
+        // Removed at once, so a restart cannot revive the denied reading.
+        await saveNow();
       if (controller.signal.aborted && !(error instanceof ClaudeUsageHttpError))
         throw new ProcessTimeoutError();
       if (error instanceof ClaudeUsageHttpError) throw error;

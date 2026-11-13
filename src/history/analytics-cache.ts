@@ -17,6 +17,10 @@ export type AnalyticsCacheEntry = {
   body: string;
 };
 
+// The dashboard asks for two live ranges; a few more allow for other period
+// and account choices without holding an unbounded set of answers.
+const MAXIMUM_ENTRIES = 8;
+
 export class AnalyticsResponseCache {
   readonly #maximumAgeMilliseconds: number;
   readonly #entries = new Map<string, AnalyticsCacheEntry>();
@@ -43,9 +47,20 @@ export class AnalyticsResponseCache {
   }
 
   public write(entry: AnalyticsCacheEntry & { key: string }): void {
-    // Answers built for an older scan can never be served again.
+    // Answers for an older scan, or past their age, can never be served again.
     for (const [key, held] of this.#entries) {
-      if (held.scanId !== entry.scanId) this.#entries.delete(key);
+      if (
+        held.scanId !== entry.scanId ||
+        entry.builtAtMilliseconds - held.builtAtMilliseconds >=
+          this.#maximumAgeMilliseconds
+      ) {
+        this.#entries.delete(key);
+      }
+    }
+    this.#entries.delete(entry.key);
+    if (this.#entries.size >= MAXIMUM_ENTRIES) {
+      const oldest = this.#entries.keys().next().value;
+      if (oldest !== undefined) this.#entries.delete(oldest);
     }
     this.#entries.set(entry.key, {
       scanId: entry.scanId,

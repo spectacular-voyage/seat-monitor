@@ -32,4 +32,27 @@ describe("analytics response cache", () => {
     expect(cache.read("day", 7, 0)).toBeUndefined();
     expect(cache.read("week", 8, 0)).toBe("c");
   });
+
+  it("holds at most eight answers and drops expired ones", () => {
+    const cache = new AnalyticsResponseCache(60_000);
+    for (let index = 0; index < 10; index += 1) {
+      cache.write({
+        key: `range-${String(index)}`,
+        scanId: 7,
+        builtAtMilliseconds: 0,
+        body: String(index),
+      });
+    }
+    expect(cache.size).toBe(8);
+    expect(cache.read("range-0", 7, 0)).toBeUndefined();
+    expect(cache.read("range-9", 7, 0)).toBe("9");
+
+    cache.write({
+      key: "late",
+      scanId: 7,
+      builtAtMilliseconds: 60_000,
+      body: "late",
+    });
+    expect(cache.size).toBe(1);
+  });
 });

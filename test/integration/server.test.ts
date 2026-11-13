@@ -787,19 +787,32 @@ describe("HTTP server", () => {
     await live({ periods: "0.5" });
     expect(readSeries).toHaveBeenCalledTimes(2);
 
-    // A past range is never cached.
-    const past = {
-      from: new Date(clock - 8 * 86_400_000).toISOString(),
-      to: new Date(clock - 86_400_000).toISOString(),
-    };
-    await live(past);
-    await live(past);
-    expect(readSeries).toHaveBeenCalledTimes(4);
+    // A past range, one ending before the newest scan, and a range shorter
+    // than an hour are never cached.
+    const uncached = [
+      {
+        from: new Date(clock - 8 * 86_400_000).toISOString(),
+        to: new Date(clock - 86_400_000).toISOString(),
+      },
+      {
+        from: new Date(clock - 7 * 86_400_000 - 10_000).toISOString(),
+        to: new Date(clock - 10_000).toISOString(),
+      },
+      {
+        from: new Date(clock - 60_000).toISOString(),
+        to: new Date(clock).toISOString(),
+      },
+    ];
+    for (const range of uncached) {
+      await live(range);
+      await live(range);
+    }
+    expect(readSeries).toHaveBeenCalledTimes(8);
 
     // A new scan replaces the answer.
     historyService.recordScan("server", [snapshot()], new Date(clock));
     const rescanned = await live();
-    expect(readSeries).toHaveBeenCalledTimes(5);
+    expect(readSeries).toHaveBeenCalledTimes(9);
     expect(
       historyAnalyticsSchema.parse(JSON.parse(rescanned)).generatedAt,
     ).toBe(new Date(clock).toISOString());
@@ -807,10 +820,10 @@ describe("HTTP server", () => {
     // Without new scans, an answer is rebuilt after one scan interval.
     clock += 59_000;
     await live();
-    expect(readSeries).toHaveBeenCalledTimes(5);
+    expect(readSeries).toHaveBeenCalledTimes(9);
     clock += 1_000;
     await live();
-    expect(readSeries).toHaveBeenCalledTimes(6);
+    expect(readSeries).toHaveBeenCalledTimes(10);
     await server.close();
   });
 
