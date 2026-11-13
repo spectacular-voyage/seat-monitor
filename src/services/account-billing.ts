@@ -1,4 +1,3 @@
-import { open } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "zod";
@@ -8,11 +7,14 @@ import type {
   LoadedClaudeProfileAccount,
   LoadedCodexProfileAccount,
 } from "../config/accounts.js";
-import { PACKAGE_VERSION } from "../version.js";
-
-const MAX_BYTES = 1_000_000;
-const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
-const USER_AGENT = `seat-monitor/${PACKAGE_VERSION}`;
+import {
+  codexRequestHeaders,
+  readCodexTokens,
+  readJsonFile,
+  requestJson,
+  type CodexTokens,
+  type JsonResponse,
+} from "./provider-http.js";
 
 export const CLAUDE_PROFILE_URL = "https://api.anthropic.com/api/oauth/profile";
 export const CODEX_SUBSCRIPTIONS_URL =
@@ -187,79 +189,6 @@ export function parseCodexSubscription(payload: unknown): ProviderBilling {
   };
 }
 
-async function readJsonFile(path: string): Promise<unknown> {
-  const file = await open(path, "r");
-  try {
-    if ((await file.stat()).size > MAX_BYTES) {
-      throw new RangeError("Profile file is too large.");
-    }
-    return JSON.parse(await file.readFile("utf8")) as unknown;
-  } finally {
-    await file.close();
-  }
-}
-
-type JsonResponse =
-  | { kind: "ok"; status: number; payload: unknown }
-  | { kind: "http_error"; status: number }
-  | { kind: "invalid_response"; status: number }
-  | { kind: "network_error" };
-
-async function requestJson(
-  fetchImplementation: typeof fetch,
-  url: string,
-  headers: Record<string, string>,
-): Promise<JsonResponse> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, REQUEST_TIMEOUT_MILLISECONDS);
-  try {
-    const response = await fetchImplementation(url, {
-      headers: {
-        ...headers,
-        Accept: "application/json",
-        "User-Agent": USER_AGENT,
-      },
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return { kind: "http_error", status: response.status };
-    }
-    if (response.body === null) {
-      return { kind: "invalid_response", status: response.status };
-    }
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
-    for await (const chunk of response.body) {
-      if (!(chunk instanceof Uint8Array)) {
-        return { kind: "invalid_response", status: response.status };
-      }
-      bytes += chunk.byteLength;
-      if (bytes > MAX_BYTES) {
-        controller.abort();
-        return { kind: "invalid_response", status: response.status };
-      }
-      chunks.push(chunk);
-    }
-    try {
-      return {
-        kind: "ok",
-        status: response.status,
-        payload: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
-      };
-    } catch {
-      return { kind: "invalid_response", status: response.status };
-    }
-  } catch {
-    return { kind: "network_error" };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function failure(response: Exclude<JsonResponse, { kind: "ok" }>) {
   return {
     status: "unavailable" as const,
@@ -316,22 +245,13 @@ async function fetchClaudeBilling(
   }
 }
 
-const codexAuthSchema = z.object({
-  tokens: z.object({
-    access_token: z.string().min(1).max(16_384),
-    account_id: z.string().min(1).max(256),
-  }),
-});
-
 async function fetchCodexBilling(
   account: LoadedCodexProfileAccount,
   fetchImplementation: typeof fetch,
 ): Promise<BillingFetchResult> {
-  let tokens: z.infer<typeof codexAuthSchema>["tokens"];
+  let tokens: CodexTokens;
   try {
-    tokens = codexAuthSchema.parse(
-      await readJsonFile(join(account.auth.codexHome, "auth.json")),
-    ).tokens;
+    tokens = await readCodexTokens(account.auth.codexHome);
   } catch {
     return {
       status: "unavailable",
@@ -341,10 +261,11 @@ async function fetchCodexBilling(
   }
   const url = new URL(CODEX_SUBSCRIPTIONS_URL);
   url.searchParams.set("account_id", tokens.account_id);
-  const response = await requestJson(fetchImplementation, url.toString(), {
-    Authorization: `Bearer ${tokens.access_token}`,
-    "chatgpt-account-id": tokens.account_id,
-  });
+  const response = await requestJson(
+    fetchImplementation,
+    url.toString(),
+    codexRequestHeaders(tokens),
+  );
   if (response.kind !== "ok") return failure(response);
   try {
     return {

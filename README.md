@@ -47,7 +47,7 @@ The package exposes `seat-monitor`, `seat-monitor-server`, `seat-monitor-claude-
 - Node.js 24 LTS or newer
 - 1Password CLI (`op`) only when using optional environment-token modes
 - Claude Code CLI 2.1.251 or newer for enabled Claude accounts
-- Codex CLI with App Server support for enabled Codex accounts
+- Codex CLI with App Server support for enabled Codex accounts (used for login, token-injected accounts, and as the fallback quota reader)
 
 For development from a repository checkout, install dependencies with:
 
@@ -121,7 +121,7 @@ The dashboard also checks for unused Claude limit-reset offers after a profile p
 
 The reset check identifies as a Claude CLI client so Anthropic can evaluate CLI-surface grants. Failed checks distinguish HTTP 429/529, rejected client surface or CLI version, missing reset data, malformed responses, unreadable credentials, and network failures. An explicit `no_grant` eligibility reason with no remaining grants confirms zero resets and clears cached offers, as does an eligible response with an empty grant list. Other eligibility reasons remain unconfirmed; their safe machine reason is retained as `ineligibleReason` in the cache and API and shown in the dashboard. To test whether frequent CLI quota reads contribute to reset-probe 429s, set `SEAT_MONITOR_CLAUDE_RESET_QUIET_ACCOUNT` to one configured Claude account alias. When that account is verified and the fleet is due for a reset check, the server pauses its quota scans for 15 minutes, retains its last snapshot with the original observation time, performs one reset check, and resumes scans. Other accounts continue normally. The pause is visible through `quietUntil` on `/api/claude-resets` and in the dashboard. The experiment runs once per service process and does not start until `/api/claude-resets` is read; leave the setting unset for normal operation.
 
-Codex reset credits appear in the same overview badges and expiry section. Their count and detail rows arrive with the existing Codex App Server quota scan, so no additional Codex provider request is made. Last confirmed credits are kept through failed scans and service restarts, labeled as last seen, and removed when they expire. The monitor never redeems a credit.
+Codex reset credits appear in the same overview badges and expiry section. Their count arrives with the Codex quota read, and their titles and expiry come from one extra request made only when the count is above zero. Last confirmed credits are kept through failed scans and service restarts, labeled as last seen, and removed when they expire. The monitor never redeems a credit.
 
 ### Set up Codex Pro profiles
 
@@ -400,6 +400,23 @@ observations. Authorization errors never use this HTTP cache. Native compatibili
 fallback remains logged as `claude-usage-fallback` and can exceed the measured
 memory budget. No provider credentials or account identifiers appear in these
 memory/fallback logs.
+
+Codex profile scans read quota directly from the two ChatGPT endpoints the Codex
+App Server itself calls: `/backend-api/wham/usage` and, only when reset credits
+are available, `/backend-api/wham/rate-limit-reset-credits`. They use the
+profile's own `auth.json` bearer and workspace ID, identify as
+`seat-monitor/<version>`, reject redirects, bound responses to 1 MB, and apply
+the provider deadline. Starting `codex app-server` instead opens the profile's
+whole thread-state database (`state_5.sqlite`, indexed from the session
+transcripts and typically 60–150 MB on a busy profile) before it answers, so a
+per-scan launch read hundreds of megabytes per fleet scan. The responses are
+converted to the App Server's shape and normalized by the same code, so limit
+keys, labels and reset offers are unchanged. These endpoints are undocumented:
+an unknown layout, rejected or expired bearer, missing token, or network failure
+falls back to `codex app-server` (which can also refresh the profile's login)
+and is logged as `codex-usage-fallback` with only a reason and HTTP status.
+Token-injected Codex accounts always use the App Server with a temporary
+`CODEX_HOME`.
 
 ### Scan memory acceptance check
 
