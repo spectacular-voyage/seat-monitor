@@ -8,6 +8,9 @@ import {
   parseClaudeHttpUsage,
   ClaudeUsageHttpError,
   parseClaudeNativeCache,
+  backoffMilliseconds,
+  MIN_BACKOFF_MILLISECONDS,
+  MAX_BACKOFF_MILLISECONDS,
 } from "../../src/services/claude-usage-http.js";
 import { parseClaudeUsageOutput } from "../../src/services/claude-usage.js";
 import { createClaudeProvider } from "../../src/services/claude.js";
@@ -260,6 +263,74 @@ describe("HTTP-first provider compatibility", () => {
     }
   });
 
+  describe("after a 429 the account is not asked again until its backoff ends", () => {
+    function counting(responses: (() => Response)[]) {
+      let calls = 0;
+      let clock = Date.parse("2026-08-30T00:30:00Z");
+      const read = createClaudeHttpUsageReader({
+        accessToken: () => Promise.resolve("token"),
+        nativeCache: () => Promise.resolve(nativeCache()),
+        fetch: () => {
+          const next = responses[Math.min(calls, responses.length - 1)]!;
+          calls += 1;
+          return Promise.resolve(next());
+        },
+      });
+      const at = (minutes: number) => {
+        clock = Date.parse("2026-08-30T00:30:00Z") + minutes * 60_000;
+      };
+      const ask = () => read({ ...options, now: () => new Date(clock) });
+      return { ask, at, calls: () => calls };
+    }
+
+    it("serves the retained reading without a request for 15 minutes, then asks again", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        const t = counting([
+          () => new Response(null, { status: 429 }),
+          () => Response.json(fixture),
+        ]);
+        expect((await t.ask()).source).toBe("cache");
+        expect(t.calls()).toBe(1);
+        t.at(14);
+        expect((await t.ask()).source).toBe("cache");
+        expect(t.calls()).toBe(1);
+        t.at(15);
+        expect((await t.ask()).source).toBe("http");
+        expect(t.calls()).toBe(2);
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
+    it("honours a longer Retry-After but never waits over an hour", () => {
+      expect(backoffMilliseconds(null, new Date(0))).toBe(
+        MIN_BACKOFF_MILLISECONDS,
+      );
+      expect(backoffMilliseconds("60", new Date(0))).toBe(
+        MIN_BACKOFF_MILLISECONDS,
+      );
+      expect(backoffMilliseconds("1800", new Date(0))).toBe(1_800_000);
+      expect(backoffMilliseconds("86400", new Date(0))).toBe(
+        MAX_BACKOFF_MILLISECONDS,
+      );
+      expect(
+        backoffMilliseconds(new Date(40 * 60_000).toUTCString(), new Date(0)),
+      ).toBe(40 * 60_000);
+      expect(backoffMilliseconds("not-a-date", new Date(0))).toBe(
+        MIN_BACKOFF_MILLISECONDS,
+      );
+    });
+
+    it("a success clears the backoff, so the next poll asks normally", async () => {
+      const t = counting([() => Response.json(fixture)]);
+      expect((await t.ask()).source).toBe("http");
+      t.at(1);
+      expect((await t.ask()).source).toBe("http");
+      expect(t.calls()).toBe(2);
+    });
+  });
+
   describe("a 429 answered from the cached reading is never presented as current", () => {
     // The real reader is throttled and falls back to the native cache, which
     // was fetched at 2026-08-30T00:20Z (session resets 02:40, week 09-03).
@@ -396,7 +467,9 @@ describe("identity-bound throttling fallback", () => {
       stderr.mockRestore();
     }
     status = 401;
-    await expect(read(options)).rejects.toMatchObject({ status: 401 });
+    // Past the 429 backoff, the next poll asks again and the rejected bearer is seen.
+    const later = { ...options, now: () => new Date("2026-08-30T00:46:00Z") };
+    await expect(read(later)).rejects.toMatchObject({ status: 401 });
   });
   it.each(["email", "account", "future"])(
     "rejects %s cache mismatches",
