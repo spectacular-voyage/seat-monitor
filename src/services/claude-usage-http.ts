@@ -231,8 +231,9 @@ export function createClaudeHttpUsageReader(
   // After a 429/529 an account is not asked again until this instant (epoch ms); its retained
   // reading answers meanwhile. Polling straight into the limit kept every account at 429 (Nov 18).
   const blockedUntil = new Map<string, { until: number; setBy: number }>();
-  // Requests are numbered as they are asked; order by number, never by clock (equal milliseconds tie).
-  let requestCounter = 0;
+  // Each wait gets a number when it is set; a request notes the last number it had seen when it was asked.
+  // A success clears a wait only if that wait already existed when the request was asked (Orla), never by clock.
+  let waitCounter = 0;
   const store = dependencies.store;
   let restored: Promise<void> | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
@@ -278,8 +279,8 @@ export function createClaudeHttpUsageReader(
   }
 
   return async (options) => {
-    // Numbered before any await, so a request's order reflects when it was asked, not when it ran.
-    const request = ++requestCounter;
+    // Noted before any await, so it reflects when the request was asked, not when it ran.
+    const seenWaits = waitCounter;
     const startedAt = options.now().getTime();
     if (!/^\d+\.\d+\.\d+$/u.test(options.cliVersion))
       throw new ClaudeUsageHttpError();
@@ -323,7 +324,7 @@ export function createClaudeHttpUsageReader(
             until:
               now.getTime() +
               backoffMilliseconds(response.headers.get("retry-after"), now),
-            setBy: request,
+            setBy: ++waitCounter,
           });
         }
         await response.body?.cancel().catch(() => undefined);
@@ -349,10 +350,10 @@ export function createClaudeHttpUsageReader(
         observedAt: options.now().toISOString(),
         source: "http",
       };
-      // Only a read asked after the one that set the wait may clear it: an older, slower success must not
-      // erase a newer 429 (Orla).
+      // Only a read asked after the wait was set may clear it: a read already in flight when the 429 arrived
+      // must not erase it, whichever started first (Orla).
       const wait = blockedUntil.get(cacheKey);
-      if (wait !== undefined && wait.setBy < request)
+      if (wait !== undefined && wait.setBy <= seenWaits)
         blockedUntil.delete(cacheKey);
       previous.delete(cacheKey);
       if (previous.size >= MAX_RETAINED_ACCOUNTS) {

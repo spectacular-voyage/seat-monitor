@@ -375,6 +375,44 @@ describe("HTTP-first provider compatibility", () => {
       }
     });
 
+    it("a read already in flight when a 429 arrives does not clear that wait", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        const clock = Date.parse("2026-08-30T00:30:00Z");
+        const gates: (() => void)[] = [];
+        let calls = 0;
+        const read = createClaudeHttpUsageReader({
+          accessToken: () => Promise.resolve("token"),
+          nativeCache: () => Promise.resolve(nativeCache()),
+          fetch: () => {
+            calls += 1;
+            const n = calls;
+            return new Promise<Response>((resolve) => {
+              gates.push(() =>
+                resolve(
+                  n === 1
+                    ? new Response(null, { status: 429 })
+                    : Response.json(fixture),
+                ),
+              );
+            });
+          },
+        });
+        const ask = () => read({ ...options, now: () => new Date(clock) });
+        const first = ask(); // asked first, answers 429
+        const second = ask(); // asked second, already in flight when the 429 lands
+        await vi.waitFor(() => expect(gates.length).toBe(2));
+        gates[0]!();
+        expect((await first).source).toBe("cache");
+        gates[1]!();
+        expect((await second).source).toBe("http");
+        expect((await ask()).source).toBe("cache"); // the wait survives
+        expect(calls).toBe(2);
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
     it("a success clears the backoff, so the next poll asks normally", async () => {
       const t = counting([() => Response.json(fixture)]);
       expect((await t.ask()).source).toBe("http");
