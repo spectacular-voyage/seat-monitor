@@ -193,6 +193,29 @@ export type ReadClaudeHttpUsage = (options: {
   now: () => Date;
 }) => Promise<ClaudeHttpUsage>;
 
+/** The wait after a 429/529: the provider's Retry-After (seconds or an HTTP date) when it asks
+ * for longer, never under 15 minutes nor over an hour. */
+export const MIN_BACKOFF_MILLISECONDS = 15 * 60_000;
+export const MAX_BACKOFF_MILLISECONDS = 60 * 60_000;
+export function backoffMilliseconds(
+  retryAfter: string | null,
+  now: Date,
+): number {
+  let asked = 0;
+  if (retryAfter !== null) {
+    const trimmed = retryAfter.trim();
+    if (/^\d+$/u.test(trimmed)) asked = Number(trimmed) * 1000;
+    else {
+      const at = Date.parse(trimmed);
+      if (Number.isFinite(at)) asked = at - now.getTime();
+    }
+  }
+  return Math.min(
+    MAX_BACKOFF_MILLISECONDS,
+    Math.max(MIN_BACKOFF_MILLISECONDS, asked),
+  );
+}
+
 export function createClaudeHttpUsageReader(
   dependencies: {
     fetch?: typeof fetch;
@@ -205,6 +228,12 @@ export function createClaudeHttpUsageReader(
 ): ReadClaudeHttpUsage {
   // Last successful normalized quota only, never unbounded history or bearer data.
   const previous = new Map<string, ClaudeUsageStoreEntry>();
+  // After a 429/529 an account is not asked again until this instant (epoch ms); its retained
+  // reading answers meanwhile. Polling straight into the limit kept every account at 429 (Nov 18).
+  const blockedUntil = new Map<string, { until: number; setBy: number }>();
+  // Each wait gets a number when it is set; a request notes the last number it had seen when it was asked.
+  // A success clears a wait only if that wait already existed when the request was asked (Orla), never by clock.
+  let waitCounter = 0;
   const store = dependencies.store;
   let restored: Promise<void> | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
@@ -250,6 +279,9 @@ export function createClaudeHttpUsageReader(
   }
 
   return async (options) => {
+    // Noted before any await, so it reflects when the request was asked, not when it ran.
+    const seenWaits = waitCounter;
+    const startedAt = options.now().getTime();
     if (!/^\d+\.\d+\.\d+$/u.test(options.cliVersion))
       throw new ClaudeUsageHttpError();
     await restore();
@@ -261,12 +293,15 @@ export function createClaudeHttpUsageReader(
       .update("\0")
       .update(options.account.auth.expectedEmail.toLowerCase())
       .digest("hex");
+    const blocked = blockedUntil.get(cacheKey);
+    const backingOff = blocked !== undefined && startedAt < blocked.until;
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
       options.timeoutMilliseconds,
     );
     try {
+      if (backingOff) throw new ClaudeUsageHttpError(429);
       const response = await (dependencies.fetch ?? fetch)(
         "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1",
         {
@@ -282,7 +317,17 @@ export function createClaudeHttpUsageReader(
         },
       );
       if (!response.ok) {
-        await response.body?.cancel();
+        // Record the wait first: a body cancel that rejects must not lose it (Orla).
+        if (response.status === 429 || response.status === 529) {
+          const now = options.now();
+          blockedUntil.set(cacheKey, {
+            until:
+              now.getTime() +
+              backoffMilliseconds(response.headers.get("retry-after"), now),
+            setBy: ++waitCounter,
+          });
+        }
+        await response.body?.cancel().catch(() => undefined);
         throw new ClaudeUsageHttpError(response.status);
       }
       if (response.body === null) throw new ClaudeUsageHttpError();
@@ -305,6 +350,11 @@ export function createClaudeHttpUsageReader(
         observedAt: options.now().toISOString(),
         source: "http",
       };
+      // Only a read asked after the wait was set may clear it: a read already in flight when the 429 arrived
+      // must not erase it, whichever started first (Orla).
+      const wait = blockedUntil.get(cacheKey);
+      if (wait !== undefined && wait.setBy <= seenWaits)
+        blockedUntil.delete(cacheKey);
       previous.delete(cacheKey);
       if (previous.size >= MAX_RETAINED_ACCOUNTS) {
         const oldest = previous.keys().next().value;
