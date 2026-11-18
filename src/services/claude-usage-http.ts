@@ -230,7 +230,7 @@ export function createClaudeHttpUsageReader(
   const previous = new Map<string, ClaudeUsageStoreEntry>();
   // After a 429/529 an account is not asked again until this instant (epoch ms); its retained
   // reading answers meanwhile. Polling straight into the limit kept every account at 429 (Nov 18).
-  const blockedUntil = new Map<string, number>();
+  const blockedUntil = new Map<string, { until: number; setAt: number }>();
   const store = dependencies.store;
   let restored: Promise<void> | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
@@ -276,6 +276,8 @@ export function createClaudeHttpUsageReader(
   }
 
   return async (options) => {
+    // Taken before any await, so a request's age reflects when it was asked, not when it ran.
+    const startedAt = options.now().getTime();
     if (!/^\d+\.\d+\.\d+$/u.test(options.cliVersion))
       throw new ClaudeUsageHttpError();
     await restore();
@@ -288,8 +290,7 @@ export function createClaudeHttpUsageReader(
       .update(options.account.auth.expectedEmail.toLowerCase())
       .digest("hex");
     const blocked = blockedUntil.get(cacheKey);
-    const backingOff =
-      blocked !== undefined && options.now().getTime() < blocked;
+    const backingOff = blocked !== undefined && startedAt < blocked.until;
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -312,16 +313,17 @@ export function createClaudeHttpUsageReader(
         },
       );
       if (!response.ok) {
-        await response.body?.cancel();
-        if (response.status === 429 || response.status === 529)
-          blockedUntil.set(
-            cacheKey,
-            options.now().getTime() +
-              backoffMilliseconds(
-                response.headers.get("retry-after"),
-                options.now(),
-              ),
-          );
+        // Record the wait first: a body cancel that rejects must not lose it (Orla).
+        if (response.status === 429 || response.status === 529) {
+          const now = options.now();
+          blockedUntil.set(cacheKey, {
+            until:
+              now.getTime() +
+              backoffMilliseconds(response.headers.get("retry-after"), now),
+            setAt: now.getTime(),
+          });
+        }
+        await response.body?.cancel().catch(() => undefined);
         throw new ClaudeUsageHttpError(response.status);
       }
       if (response.body === null) throw new ClaudeUsageHttpError();
@@ -344,7 +346,11 @@ export function createClaudeHttpUsageReader(
         observedAt: options.now().toISOString(),
         source: "http",
       };
-      blockedUntil.delete(cacheKey);
+      // Only a read that started after the wait was set may clear it: an older, slower success must not
+      // erase a newer 429 (Orla).
+      const wait = blockedUntil.get(cacheKey);
+      if (wait !== undefined && wait.setAt <= startedAt)
+        blockedUntil.delete(cacheKey);
       previous.delete(cacheKey);
       if (previous.size >= MAX_RETAINED_ACCOUNTS) {
         const oldest = previous.keys().next().value;

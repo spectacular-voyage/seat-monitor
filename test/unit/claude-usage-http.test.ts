@@ -322,6 +322,60 @@ describe("HTTP-first provider compatibility", () => {
       );
     });
 
+    it("keeps the wait when cancelling the 429 body rejects", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        const rejectingBody = () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                throw new Error("cancel failed");
+              },
+            }),
+            { status: 429 },
+          );
+        const t = counting([rejectingBody, () => Response.json(fixture)]);
+        expect((await t.ask()).source).toBe("cache");
+        t.at(5);
+        expect((await t.ask()).source).toBe("cache");
+        expect(t.calls()).toBe(1);
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
+    it("an older, slower success does not erase a newer 429 wait", async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        let clock = Date.parse("2026-08-30T00:30:00Z");
+        let release: (() => void) | undefined;
+        let calls = 0;
+        const read = createClaudeHttpUsageReader({
+          accessToken: () => Promise.resolve("token"),
+          nativeCache: () => Promise.resolve(nativeCache()),
+          fetch: () => {
+            calls += 1;
+            if (calls === 1)
+              return new Promise<Response>((resolve) => {
+                release = () => resolve(Response.json(fixture));
+              });
+            return Promise.resolve(new Response(null, { status: 429 }));
+          },
+        });
+        const ask = () => read({ ...options, now: () => new Date(clock) });
+        const slow = ask(); // started first, answers last
+        clock += 60_000;
+        expect((await ask()).source).toBe("cache"); // the newer request is limited
+        release?.();
+        expect((await slow).source).toBe("http");
+        clock += 5 * 60_000; // still inside the newer wait
+        expect((await ask()).source).toBe("cache");
+        expect(calls).toBe(2);
+      } finally {
+        stderr.mockRestore();
+      }
+    });
+
     it("a success clears the backoff, so the next poll asks normally", async () => {
       const t = counting([() => Response.json(fixture)]);
       expect((await t.ask()).source).toBe("http");
