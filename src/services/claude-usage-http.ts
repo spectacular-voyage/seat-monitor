@@ -230,7 +230,9 @@ export function createClaudeHttpUsageReader(
   const previous = new Map<string, ClaudeUsageStoreEntry>();
   // After a 429/529 an account is not asked again until this instant (epoch ms); its retained
   // reading answers meanwhile. Polling straight into the limit kept every account at 429 (Nov 18).
-  const blockedUntil = new Map<string, { until: number; setAt: number }>();
+  const blockedUntil = new Map<string, { until: number; setBy: number }>();
+  // Requests are numbered as they are asked; order by number, never by clock (equal milliseconds tie).
+  let requestCounter = 0;
   const store = dependencies.store;
   let restored: Promise<void> | undefined;
   let saveTimer: NodeJS.Timeout | undefined;
@@ -276,7 +278,8 @@ export function createClaudeHttpUsageReader(
   }
 
   return async (options) => {
-    // Taken before any await, so a request's age reflects when it was asked, not when it ran.
+    // Numbered before any await, so a request's order reflects when it was asked, not when it ran.
+    const request = ++requestCounter;
     const startedAt = options.now().getTime();
     if (!/^\d+\.\d+\.\d+$/u.test(options.cliVersion))
       throw new ClaudeUsageHttpError();
@@ -320,7 +323,7 @@ export function createClaudeHttpUsageReader(
             until:
               now.getTime() +
               backoffMilliseconds(response.headers.get("retry-after"), now),
-            setAt: now.getTime(),
+            setBy: request,
           });
         }
         await response.body?.cancel().catch(() => undefined);
@@ -346,10 +349,10 @@ export function createClaudeHttpUsageReader(
         observedAt: options.now().toISOString(),
         source: "http",
       };
-      // Only a read that started after the wait was set may clear it: an older, slower success must not
+      // Only a read asked after the one that set the wait may clear it: an older, slower success must not
       // erase a newer 429 (Orla).
       const wait = blockedUntil.get(cacheKey);
-      if (wait !== undefined && wait.setAt <= startedAt)
+      if (wait !== undefined && wait.setBy < request)
         blockedUntil.delete(cacheKey);
       previous.delete(cacheKey);
       if (previous.size >= MAX_RETAINED_ACCOUNTS) {

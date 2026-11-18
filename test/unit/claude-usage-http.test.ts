@@ -363,8 +363,7 @@ describe("HTTP-first provider compatibility", () => {
           },
         });
         const ask = () => read({ ...options, now: () => new Date(clock) });
-        const slow = ask(); // started first, answers last
-        clock += 60_000;
+        const slow = ask(); // asked first, answers last; the clock stays frozen (equal milliseconds)
         expect((await ask()).source).toBe("cache"); // the newer request is limited
         release?.();
         expect((await slow).source).toBe("http");
